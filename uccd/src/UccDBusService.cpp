@@ -2868,6 +2868,7 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
   dmiSKUDeviceMap[ "STELLARIS16I07" ] = UniwillDeviceID::STELLARIS16I07;
   dmiSKUDeviceMap[ "XNE16A25" ] = UniwillDeviceID::XNE16A25;
   dmiSKUDeviceMap[ "XNE16E25" ] = UniwillDeviceID::XNE16E25;
+  dmiSKUDeviceMap[ "XCO15M25" ] = UniwillDeviceID::XCO15M25;
   dmiSKUDeviceMap[ "SIRIUS1601" ] = UniwillDeviceID::SIRIUS1601;
   dmiSKUDeviceMap[ "SIRIUS1602" ] = UniwillDeviceID::SIRIUS1602;
 

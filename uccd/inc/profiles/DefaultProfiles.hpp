@@ -66,6 +66,7 @@ enum class UniwillDeviceID
   // XMG models (via SchenkerTechnologiesGmbH vendor string)
   XNE16E25,                   // XMG NEO 16" Intel (Gen7, 2025)
   XNE16A25,                   // XMG NEO 16" AMD (Gen7, 2025)
+  XCO15M25,                   // XMG CORE 15" AMD (M25, 2025)
 };
 
 // pre-defined profiles
