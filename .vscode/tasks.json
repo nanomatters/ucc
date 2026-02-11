@@ -1,0 +1,115 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build-uccd",
+			"type": "shell",
+			"command": "ninja",
+			"args": [
+				"-C",
+				"${workspaceRoot}/build"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared"
+			},
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "UCC: Debug GUI",
+			"type": "shell",
+			"command": "gdb",
+			"args": [
+				"--args",
+				"${workspaceFolder}/build/ucc-gui/ucc-gui"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"dependsOn": "UCC: Build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"focus": true
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "UCC: Build",
+			"type": "shell",
+			"command": "./build-local.sh",
+			"args": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared"
+			},
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "UCC: Install",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--install",
+				"."
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			"dependsOn": "UCC: Build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared"
+			}
+		},
+		{
+			"label": "UCC: Run GUI",
+			"type": "shell",
+			"command": "./run-ucc-gui.sh",
+			"args": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"focus": true
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "UCC: Build, Install & Run",
+			"dependsOn": [
+				"UCC: Install",
+				"UCC: Run GUI"
+			],
+			"dependsOrder": "sequence",
+			"presentation": {
+				"reveal": "always"
+			}
+		},
+		{
+			"label": "Build uccd only",
+			"type": "shell",
+			"command": "ninja",
+			"args": [
+				"-j8",
+				"uccd"
+			],
+			"group": "build"
+		}
+	]
+}

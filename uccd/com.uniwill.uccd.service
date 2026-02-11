@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=com.uniwill.uccd
+Exec=/usr/bin/uccd --start

@@ -1,0 +1,2 @@
+add_library(tuxedo_io_lib INTERFACE)
+target_include_directories(tuxedo_io_lib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

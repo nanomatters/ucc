@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Uniwill Control Center Tray
+Comment=System tray applet for Uniwill laptop control
+Exec=ucc-tray
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;Qt;
+StartupNotify=false
+X-KDE-autostart-after=panel
+X-GNOME-Autostart-enabled=true

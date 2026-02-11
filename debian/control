@@ -1,0 +1,59 @@
+Source: ucc
+Priority: optional
+Maintainer: Erhan Bilgili <erhan.bilgili@pm.me>
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.20),
+               extra-cmake-modules,
+               g++ (>= 9),
+               qt6-base-dev (>= 6.0),
+               qt6-declarative-dev,
+               qt6-connectivity-dev,
+               qt6-tools-dev,
+               kf6-plasma-dev,
+               libkf6windowsystem-dev,
+               libsdbus-c++-dev,
+               libsystemd-dev,
+               libxrandr-dev,
+               libudev-dev,
+               pkg-config
+Standards-Version: 4.6.1
+Homepage: https://github.com/tuxedocomputers/uniwill-control-center
+Vcs-Git: https://github.com/tuxedocomputers/uniwill-control-center.git
+
+Package: ucc
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         systemd,
+         tuxedo-drivers,
+         qt6-qpa-plugins
+Recommends: ucc-gui, ucc-tray
+Description: Uniwill Control Center - System control daemon and tools
+ Uniwill Control Center (UCC) is a comprehensive system control application
+ suite for TUXEDO computers. This package provides the core daemon and utilities.
+ .
+ Features:
+  - Fan control management
+  - Keyboard backlight control
+  - Display settings
+  - CPU power management
+  - Water cooler monitoring and control
+  - System monitoring
+
+Package: ucc-gui
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         ucc (= ${binary:Version}),
+         qt6-base (>= 6.0),
+         libkf6windowsystem6
+Description: Uniwill Control Center - Graphical user interface
+ Main graphical user interface for Uniwill Control Center.
+ Provides full control over system settings and monitoring.
+
+Package: ucc-tray
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         ucc (= ${binary:Version}),
+         qt6-base (>= 6.0)
+Description: Uniwill Control Center - System tray applet
+ System tray application for quick access to Uniwill Control Center
+ features and status monitoring.

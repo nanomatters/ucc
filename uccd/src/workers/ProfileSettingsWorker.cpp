@@ -1,0 +1,868 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "workers/ProfileSettingsWorker.hpp"
+#include <tuxedo_io_lib/tuxedo_io_api.hh>
+
+// =====================================================================
+//  Public methods
+// =====================================================================
+
+void ProfileSettingsWorker::start()
+{
+  // --- ODM Profile ---
+  detectODMProfileType();
+  const UccProfile profile = m_getActiveProfile();
+  if ( !profile.id.empty() )
+  {
+    applyODMProfile();
+  }
+
+  // --- ODM Power Limits ---
+  logLine( "ProfileSettingsWorker: ODM Power Limits onStart" );
+  if ( !m_getActiveProfile().id.empty() )
+  {
+    applyODMPowerLimits();
+  }
+
+  // --- Charging ---
+  initializeChargingSettings();
+
+  // --- YCbCr420 ---
+  checkYCbCr420Availability();
+  applyYCbCr420Workaround();
+
+  // --- NVIDIA Power Control ---
+  initNVIDIAPowerCTRL();
+}
+
+std::vector< TDPInfo > ProfileSettingsWorker::getTDPInfo()
+{
+  std::vector< TDPInfo > tdpInfo;
+
+  int nrTDPs = 0;
+
+  if ( not m_ioApi.getNumberTDPs( nrTDPs ) or nrTDPs <= 0 )
+    return tdpInfo;
+
+  std::vector< std::string > descriptors;
+  m_ioApi.getTDPDescriptors( descriptors );
+
+  for ( int i = 0; i < nrTDPs; ++i )
+  {
+    TDPInfo info;
+    info.current = 0;
+    info.min = 0;
+    info.max = 0;
+    info.descriptor = ( i < static_cast< int >( descriptors.size() ) )
+                        ? descriptors[ static_cast< size_t >( i ) ]
+                        : "";
+
+    m_ioApi.getTDPMin( i, reinterpret_cast< int & >( info.min ) );
+    m_ioApi.getTDPMax( i, reinterpret_cast< int & >( info.max ) );
+    m_ioApi.getTDP( i, reinterpret_cast< int & >( info.current ) );
+
+    tdpInfo.push_back( info );
+  }
+
+  return tdpInfo;
+}
+
+bool ProfileSettingsWorker::setTDPValues( const std::vector< uint32_t > &values )
+{
+  bool allSuccess = true;
+
+  for ( size_t i = 0; i < values.size(); ++i )
+  {
+    if ( not m_ioApi.setTDP( static_cast< int >( i ), static_cast< int >( values[ i ] ) ) )
+    {
+      allSuccess = false;
+    }
+  }
+
+  return allSuccess;
+}
+
+bool ProfileSettingsWorker::applyChargingProfile( const std::string &profileDescriptor ) noexcept
+{
+  if ( not hasChargingProfile() )
+    return false;
+
+  if ( not profileDescriptor.empty() )
+    m_currentChargingProfile = profileDescriptor;
+
+  try
+  {
+    const std::string profileToSet = m_currentChargingProfile;
+    const std::string currentProfile =
+      SysfsNode< std::string >( CHARGING_PROFILE ).read().value_or( "" );
+    const auto profilesAvailable = getChargingProfilesAvailable();
+
+    auto it = std::find( profilesAvailable.begin(), profilesAvailable.end(), profileToSet );
+
+    if ( not profileToSet.empty() and profileToSet != currentProfile and it != profilesAvailable.end() )
+    {
+      if ( SysfsNode< std::string >( CHARGING_PROFILE ).write( profileToSet ) )
+      {
+        syslog( LOG_INFO, "Applied charging profile '%s'", profileToSet.c_str() );
+        return true;
+      }
+    }
+  }
+  catch ( ... )
+  {
+    syslog( LOG_WARNING, "Failed applying charging profile" );
+  }
+
+  return false;
+}
+
+bool ProfileSettingsWorker::applyChargingPriority( const std::string &priorityDescriptor ) noexcept
+{
+  if ( not hasChargingPriority() )
+    return false;
+
+  if ( not priorityDescriptor.empty() )
+    m_currentChargingPriority = priorityDescriptor;
+
+  try
+  {
+    const std::string prioToSet = m_currentChargingPriority;
+    const std::string currentPrio =
+      SysfsNode< std::string >( CHARGING_PRIORITY ).read().value_or( "" );
+    const auto priosAvailable = getChargingPrioritiesAvailable();
+
+    auto it = std::find( priosAvailable.begin(), priosAvailable.end(), prioToSet );
+
+    if ( not prioToSet.empty() and prioToSet != currentPrio and it != priosAvailable.end() )
+    {
+      if ( SysfsNode< std::string >( CHARGING_PRIORITY ).write( prioToSet ) )
+      {
+        syslog( LOG_INFO, "Applied charging priority '%s'", prioToSet.c_str() );
+        return true;
+      }
+    }
+  }
+  catch ( ... )
+  {
+    syslog( LOG_WARNING, "Failed applying charging priority" );
+  }
+
+  return false;
+}
+
+std::vector< int > ProfileSettingsWorker::getChargeStartAvailableThresholds() const noexcept
+{
+  auto battery = PowerSupplyController::getFirstBattery();
+  if ( not battery )
+    return {};
+
+  if ( battery->getChargeControlStartThreshold() == -1 )
+    return {};
+
+  auto thresholds = battery->getChargeControlStartAvailableThresholds();
+
+  if ( thresholds.empty() )
+  {
+    thresholds.resize( 101 );
+    for ( size_t i = 0; i <= 100; ++i )
+      thresholds[ i ] = static_cast< int >( i );
+  }
+
+  return thresholds;
+}
+
+std::vector< int > ProfileSettingsWorker::getChargeEndAvailableThresholds() const noexcept
+{
+  auto battery = PowerSupplyController::getFirstBattery();
+  if ( not battery )
+    return {};
+
+  if ( battery->getChargeControlEndThreshold() == -1 )
+    return {};
+
+  auto thresholds = battery->getChargeControlEndAvailableThresholds();
+
+  if ( thresholds.empty() )
+  {
+    thresholds.resize( 101 );
+    for ( size_t i = 0; i <= 100; ++i )
+      thresholds[ i ] = static_cast< int >( i );
+  }
+
+  return thresholds;
+}
+
+bool ProfileSettingsWorker::setChargeStartThreshold( int value ) noexcept
+{
+  auto battery = PowerSupplyController::getFirstBattery();
+  if ( not battery )
+    return false;
+
+  if ( battery->setChargeControlStartThreshold( value ) )
+  {
+    syslog( LOG_INFO, "Set charge start threshold to %d", value );
+    return true;
+  }
+
+  syslog( LOG_WARNING, "Failed writing start threshold" );
+  return false;
+}
+
+bool ProfileSettingsWorker::setChargeEndThreshold( int value ) noexcept
+{
+  auto battery = PowerSupplyController::getFirstBattery();
+  if ( not battery )
+    return false;
+
+  if ( battery->setChargeControlEndThreshold( value ) )
+  {
+    syslog( LOG_INFO, "Set charge end threshold to %d", value );
+    return true;
+  }
+
+  syslog( LOG_WARNING, "Failed writing end threshold" );
+  return false;
+}
+
+std::string ProfileSettingsWorker::getChargeType() const noexcept
+{
+  auto battery = PowerSupplyController::getFirstBattery();
+  if ( not battery )
+    return "Unknown";
+
+  ChargeType type = battery->getChargeType();
+
+  switch ( type )
+  {
+    case ChargeType::Trickle:      return "Trickle";
+    case ChargeType::Fast:         return "Fast";
+    case ChargeType::Standard:     return "Standard";
+    case ChargeType::Adaptive:     return "Adaptive";
+    case ChargeType::Custom:       return "Custom";
+    case ChargeType::LongLife:     return "LongLife";
+    case ChargeType::Bypass:       return "Bypass";
+    case ChargeType::NotAvailable: return "N/A";
+    default:                       return "Unknown";
+  }
+}
+
+bool ProfileSettingsWorker::setChargeType( const std::string &type ) noexcept
+{
+  auto battery = PowerSupplyController::getFirstBattery();
+  if ( not battery )
+    return false;
+
+  if ( SysfsNode< std::string >( battery->getBasePath() + "/charge_type" ).write( type ) )
+  {
+    syslog( LOG_INFO, "Set charge type to %s", type.c_str() );
+    return true;
+  }
+
+  syslog( LOG_WARNING, "Failed writing charge type" );
+  return false;
+}
+
+std::string ProfileSettingsWorker::getChargingProfilesAvailableJSON() const noexcept
+{
+  auto profiles = getChargingProfilesAvailable();
+
+  std::ostringstream oss;
+  oss << "[";
+  for ( size_t i = 0; i < profiles.size(); ++i )
+  {
+    if ( i > 0 )
+      oss << ",";
+    oss << "\"" << profiles[ i ] << "\"";
+  }
+  oss << "]";
+
+  return oss.str();
+}
+
+std::string ProfileSettingsWorker::getChargingPrioritiesAvailableJSON() const noexcept
+{
+  auto prios = getChargingPrioritiesAvailable();
+
+  std::ostringstream oss;
+  oss << "[";
+  for ( size_t i = 0; i < prios.size(); ++i )
+  {
+    if ( i > 0 )
+      oss << ",";
+    oss << "\"" << prios[ i ] << "\"";
+  }
+  oss << "]";
+
+  return oss.str();
+}
+
+std::string ProfileSettingsWorker::getChargeStartAvailableThresholdsJSON() const noexcept
+{
+  auto thresholds = getChargeStartAvailableThresholds();
+
+  std::ostringstream oss;
+  oss << "[";
+  for ( size_t i = 0; i < thresholds.size(); ++i )
+  {
+    if ( i > 0 )
+      oss << ",";
+    oss << thresholds[ i ];
+  }
+  oss << "]";
+
+  return oss.str();
+}
+
+std::string ProfileSettingsWorker::getChargeEndAvailableThresholdsJSON() const noexcept
+{
+  auto thresholds = getChargeEndAvailableThresholds();
+
+  std::ostringstream oss;
+  oss << "[";
+  for ( size_t i = 0; i < thresholds.size(); ++i )
+  {
+    if ( i > 0 )
+      oss << ",";
+    oss << thresholds[ i ];
+  }
+  oss << "]";
+
+  return oss.str();
+}
+
+void ProfileSettingsWorker::validateNVIDIACTGPOffset()
+{
+  if ( !m_nvidiaPowerCTRLAvailable )
+    return;
+
+  std::ifstream file( NVIDIA_CTGP_OFFSET );
+  if ( file.is_open() )
+  {
+    int32_t currentValue = 0;
+    file >> currentValue;
+    file.close();
+
+    int32_t expectedOffset = getNVIDIAProfileOffset();
+
+    if ( currentValue != expectedOffset )
+    {
+      std::cout << "[NVIDIAPowerCTRL] External change detected (current: " << currentValue
+                << ", expected: " << expectedOffset << "), re-applying profile" << std::endl;
+      applyNVIDIACTGPOffset();
+    }
+  }
+}
+
+// =====================================================================
+//  Private methods — ODM Profile
+// =====================================================================
+
+void ProfileSettingsWorker::detectODMProfileType()
+{
+  if ( SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE ).isAvailable() and
+       SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE_CHOICES ).isAvailable() )
+  {
+    m_odmProfileType = ODMProfileType::TuxedoPlatformProfile;
+    syslog( LOG_INFO, "ProfileSettingsWorker: Using TUXEDO platform_profile" );
+    return;
+  }
+
+  if ( SysfsNode< std::string >( ACPI_PLATFORM_PROFILE ).isAvailable() and
+       SysfsNode< std::string >( ACPI_PLATFORM_PROFILE_CHOICES ).isAvailable() )
+  {
+    m_odmProfileType = ODMProfileType::AcpiPlatformProfile;
+    syslog( LOG_INFO, "ProfileSettingsWorker: Using ACPI platform_profile" );
+    return;
+  }
+
+  std::vector< std::string > availableProfiles;
+  if ( getAvailableProfilesViaAPI( availableProfiles ) and not availableProfiles.empty() )
+  {
+    m_odmProfileType = ODMProfileType::TuxedoIOAPI;
+    syslog( LOG_INFO, "ProfileSettingsWorker: Using Tuxedo IO API" );
+    return;
+  }
+
+  m_odmProfileType = ODMProfileType::None;
+  syslog( LOG_INFO, "ProfileSettingsWorker: No ODM profile support available" );
+}
+
+std::vector< std::string > ProfileSettingsWorker::readPlatformProfileChoices(
+  const std::string &path )
+{
+  std::vector< std::string > profiles;
+
+  std::ifstream file( path );
+  if ( not file.is_open() )
+    return profiles;
+
+  std::string line;
+  if ( std::getline( file, line ) )
+  {
+    std::istringstream iss( line );
+    std::string profile;
+    while ( iss >> profile )
+    {
+      profiles.push_back( profile );
+    }
+  }
+
+  return profiles;
+}
+
+void ProfileSettingsWorker::applyODMProfile()
+{
+  const UccProfile profile = m_getActiveProfile();
+  const std::string chosenProfileName = profile.odmProfile.name.value_or( "" );
+
+  switch ( m_odmProfileType )
+  {
+    case ODMProfileType::TuxedoPlatformProfile:
+      applyPlatformProfile(
+        TUXEDO_PLATFORM_PROFILE, TUXEDO_PLATFORM_PROFILE_CHOICES, chosenProfileName );
+      break;
+
+    case ODMProfileType::AcpiPlatformProfile:
+      applyPlatformProfile(
+        ACPI_PLATFORM_PROFILE, ACPI_PLATFORM_PROFILE_CHOICES, chosenProfileName );
+      break;
+
+    case ODMProfileType::TuxedoIOAPI:
+      applyProfileViaAPI( chosenProfileName );
+      break;
+
+    case ODMProfileType::None:
+      m_setOdmProfilesAvailable( {} );
+      break;
+  }
+}
+
+void ProfileSettingsWorker::applyPlatformProfile(
+  const std::string &profilePath, const std::string &choicesPath,
+  const std::string &chosenProfileName )
+{
+  std::vector< std::string > availableProfiles = readPlatformProfileChoices( choicesPath );
+
+  m_setOdmProfilesAvailable( availableProfiles );
+
+  if ( chosenProfileName.empty() )
+  {
+    syslog( LOG_INFO, "ProfileSettingsWorker: No profile name specified in active profile" );
+    return;
+  }
+
+  auto it = std::find( availableProfiles.begin(), availableProfiles.end(), chosenProfileName );
+  if ( it == availableProfiles.end() )
+  {
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Profile '%s' not available",
+            chosenProfileName.c_str() );
+    return;
+  }
+
+  SysfsNode< std::string > profileNode( profilePath );
+  if ( profileNode.write( chosenProfileName ) )
+  {
+    syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
+            chosenProfileName.c_str() );
+  }
+  else
+  {
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to set ODM profile to '%s'",
+            chosenProfileName.c_str() );
+  }
+}
+
+void ProfileSettingsWorker::applyProfileViaAPI( const std::string &chosenProfileName )
+{
+  std::vector< std::string > availableProfiles;
+
+  if ( not getAvailableProfilesViaAPI( availableProfiles ) )
+  {
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to get available profiles via API" );
+    m_setOdmProfilesAvailable( {} );
+    return;
+  }
+
+  m_setOdmProfilesAvailable( availableProfiles );
+
+  std::string profileToApply = chosenProfileName;
+
+  auto it = std::find( availableProfiles.begin(), availableProfiles.end(), profileToApply );
+  if ( it == availableProfiles.end() )
+  {
+    profileToApply = getDefaultProfileViaAPI();
+    syslog( LOG_INFO,
+            "ProfileSettingsWorker: Profile '%s' not available, using default '%s'",
+            chosenProfileName.c_str(), profileToApply.c_str() );
+  }
+
+  it = std::find( availableProfiles.begin(), availableProfiles.end(), profileToApply );
+  if ( it == availableProfiles.end() )
+  {
+    syslog( LOG_WARNING, "ProfileSettingsWorker: No valid profile found" );
+    return;
+  }
+
+  if ( setProfileViaAPI( profileToApply ) )
+  {
+    syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
+            profileToApply.c_str() );
+  }
+  else
+  {
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to apply profile '%s'",
+            profileToApply.c_str() );
+  }
+}
+
+// =====================================================================
+//  Private methods — ODM Power Limits
+// =====================================================================
+
+void ProfileSettingsWorker::logLine( const std::string &message )
+{
+  if ( m_logFunction )
+  {
+    m_logFunction( message );
+  }
+
+  syslog( LOG_INFO, "%s", message.c_str() );
+}
+
+void ProfileSettingsWorker::applyODMPowerLimits()
+{
+  logLine( "ProfileSettingsWorker: applyODMPowerLimits() called" );
+
+  const UccProfile profile = m_getActiveProfile();
+  const auto &odmPowerLimits = profile.odmPowerLimits;
+
+  auto tdpInfo = getTDPInfo();
+
+  if ( tdpInfo.empty() )
+  {
+    logLine( "ProfileSettingsWorker: No TDP hardware available" );
+    m_setOdmPowerLimitsJSON( "[]" );
+    return;
+  }
+
+  logLine( "ProfileSettingsWorker: Found " + std::to_string( tdpInfo.size() ) +
+           " TDP descriptors" );
+
+  std::vector< uint32_t > newTDPValues;
+
+  if ( not odmPowerLimits.tdpValues.empty() )
+  {
+    for ( int val : odmPowerLimits.tdpValues )
+      newTDPValues.push_back( static_cast< uint32_t >( val ) );
+  }
+
+  if ( newTDPValues.empty() )
+  {
+    for ( const auto &tdp : tdpInfo )
+    {
+      newTDPValues.push_back( tdp.max );
+    }
+  }
+
+  std::ostringstream logMessage;
+  logMessage << "ProfileSettingsWorker: Set ODM TDPs [";
+
+  for ( size_t i = 0; i < newTDPValues.size(); ++i )
+  {
+    if ( i > 0 )
+      logMessage << ", ";
+
+    logMessage << newTDPValues[ i ] << " W";
+  }
+
+  logMessage << "]";
+  logLine( logMessage.str() );
+
+  const bool writeSuccess = setTDPValues( newTDPValues );
+
+  if ( writeSuccess )
+  {
+    for ( size_t i = 0; i < tdpInfo.size() and i < newTDPValues.size(); ++i )
+    {
+      tdpInfo[ i ].current = newTDPValues[ i ];
+    }
+  }
+  else
+  {
+    logLine( "ProfileSettingsWorker: Failed to write TDP values" );
+  }
+
+  std::ostringstream jsonStream;
+  jsonStream << "[";
+
+  for ( size_t i = 0; i < tdpInfo.size(); ++i )
+  {
+    if ( i > 0 )
+      jsonStream << ",";
+
+    jsonStream << "{"
+               << "\"current\":" << tdpInfo[ i ].current << ","
+               << "\"min\":" << tdpInfo[ i ].min << ","
+               << "\"max\":" << tdpInfo[ i ].max
+               << "}";
+  }
+
+  jsonStream << "]";
+
+  m_setOdmPowerLimitsJSON( jsonStream.str() );
+}
+
+// =====================================================================
+//  Private methods — Charging
+// =====================================================================
+
+void ProfileSettingsWorker::initializeChargingSettings() noexcept
+{
+  if ( hasChargingProfile() )
+  {
+    auto currentProfile = SysfsNode< std::string >( CHARGING_PROFILE ).read().value_or( "" );
+
+    if ( not currentProfile.empty() )
+    {
+      m_currentChargingProfile = currentProfile;
+      syslog( LOG_INFO, "Initialized charging profile: %s", m_currentChargingProfile.c_str() );
+    }
+  }
+
+  if ( hasChargingPriority() )
+  {
+    auto currentPrio = SysfsNode< std::string >( CHARGING_PRIORITY ).read().value_or( "" );
+
+    if ( not currentPrio.empty() )
+    {
+      m_currentChargingPriority = currentPrio;
+      syslog( LOG_INFO, "Initialized charging priority: %s", m_currentChargingPriority.c_str() );
+    }
+  }
+}
+
+// =====================================================================
+//  Private methods — YCbCr 4:2:0
+// =====================================================================
+
+void ProfileSettingsWorker::checkYCbCr420Availability()
+{
+  m_ycbcr420Available = false;
+
+  if ( m_settings.ycbcr420Workaround.empty() )
+  {
+    return;
+  }
+
+  for ( const auto &cardEntry : m_settings.ycbcr420Workaround )
+  {
+    int card = cardEntry.card;
+    for ( const auto &portEntry : cardEntry.ports )
+    {
+      std::string port = portEntry.port;
+      std::string path = "/sys/kernel/debug/dri/" + std::to_string( card ) + "/" + port +
+                         "/force_yuv420_output";
+
+      if ( fileExists( path ) )
+      {
+        m_ycbcr420Available = true;
+        return;
+      }
+    }
+  }
+}
+
+void ProfileSettingsWorker::applyYCbCr420Workaround()
+{
+  bool settings_changed = false;
+
+  for ( const auto &cardEntry : m_settings.ycbcr420Workaround )
+  {
+    int card = cardEntry.card;
+    for ( const auto &portEntry : cardEntry.ports )
+    {
+      std::string port = portEntry.port;
+      bool enableYuv = portEntry.enabled;
+
+      std::string path = "/sys/kernel/debug/dri/" + std::to_string( card ) + "/" + port +
+                         "/force_yuv420_output";
+
+      if ( fileExists( path ) )
+      {
+        std::ifstream file( path );
+        if ( file.is_open() )
+        {
+          char currentValue;
+          file.get( currentValue );
+          file.close();
+
+          bool oldValue = ( currentValue == '1' );
+          if ( oldValue != enableYuv )
+          {
+            std::ofstream outFile( path );
+            if ( outFile.is_open() )
+            {
+              outFile << ( enableYuv ? "1" : "0" );
+              outFile.close();
+              settings_changed = true;
+              std::cout << "[YCbCr420] Set " << path << " to " << ( enableYuv ? "1" : "0" )
+                        << std::endl;
+            }
+            else
+            {
+              std::cerr << "[YCbCr420] Failed to write to " << path << std::endl;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if ( settings_changed )
+  {
+    m_modeReapplyPending = true;
+    std::cout << "[YCbCr420] Mode reapply pending due to YUV420 changes" << std::endl;
+  }
+}
+
+// =====================================================================
+//  Private methods — NVIDIA Power Control
+// =====================================================================
+
+void ProfileSettingsWorker::initNVIDIAPowerCTRL()
+{
+  m_nvidiaPowerCTRLAvailable = checkNVIDIAAvailability();
+
+  if ( m_nvidiaPowerCTRLAvailable )
+  {
+    queryNVIDIAPowerLimits();
+    applyNVIDIACTGPOffset();
+  }
+}
+
+int32_t ProfileSettingsWorker::getNVIDIAProfileOffset() const
+{
+  UccProfile profile = m_getActiveProfile();
+
+  if ( profile.nvidiaPowerCTRLProfile.has_value() )
+  {
+    return profile.nvidiaPowerCTRLProfile->cTGPOffset;
+  }
+
+  return 0; // Default offset
+}
+
+void ProfileSettingsWorker::applyNVIDIACTGPOffset()
+{
+  if ( !m_cTGPAdjustmentSupported )
+  {
+    std::cout << "[NVIDIAPowerCTRL] cTGP adjustment not supported for this device, skipping" << std::endl;
+    return;
+  }
+
+  int32_t ctgpOffset = getNVIDIAProfileOffset();
+
+  std::ofstream file( NVIDIA_CTGP_OFFSET );
+  if ( !file.is_open() )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Failed to open " << NVIDIA_CTGP_OFFSET << " for writing"
+              << std::endl;
+    return;
+  }
+
+  file << ctgpOffset;
+  file.flush();
+
+  if ( !file.good() )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Failed to write cTGP offset to " << NVIDIA_CTGP_OFFSET
+              << " (stream error)" << std::endl;
+    return;
+  }
+
+  file.close();
+
+  // Verify the write by reading back
+  std::ifstream verifyFile( NVIDIA_CTGP_OFFSET );
+  if ( verifyFile.is_open() )
+  {
+    int32_t verifiedValue = -1;
+    verifyFile >> verifiedValue;
+    verifyFile.close();
+
+    if ( verifiedValue == ctgpOffset )
+    {
+      m_lastAppliedNVIDIAOffset = ctgpOffset;
+      std::cout << "[NVIDIAPowerCTRL] Applied cTGP offset: " << ctgpOffset << std::endl;
+    }
+    else
+    {
+      std::cerr << "[NVIDIAPowerCTRL] Write verification failed - wrote " << ctgpOffset
+                << " but read back " << verifiedValue << std::endl;
+    }
+  }
+}
+
+void ProfileSettingsWorker::queryNVIDIAPowerLimits()
+{
+  m_nvidiaPowerCTRLDefaultPowerLimit =
+    executeNvidiaSmi( "nvidia-smi --format=csv,noheader,nounits --query-gpu=power.default_limit" );
+
+  m_nvidiaPowerCTRLMaxPowerLimit =
+    executeNvidiaSmi( "nvidia-smi --format=csv,noheader,nounits --query-gpu=power.max_limit" );
+
+  std::cout << "[NVIDIAPowerCTRL] NVIDIA GPU power limits - Default: "
+            << m_nvidiaPowerCTRLDefaultPowerLimit << "W, Max: " << m_nvidiaPowerCTRLMaxPowerLimit
+            << "W" << std::endl;
+}
+
+int32_t ProfileSettingsWorker::executeNvidiaSmi( const std::string &command )
+{
+  std::array< char, 128 > buffer;
+  std::string result;
+
+  auto pipeDeleter = []( FILE *fp )
+  {
+    if ( fp )
+      pclose( fp );
+  };
+  std::unique_ptr< FILE, decltype( pipeDeleter ) > pipe(
+    popen( command.c_str(), "r" ), pipeDeleter );
+  if ( !pipe )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Failed to execute: " << command << std::endl;
+    return 0;
+  }
+
+  while ( fgets( buffer.data(), buffer.size(), pipe.get() ) != nullptr )
+  {
+    result += buffer.data();
+  }
+
+  // Trim whitespace and convert to int
+  result.erase( 0, result.find_first_not_of( " \t\n\r" ) );
+  result.erase( result.find_last_not_of( " \t\n\r" ) + 1 );
+
+  try
+  {
+    return std::stoi( result );
+  }
+  catch ( ... )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Failed to parse nvidia-smi output: " << result << std::endl;
+    return 0;
+  }
+}

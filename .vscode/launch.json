@@ -1,0 +1,82 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "(gdb) Attach",
+        "type": "cppdbg",
+        "request": "attach",
+        "program": "${workspaceFolder}/build/ucc-gui/ucc-gui",
+        "MIMode": "gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            },
+            {
+                "description": "Set Disassembly Flavor to Intel",
+                "text": "-gdb-set disassembly-flavor intel",
+                "ignoreFailures": true
+            }
+        ]
+      },
+
+        {
+            "name": "tcc main process",
+            "type": "node",
+            "request": "launch",
+            "cwd": "${workspaceRoot}",
+            "runtimeExecutable": "${workspaceRoot}/node_modules/.bin/electron",
+            "windows": {
+              "runtimeExecutable": "${workspaceRoot}/node_modules/.bin/electron.cmd"
+            },
+            "runtimeArgs": [
+                "./dist/tuxedo-control-center"
+            ],
+            "program": "${workspaceRoot}/src/e-app/main.ts",
+            "outFiles": [
+                "${workspaceRoot}/dist/tuxedo-control-center/e-app/e-app/main.js"
+            ],
+            "sourceMaps": true
+        },
+        {
+            "name": "tcc render process",
+            "type": "chrome",
+            "request": "launch",
+            "runtimeExecutable": "${workspaceRoot}/node_modules/.bin/electron",
+            "windows": {
+            "runtimeExecutable": "${workspaceRoot}/node_modules/.bin/electron.cmd"
+            },
+            "runtimeArgs": [
+                "${workspaceRoot}/dist/tuxedo-control-center"
+            ],
+            "webRoot": "${workspaceRoot}/dist",
+            "sourceMaps": true,
+            "sourceMapPathOverrides": {
+                "webpack:///./*": "${workspaceRoot}/*"
+            },
+            "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "name": "uccd (C++)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/uccd",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}/build",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build-uccd",
+            "sourceLanguages": ["cpp"]
+        }
+    ]
+}

@@ -1,0 +1,104 @@
+{
+    "files.associations": {
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "new": "cpp"
+    },
+    "xliffSync.baseFile": "lang.xlf",
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.detectIndentation": false,
+    "cmake.sourceDirectory": "/opt/devel/git/ucc",
+    "chat.tools.terminal.autoApprove": {
+      "./uccd": true,
+      "gdb": true,
+      "timeout": true,
+      "dbus-send": true,
+      "g++": true,
+      "./test_powersupply": true,
+      "dpkg": true,
+      "cmake": true,
+      "true": true,
+      "journalctl": true,
+      "busctl": true,
+      "/home/erhan/tmp/src/ucc/bin/ucc-gui": true,
+      "make": true,
+      "./build-local.sh": true,
+      "nm": true,
+      "nproc": true,
+      "run": true,
+      "ldd": true,
+      "quit": true,
+      "n": true,
+      "y": true,
+      "ninja": true,
+      "env": true,
+      "coredumpctl": true,
+      "git mv": true,
+      "git add": true,
+      "git commit": true,
+      "/^for f in \\$\\(git grep -l \"com\\.tuxedocomputers\\.tccd\\\\\\|/com/uniwill/uccd\\\\\\|com\\.tuxedocomputers\\.uccd\" --null \\| tr '\\\\0' '\\\\n'\\); do perl -0777 -pe 's/com\\\\\\.tuxedocomputers\\\\\\.tccd/com\\.uniwill\\.uccd/g; s/\\\\/com\\\\/tuxedocomputers\\\\/tccd/\\\\/com\\\\/uniwill\\\\/uccd/g; s/com\\\\\\.tuxedocomputers\\\\\\.uccd/com\\.uniwill\\.uccd/g;' -i \"\\$f\"; done && git add -A && git commit -m \"chore\\(dbus\\): update DBus service/interface and object paths to com\\.uniwill\\.uccd and /com/uniwill/uccd\" \\|\\| true$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^perl -0777 -pe \"s/com\\\\\\.tuxedocomputers\\\\\\.tccd/com\\.uniwill\\.uccd/g;\" -i uccd/TccDBusService\\.cpp uccd/UccDBusService\\.cpp && git add uccd/TccDBusService\\.cpp uccd/UccDBusService\\.cpp && git commit -m \"chore\\(dbus\\): replace remaining com\\.tuxedocomputers\\.tccd occurrences with com\\.uniwill\\.uccd\" \\|\\| true$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "git rev-parse": true,
+      "/^files=\"\\.vscode/settings\\.json Profile_Management_Implementation\\.md TESTING_WIDGET\\.md show-real-data\\.sh src/service-app/classes/TccDBusService\\.ts src/service-app/classes/UccDBusService\\.ts PROJECT_STATUS\\.md test-widget\\.sh ucc-widgets/profile-switcher/package/contents/ui/main\\.qml ucc-widgets/system-monitor/package/contents/ui/SystemMetricsProvider\\.qml ucc-widgets/system-monitor/package/contents/ui/main\\.qml test-dbus\\.sh test-display-refresh\\.sh test-prime-worker\\.sh test-widget\\.sh\"; for f in \\$files; do perl -0777 -pe 's/com\\\\\\.tuxedocomputers\\\\\\.tccd/com\\.uniwill\\.uccd/g; s/\\\\/com\\\\/tuxedocomputers\\\\/tccd/\\\\/com\\\\/uniwill\\\\/uccd/g;' -i \"\\$f\"; done && git add -A && git commit -m \"chore\\(dbus\\): update remaining DBus references in tests, QML and docs to com\\.uniwill\\.uccd\" \\|\\| true$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/opt/devel/git/ucc/build/ucc-tray/ucc-tray": true,
+      "./run-ucc-gui.sh": true,
+      "/opt/devel/git/ucc/run-ucc-gui.sh": true,
+      "/^cd /opt/devel/git/ucc && source build/prefix\\.sh && \\./run-ucc-gui\\.sh$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python3 keyboard_mapping_util\\.py$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "qdbus6": true,
+      "setxkbmap": true,
+      "localectl": true,
+      "lscpu": true,
+      "rpm": true,
+      "cp": true,
+      "gdbus": true,
+      "uname": true,
+      "sensors": true,
+      "lspci": true,
+      "lsmod": true,
+      "modinfo": true,
+      "nvidia-smi": true,
+      "dmesg": true,
+      "/^sudo cat /etc/ucc/settings 2>/dev/null \\|\\| echo \"FILE NOT FOUND\"; echo \"---\"; cat /etc/ucc/settings 2>/dev/null \\|\\| echo \"No read access without sudo\"$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^cat /etc/ucc/settings \\| python3 -c \"\nimport sys,json\nd=json\\.load\\(sys\\.stdin\\)\nsm = d\\.get\\('stateMap',\\{\\}\\)\nfor state, profile in sm\\.items\\(\\):\n    pid = profile\\.get\\('profileId','\\?'\\) if isinstance\\(profile, dict\\) else '\\?'\n    print\\(f'State: \\{state\\} -> profileId: \\{pid\\}'\\)\n    if isinstance\\(profile, dict\\):\n        odm = profile\\.get\\('odmPowerLimits', \\{\\}\\)\n        tdp = odm\\.get\\('tdpValues', \\[\\]\\) if isinstance\\(odm, dict\\) else \\[\\]\n        print\\(f'  odmPowerLimits\\.tdpValues: \\{tdp\\}'\\)\n\" 2>&1 \\| head -50$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^cat /etc/ucc/settings \\| python3 -c \"\nimport sys,json\nd=json\\.load\\(sys\\.stdin\\)\nsm = d\\.get\\('stateMap',\\{\\}\\)\nfor state, data in sm\\.items\\(\\):\n    print\\(f'=== State: \\{state\\} ==='\\)\n    if isinstance\\(data, dict\\):\n        for k,v in data\\.items\\(\\):\n            print\\(f'  \\{k\\}: \\{json\\.dumps\\(v\\)\\[:200\\]\\}'\\)\n\" 2>&1 \\| head -80$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^cat /etc/ucc/settings \\| python3 -c \"\nimport sys,json\nd=json\\.load\\(sys\\.stdin\\)\nsm = d\\.get\\('stateMap',\\{\\}\\)\nfor state, data in sm\\.items\\(\\):\n    print\\(f'=== State: \\{state\\} \\(type=\\{type\\(data\\)\\.__name__\\}\\) ==='\\)\n    print\\(f'  value: \\{json\\.dumps\\(data\\)\\[:300\\]\\}'\\)\nprint\\(\\)\n# Also check top-level keys\nfor k in d\\.keys\\(\\):\n    if k != 'stateMap':\n        val = d\\[k\\]\n        print\\(f'Top-level key: \\{k\\} = \\{json\\.dumps\\(val\\)\\[:200\\]\\}'\\)\n\" 2>&1 \\| head -60$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^cat /etc/ucc/settings \\| python3 -c \"\nimport sys,json\nd=json\\.load\\(sys\\.stdin\\)\nprofiles = d\\.get\\('profiles',\\{\\}\\)\nfor pid, pdata in profiles\\.items\\(\\):\n    print\\(f'=== Profile: \\{pid\\} ==='\\)\n    if isinstance\\(pdata, dict\\):\n        name = pdata\\.get\\('name','\\?'\\)\n        print\\(f'  name: \\{name\\}'\\)\n        odm_pl = pdata\\.get\\('odmPowerLimits', \\{\\}\\)\n        print\\(f'  odmPowerLimits: \\{json\\.dumps\\(odm_pl\\)\\}'\\)\n        odm_profile = pdata\\.get\\('odmProfile', \\{\\}\\)\n        print\\(f'  odmProfile: \\{json\\.dumps\\(odm_profile\\)\\}'\\)\n        cpu = pdata\\.get\\('cpu', \\{\\}\\)\n        print\\(f'  cpu\\.governor: \\{cpu\\.get\\(\\\\\"governor\\\\\",\\\\\"\\?\\\\\"\\)\\}'\\)\n        print\\(f'  cpu\\.scalingMaxFrequency: \\{cpu\\.get\\(\\\\\"scalingMaxFrequency\\\\\",\\\\\"\\?\\\\\"\\)\\}'\\)\n    print\\(\\)\n\" 2>&1 \\| head -80$/": {
+        "approve": true,
+        "matchCommandLine": true
+      }
+    },
+    "editor.fontFamily": "'Source Code Pro', Menlo, Monaco, 'Courier New', monospace",
+    "editor.fontSize": 14,
+    "terminal.integrated.fontFamily": "Source Code Pro",
+    "terminal.integrated.fontSize": 14
+}

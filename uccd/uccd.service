@@ -1,0 +1,26 @@
+[Unit]
+Description=Uniwill Control Center Daemon
+Documentation=man:uccd(8)
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/uccd --start
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=10s
+User=root
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=uccd
+
+# Security hardening
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=true
+ReadWritePaths=/etc/ucc /run
+
+[Install]
+WantedBy=multi-user.target
