@@ -110,6 +110,20 @@
 				"uccd"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Build uccd only (rebuild)",
+			"type": "shell",
+			"command": "ninja",
+			"args": [
+				"-j4"
+			],
+			"group": "build"
+		},
+		{
+			"label": "rebuild-uccd",
+			"type": "shell",
+			"command": "ninja -j4 -C /opt/devel/git/ucc/build"
 		}
 	]
 }

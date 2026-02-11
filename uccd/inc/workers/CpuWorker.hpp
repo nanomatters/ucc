@@ -48,6 +48,8 @@ public:
   {
     // check for EPP write quirks for specific devices
     m_noEPPWriteQuirk = false; // todo: implement device detection if needed
+    m_validationFailureCount = 0;
+    m_reapplyGaveUp = false;
   }
 
   void onStart() override
@@ -63,8 +65,31 @@ public:
     // validate current CPU settings match profile
     if ( m_getCpuSettingsEnabled() and not validateCpuFreq() )
     {
-      logLine( "CpuWorker: Incorrect settings, reapplying profile" );
+      if ( m_reapplyGaveUp )
+        return;
+
+      ++m_validationFailureCount;
+
+      if ( m_validationFailureCount >= maxReapplyAttempts )
+      {
+        logLine( "CpuWorker: CPU settings keep being reverted by another service "
+                 "(e.g. tuned, power-profiles-daemon). Giving up after "
+                 + std::to_string( maxReapplyAttempts ) + " attempts.", LOG_WARNING );
+        m_reapplyGaveUp = true;
+        return;
+      }
+
+      logLine( "CpuWorker: Incorrect settings, reapplying profile "
+               "(attempt " + std::to_string( m_validationFailureCount )
+               + "/" + std::to_string( maxReapplyAttempts ) + ")", LOG_INFO );
       applyCpuProfile( m_getActiveProfile() );
+    }
+    else
+    {
+      if ( m_validationFailureCount > 0 )
+        m_validationFailureCount = 0;
+      if ( m_reapplyGaveUp )
+        m_reapplyGaveUp = false;
     }
   }
 
@@ -82,6 +107,8 @@ public:
   {
     if ( m_getCpuSettingsEnabled() )
     {
+      m_validationFailureCount = 0;
+      m_reapplyGaveUp = false;
       applyCpuProfile( m_getActiveProfile() );
     }
   }
@@ -105,6 +132,10 @@ private:
   std::function< void( const std::string & ) > m_logFunction;
   std::unique_ptr< CpuController > m_cpuCtrl;
   bool m_noEPPWriteQuirk;
+  int m_validationFailureCount;
+  bool m_reapplyGaveUp;
+
+  static constexpr int maxReapplyAttempts = 3;
 
   const std::vector< std::string > m_preferredAcpiFreqGovernors = {
     "ondemand", "schedutil", "conservative"
@@ -114,14 +145,14 @@ private:
     "performance"
   };
 
-  void logLine( const std::string &message )
+  void logLine( const std::string &message, int priority = LOG_INFO )
   {
     if ( m_logFunction )
     {
       m_logFunction( message );
     }
 
-    syslog( LOG_INFO, "%s", message.c_str() );
+    syslog( priority, "%s", message.c_str() );
   }
 
   /**
@@ -280,7 +311,7 @@ private:
             {
               logLine( "CpuWorker: Unexpected value core" + std::to_string( core.coreIndex )
                        + " minimum scaling frequency " + std::to_string( *currentMin )
-                       + " instead of " + std::to_string( *profile.cpu.scalingMinFrequency ) );
+                       + " instead of " + std::to_string( *profile.cpu.scalingMinFrequency ), LOG_DEBUG );
               return false;
             }
           }
@@ -294,7 +325,7 @@ private:
             {
               logLine( "CpuWorker: Unexpected value core" + std::to_string( core.coreIndex )
                        + " maximum scaling frequency " + std::to_string( *currentMax )
-                       + " instead of " + std::to_string( *profile.cpu.scalingMaxFrequency ) );
+                       + " instead of " + std::to_string( *profile.cpu.scalingMaxFrequency ), LOG_DEBUG );
               return false;
             }
           }
@@ -309,7 +340,7 @@ private:
             if ( currentGovernor.has_value() and *currentGovernor != *defaultGovernor )
             {
               logLine( "CpuWorker: Unexpected value core" + std::to_string( core.coreIndex )
-                       + " scaling governor '" + *currentGovernor + "' instead of '" + *defaultGovernor + "'" );
+                       + " scaling governor '" + *currentGovernor + "' instead of '" + *defaultGovernor + "'", LOG_DEBUG );
               return false;
             }
           }
@@ -323,7 +354,7 @@ private:
             {
               logLine( "CpuWorker: Unexpected value core" + std::to_string( core.coreIndex )
                        + " energy performance preference => '" + *currentEPP
-                       + "' instead of '" + profile.cpu.energyPerformancePreference + "'" );
+                       + "' instead of '" + profile.cpu.energyPerformancePreference + "'", LOG_DEBUG );
               return false;
             }
           }
@@ -339,7 +370,7 @@ private:
         {
           logLine( "CpuWorker: Unexpected value noTurbo => '"
                    + std::string( *currentNoTurbo ? "true" : "false" )
-                   + "' instead of '" + std::string( profile.cpu.noTurbo ? "true" : "false" ) + "'" );
+                   + "' instead of '" + std::string( profile.cpu.noTurbo ? "true" : "false" ) + "'", LOG_DEBUG );
           return false;
         }
       }

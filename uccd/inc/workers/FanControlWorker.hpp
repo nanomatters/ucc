@@ -504,8 +504,8 @@ protected:
         }
 
         // Log the temperature and speed we are about to set for debugging
-        syslog( LOG_INFO, "FanControlWorker: fan %d temp=%d calculated=%d set=%d sameSpeed=%d",
-                static_cast< int >( fanIndex ), fanTemps[fanIndex], fanSpeedsSet[fanIndex], speedToSet, m_modeSameSpeed ? 1 : 0 );
+        //syslog( LOG_DEBUG, "FanControlWorker: fan %d temp=%d calculated=%d set=%d sameSpeed=%d",
+        //        static_cast< int >( fanIndex ), fanTemps[fanIndex], fanSpeedsSet[fanIndex], speedToSet, m_modeSameSpeed ? 1 : 0 );
 
         m_io.setFanSpeedPercent( static_cast< int >( fanIndex ), speedToSet );
       }
@@ -547,8 +547,12 @@ private:
   void updateFanLogicsFromProfile( const UccProfile &profile )
   {
     // Respect profile setting for same-speed mode
+    bool prevSameSpeed = m_modeSameSpeed;
     m_modeSameSpeed = profile.fan.sameSpeed;
-    syslog( LOG_INFO, "FanControlWorker: sameSpeed mode = %d", m_modeSameSpeed ? 1 : 0 );
+    if ( m_modeSameSpeed != prevSameSpeed )
+    {
+      syslog( LOG_INFO, "FanControlWorker: sameSpeed mode changed to %d", m_modeSameSpeed ? 1 : 0 );
+    }
 
     for ( size_t i = 0; i < m_fanLogics.size(); ++i )
     {

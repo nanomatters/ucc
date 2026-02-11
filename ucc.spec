@@ -48,10 +48,8 @@ CPU power management, and water cooler control for supported systems.
 %autosetup
 
 %build
-export CC=gcc
-export CXX=g++
 %cmake \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
   -DCMAKE_INSTALL_LIBDIR=%{_libdir} \
   -DCMAKE_INSTALL_RPATH="" \
