@@ -2173,41 +2173,67 @@ void UccDBusService::onWork()
     m_adaptor->emitModeReapplyPendingChanged( true );
 
   // Check water cooler connection state changes and switch power state.
-  // IMPORTANT: only read the flag under the lock, then release BEFORE calling
-  // applyProfileForCurrentState() which itself acquires the same mutex
-  // (via updateDBusActiveProfileData).  Holding it here would self-deadlock.
-  bool wcStatusChanged = false;
-  bool wcConnected = false;
-  wcConnected = m_dbusData.waterCoolerConnected;
-  wcStatusChanged = ( wcConnected != m_previousWaterCoolerConnected );
+  // Debounce: BLE connections are inherently unstable – the water cooler
+  // may briefly disconnect (UART error) and reconnect within seconds.
+  // We only act on a state change once it has been stable for a
+  // configurable number of seconds (shorter for connect, longer for
+  // disconnect so a quick reconnect does not trigger a power-state flip).
+  bool wcConnected = m_dbusData.waterCoolerConnected;
 
-  if ( wcStatusChanged )
+  if ( wcConnected != m_previousWaterCoolerConnected )
   {
-    m_previousWaterCoolerConnected = wcConnected;
-    const std::string status = wcConnected ? "connected" : "disconnected";
-    syslog( LOG_INFO, "Water cooler status changed to: %s", status.c_str() );
-
-    // Emit signal for applications to handle water cooler status changes
-    m_object->emitSignal("WaterCoolerStatusChanged").onInterface("com.uniwill.uccd").withArguments(status);
-
-    // Switch power state based on water cooler connection and apply the
-    // corresponding profile so the system actually transitions.
-    if ( wcConnected )
+    // Raw flag differs from the last accepted state.
+    if ( !m_wcDebouncePending || m_wcDebouncedTarget != wcConnected )
     {
-      m_currentState = ProfileState::WC;
-      const std::string stateKey = "power_wc";
-      std::cout << "[State] Water cooler connected, switching to " << stateKey << std::endl;
-      m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
+      // First time we see this new value (or direction changed) – start timer.
+      m_wcDebouncePending  = true;
+      m_wcDebouncedTarget  = wcConnected;
+      m_wcDebounceStart    = std::chrono::steady_clock::now();
     }
     else
     {
-      m_currentState = determineState();
-      const std::string stateKey = profileStateToString( m_currentState );
-      std::cout << "[State] Water cooler disconnected, reverting to " << stateKey << std::endl;
-      m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
-    }
+      // Still waiting for the same direction – check elapsed time.
+      const int requiredSeconds = wcConnected ? WC_CONNECT_DEBOUNCE_S
+                                              : WC_DISCONNECT_DEBOUNCE_S;
+      auto elapsed = std::chrono::steady_clock::now() - m_wcDebounceStart;
+      if ( std::chrono::duration_cast< std::chrono::seconds >( elapsed ).count()
+           >= requiredSeconds )
+      {
+        // Stable long enough – accept the change.
+        m_wcDebouncePending = false;
+        m_previousWaterCoolerConnected = wcConnected;
 
-    applyProfileForCurrentState();
+        const std::string status = wcConnected ? "connected" : "disconnected";
+        syslog( LOG_INFO, "Water cooler status changed to: %s (debounced)", status.c_str() );
+
+        // Emit signal for applications to handle water cooler status changes
+        m_object->emitSignal("WaterCoolerStatusChanged").onInterface("com.uniwill.uccd").withArguments(status);
+
+        // Switch power state based on water cooler connection and apply the
+        // corresponding profile so the system actually transitions.
+        if ( wcConnected )
+        {
+          m_currentState = ProfileState::WC;
+          const std::string stateKey = "power_wc";
+          std::cout << "[State] Water cooler connected, switching to " << stateKey << std::endl;
+          m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
+        }
+        else
+        {
+          m_currentState = determineState();
+          const std::string stateKey = profileStateToString( m_currentState );
+          std::cout << "[State] Water cooler disconnected, reverting to " << stateKey << std::endl;
+          m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
+        }
+
+        applyProfileForCurrentState();
+      }
+    }
+  }
+  else
+  {
+    // Raw flag matches accepted state – cancel any pending debounce.
+    m_wcDebouncePending = false;
   }
 }
 

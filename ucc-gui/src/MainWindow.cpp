@@ -126,18 +126,24 @@ MainWindow::MainWindow( QWidget *parent )
     qDebug() << "  Limit" << (int)i << "=" << hardwareLimits[i];
   }
 
-  // Load initial data
+  // Load initial data — refresh() emits signals that populate the UI.
+  // Block the profile combo to avoid cascading loadProfileDetails calls.
+  m_profileCombo->blockSignals( true );
   m_profileManager->refresh();
-  
-  // Ensure profile combo is populated after refresh
+  m_profileCombo->blockSignals( false );
+
+  // Now populate the combo and load the active profile exactly once.
   onAllProfilesChanged();
-  
+
   // Initialize current fan profile to first available fan profile (if any)
   m_currentFanProfile = ( m_fanControlTab && m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
     ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
   
   // Update fan tab visibility now that profiles are loaded
   updateFanTabVisibility();
+
+  // Startup complete — allow hardware interaction from now on
+  m_initializing = false;
 
   // Start monitoring since dashboard is the first tab
   m_systemMonitor->setMonitoringActive( true );
@@ -207,10 +213,15 @@ void MainWindow::connectFanControlTab()
            this, &MainWindow::onCopyFanProfileClicked );
 
   // Bidirectional water-cooler enable checkbox sync
+  // FanControlTab toggle → D-Bus + sync dashboard checkbox
   connect( m_fanControlTab, &FanControlTab::waterCoolerEnableChanged,
            m_dashboardTab, &DashboardTab::setWaterCoolerEnabled );
+  // DashboardTab toggle → D-Bus call + sync fan tab checkbox
   connect( m_dashboardTab, &DashboardTab::waterCoolerEnableChanged,
-           m_fanControlTab, &FanControlTab::setWaterCoolerEnabled );
+           this, [this]( bool enabled ) {
+             m_fanControlTab->setWaterCoolerEnabled( enabled );
+             m_fanControlTab->sendWaterCoolerEnable( enabled );
+           } );
   connect( m_fanControlTab, &FanControlTab::removeRequested,
            this, &MainWindow::onRemoveFanProfileClicked );
 
@@ -736,6 +747,7 @@ void MainWindow::connectSignals()
 
   connect( m_profileManager.get(), &ProfileManager::activeProfileChanged,
            this, [this]() {
+    if ( m_initializing ) return;  // defer to onAllProfilesChanged after init
     qDebug() << "activeProfileChanged signal received, updating UI";
     loadProfileDetails( m_profileManager->activeProfile() );
     updateFanTabVisibility();
@@ -1050,56 +1062,27 @@ void MainWindow::onProfileIndexChanged( int index )
 
 void MainWindow::onAllProfilesChanged()
 {
-  FILE *log = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log, "\n\n!!! onAllProfilesChanged() CALLED !!!\n\n" );
-  fflush( log );
-  fclose( log );
-  
-  FILE *log2 = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log2, "onAllProfilesChanged called\n" );
   
   // First, ensure hardware limits are loaded
   std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  fprintf( log2, "Hardware limits in onAllProfilesChanged: %zu values\n", hardwareLimits.size() );
-  for ( size_t i = 0; i < hardwareLimits.size(); ++i )
-  {
-    fprintf( log2, "  Limit %zu = %d\n", i, hardwareLimits[i] );
-  }
-  fflush( log2 );
   
+  // Block combo signals to prevent cascading loadProfileDetails calls
+  // while we repopulate the list.
+  m_profileCombo->blockSignals( true );
   m_profileCombo->clear();
   m_profileCombo->addItems( m_profileManager->allProfiles() );
   m_profileCombo->setCurrentIndex( m_profileManager->activeProfileIndex() );
+  m_profileCombo->blockSignals( false );
   m_selectedProfileIndex = m_profileManager->activeProfileIndex();
 
   // Load the active profile details
   QString activeProfile = m_profileManager->activeProfile();
-  fprintf( log2, "Active profile: %s (index: %d)\n", activeProfile.toStdString().c_str(), 
-           m_profileManager->activeProfileIndex() );
-  fprintf( log2, "All profiles: " );
-  for ( const auto &p : m_profileManager->allProfiles() )
-  {
-    fprintf( log2, "%s, ", p.toStdString().c_str() );
-  }
-  fprintf( log2, "\n" );
-  fflush( log2 );
-  
   if ( !activeProfile.isEmpty() )
   {
-    fprintf( log2, "Calling loadProfileDetails for: %s\n", activeProfile.toStdString().c_str() );
-    fflush( log2 );
     loadProfileDetails( activeProfile );
   }
-  else
-  {
-    fprintf( log2, "ERROR: Active profile is empty!\n" );
-    fflush( log2 );
-  }
-
   // Custom profiles may have changed; reload fan profiles (adds custom entries to the fan combo)
   reloadFanProfiles();
-  fprintf( log2, "Reloaded fan profiles from ProfileManager\n" );
-  fflush( log2 );
 
   // If we were in the middle of saving, mark as complete
   if ( m_saveInProgress )
@@ -1113,9 +1096,6 @@ void MainWindow::onAllProfilesChanged()
   // Ensure buttons reflect current profile set (remove button availability etc.)
   updateButtonStates();
 
-  fprintf( log2, "Profiles updated. Count: %ld\n", (long)m_profileManager->allProfiles().size() );
-  fflush( log2 );
-  fclose( log2 );
 }
 
 void MainWindow::onActiveProfileIndexChanged()
@@ -1179,9 +1159,6 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   m_currentLoadedProfile = profileName;
   updateButtonStates();
   
-  FILE *log = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log, "\n=== loadProfileDetails called with: %s\n", profileName.toStdString().c_str() );
-  fflush( log );
   
   // Get the profile ID from the profile name
   QString profileId = m_profileManager->getProfileIdByName( profileName );
@@ -1189,13 +1166,8 @@ void MainWindow::loadProfileDetails( const QString &profileName )
 
   if ( profileId.isEmpty() )
   {
-    fprintf( log, "ERROR: Failed to find profile ID for %s\n", profileName.toStdString().c_str() );
-    fflush( log );
-    fclose( log );
     return;
   }
-  fprintf( log, "Profile ID found: %s\n", profileId.toStdString().c_str() );
-  fflush( log );
 
   // Get the profile JSON from ProfileManager using the profile ID
   QString profileJson = m_profileManager->getProfileDetails( profileId );
@@ -1203,34 +1175,17 @@ void MainWindow::loadProfileDetails( const QString &profileName )
 
   if ( profileJson.isEmpty() )
   {
-    fprintf( log, "ERROR: Failed to load profile data for %s\n", profileName.toStdString().c_str() );
-    fflush( log );
-    fclose( log );
     return;
   }
-  fprintf( log, "Profile JSON length: %ld\n", (long)profileJson.length() );
-  fprintf( log, "First 300 chars: %s\n", profileJson.left( 300 ).toStdString().c_str() );
-  fflush( log );
 
   QJsonDocument doc = QJsonDocument::fromJson( profileJson.toUtf8() );
 
   if ( !doc.isObject() )
   {
-    fprintf( log, "ERROR: Invalid profile JSON structure\n" );
-    fflush( log );
-    fclose( log );
     return;
   }
 
   QJsonObject obj = doc.object();
-  fprintf( log, "Profile object keys: " );
-  for ( const auto &key : obj.keys() )
-  {
-    fprintf( log, "%s ", key.toStdString().c_str() );
-  }
-  fprintf( log, "\n" );
-  fflush( log );
-
   // Block signals while updating to avoid triggering slot updates
   m_brightnessSlider->blockSignals( true );
   m_setBrightnessCheckBox->blockSignals( true );
@@ -1392,39 +1347,25 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   // Load ODM Power Limits (TDP) settings (nested in odmPowerLimits object)
   // First, set slider ranges from hardware limits
   std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  fprintf( log, "Hardware limits size: %zu\n", hardwareLimits.size() );
-  for ( size_t i = 0; i < hardwareLimits.size(); ++i )
-  {
-    fprintf( log, "  Hardware limit %zu = %d\n", i, hardwareLimits[i] );
-  }
-  fflush( log );
-  
-
   if ( hardwareLimits.size() > 0 )
   {
     m_odmPowerLimit1Slider->setMaximum( hardwareLimits[0] );
-    fprintf( log, "Set ODM Power Limit 1 max to: %d\n", hardwareLimits[0] );
   }
 
   if ( hardwareLimits.size() > 1 )
   {
     m_odmPowerLimit2Slider->setMaximum( hardwareLimits[1] );
-    fprintf( log, "Set ODM Power Limit 2 max to: %d\n", hardwareLimits[1] );
   }
 
   if ( hardwareLimits.size() > 2 )
   {
     m_odmPowerLimit3Slider->setMaximum( hardwareLimits[2] );
-    fprintf( log, "Set ODM Power Limit 3 max to: %d\n", hardwareLimits[2] );
   }
-  fflush( log );
   
   // Set GPU power max from hardware
   if ( auto gpuMax = m_profileManager->getClient()->getNVIDIAPowerCTRLMaxPowerLimit() )
   {
     m_gpuPowerSlider->setMaximum( *gpuMax );
-    fprintf( log, "Set GPU power max to: %d\n", *gpuMax );
-    fflush( log );
   }
   
   // Then, set slider values from profile
@@ -1432,21 +1373,17 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
   {
     QJsonObject odmLimitsObj = obj["odmPowerLimits"].toObject();
-    fprintf( log, "odmPowerLimits object found\n" );
-    fflush( log );
     
 
     if ( odmLimitsObj.contains( "tdpValues" ) && odmLimitsObj["tdpValues"].isArray() )
     {
       QJsonArray tdpArray = odmLimitsObj["tdpValues"].toArray();
-      fprintf( log, "tdpValues array found with size: %ld\n", (long)tdpArray.size() );
       
       // Load actual values from profile - these are the current settings
 
       if ( tdpArray.size() > 0 )
       {
         int val0 = tdpArray[0].toInt();
-        fprintf( log, "Setting ODM Power Limit 1 to: %d\n", val0 );
         m_odmPowerLimit1Slider->setValue( val0 );
       }
       
@@ -1454,7 +1391,6 @@ void MainWindow::loadProfileDetails( const QString &profileName )
       if ( tdpArray.size() > 1 )
       {
         int val1 = tdpArray[1].toInt();
-        fprintf( log, "Setting ODM Power Limit 2 to: %d\n", val1 );
         m_odmPowerLimit2Slider->setValue( val1 );
       }
       
@@ -1462,21 +1398,10 @@ void MainWindow::loadProfileDetails( const QString &profileName )
       if ( tdpArray.size() > 2 )
       {
         int val2 = tdpArray[2].toInt();
-        fprintf( log, "Setting ODM Power Limit 3 to: %d\n", val2 );
         m_odmPowerLimit3Slider->setValue( val2 );
       }
     }
-    else
-    {
-      fprintf( log, "WARNING: tdpValues not found or not an array in odmPowerLimits\n" );
-    }
   }
-  else
-  {
-    fprintf( log, "WARNING: odmPowerLimits object not found in profile JSON\n" );
-  }
-  fflush( log );
-
   // Load NVIDIA Power Control settings (nested in nvidiaPowerCTRLProfile object)
 
   if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj["nvidiaPowerCTRLProfile"].isObject() )
@@ -1640,30 +1565,30 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   onODMPowerLimit3Changed( m_odmPowerLimit3Slider->value() );
   onGpuPowerChanged( m_gpuPowerSlider->value() );
   
-  // Trigger fan profile change if one was loaded
+  // Trigger fan profile change if one was loaded (loads fan curve data for display only)
   if ( !loadedFanProfile.isEmpty() )
   {
     onFanProfileChanged( loadedFanProfile );
   }
   
-  // Trigger keyboard profile change if one was loaded
+  // Load keyboard profile for display only — block signals to prevent hardware writes
+  // (brightness slider → setGlobalBrightness → colorsChanged → setKeyboardBacklight)
   if ( !loadedKeyboardProfile.isEmpty() )
   {
+    if ( m_keyboardBrightnessSlider ) m_keyboardBrightnessSlider->blockSignals( true );
+    if ( m_keyboardVisualizer ) m_keyboardVisualizer->blockSignals( true );
+
     onKeyboardProfileChanged( loadedKeyboardProfile );
+
+    if ( m_keyboardBrightnessSlider ) m_keyboardBrightnessSlider->blockSignals( false );
+    if ( m_keyboardVisualizer ) m_keyboardVisualizer->blockSignals( false );
   }
   
-  fprintf( log, "Profile details loaded for: %s\n", profileName.toStdString().c_str() );
-  fprintf( log, "Final slider values: ODM1=%d, ODM2=%d, ODM3=%d\n", 
-           m_odmPowerLimit1Slider->value(), m_odmPowerLimit2Slider->value(), m_odmPowerLimit3Slider->value() );
-  fprintf( log, "Final slider maxima: ODM1_max=%d, ODM2_max=%d, ODM3_max=%d\n",
-           m_odmPowerLimit1Slider->maximum(), m_odmPowerLimit2Slider->maximum(), m_odmPowerLimit3Slider->maximum() );
-  fflush( log );
   
   // Enable/disable editing widgets based on whether profile is custom
   const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileName ) : false;
   updateProfileEditingWidgets( isCustom );
 
-  fclose( log );
 }
 
 void MainWindow::updateProfileEditingWidgets( bool isCustom )

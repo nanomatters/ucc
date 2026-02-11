@@ -421,7 +421,17 @@ void FanControlTab::setWaterCoolerEnabled( bool enabled )
     m_waterCoolerEnableCheckBox->setChecked( enabled );
     m_waterCoolerEnableCheckBox->blockSignals( false );
   }
-  // Forward to daemon
+  // NOTE: Do NOT call EnableWaterCooler on D-Bus here.
+  // This method is called during profile loading to update the UI checkbox.
+  // Calling EnableWaterCooler would restart BLE scanning (destroying any
+  // active connection) or disconnect the water cooler, causing the
+  // connected → disconnected → reconnecting oscillation on GUI startup.
+  // The D-Bus call only happens via onWaterCoolerEnableToggled() when the
+  // user explicitly toggles the checkbox.
+}
+
+void FanControlTab::sendWaterCoolerEnable( bool enabled )
+{
   if ( m_waterCoolerDbus )
     m_waterCoolerDbus->call( QStringLiteral( "EnableWaterCooler" ), enabled );
 }

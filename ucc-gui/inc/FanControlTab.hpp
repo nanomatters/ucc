@@ -73,6 +73,7 @@ public:
 
   /** Update the water-cooler enable checkbox without re-triggering signals. */
   void setWaterCoolerEnabled( bool enabled );
+  void sendWaterCoolerEnable( bool enabled );
   bool isWaterCoolerEnabled() const;
 
   QString currentFanProfile() const { return m_currentFanProfile; }

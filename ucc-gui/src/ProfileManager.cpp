@@ -33,14 +33,8 @@ ProfileManager::ProfileManager( QObject *parent )
   , m_client( std::make_unique< UccdClient >( this ) )
   , m_settings( std::make_unique< QSettings >( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat, this ) )
 {
-  FILE *log = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log, "ProfileManager constructor called\n" );
-  fprintf( log, "QSettings file path: %s\n", m_settings->fileName().toStdString().c_str() );
-  fflush( log );
   
   m_connected = m_client->isConnected();
-  fprintf( log, "Connected status: %d\n", m_connected );
-  fflush( log );
 
   // Load local custom fan profiles regardless of DBus connection
   loadCustomFanProfilesFromSettings();
@@ -52,8 +46,6 @@ ProfileManager::ProfileManager( QObject *parent )
   {
     // Fetch hardware power limits immediately
     m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
-    fprintf( log, "ProfileManager constructor: Fetched hardware limits, size: %zu\n", m_hardwarePowerLimits.size() );
-    fflush( log );
     
     // Connect to profile changed signal
     connect( m_client.get(), &UccdClient::profileChanged,
@@ -75,19 +67,7 @@ ProfileManager::ProfileManager( QObject *parent )
     // No need to set stateMap in uccd; UCC handles power state changes
     
     // DO NOT load profiles here - defer to after signals are connected
-    fprintf( log, "NOT calling updateProfiles() in constructor - will be called later\n" );
-    fflush( log );
   }
-  else
-  {
-    fprintf( log, "WARNING: Not connected to DBus!\n" );
-    fflush( log );
-  }
-
-  fprintf( log, "ProfileManager constructor done\n" );
-  fflush( log );
-  fclose( log );
-  
   emit connectedChanged();
 
 
@@ -101,9 +81,6 @@ void ProfileManager::refresh()
 
 void ProfileManager::updateProfiles()
 {
-  FILE *log = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log, "updateProfiles() called\n" );
-  fflush( log );
   
   // Fetch default profiles if not already loaded
   if (m_defaultProfilesData.isEmpty()) {
@@ -149,8 +126,6 @@ void ProfileManager::updateProfiles()
       if ( auto state = m_client->getPowerState() )
       {
         m_powerState = QString::fromStdString( *state );
-        fprintf( log, "Got power state from daemon: %s\n", m_powerState.toStdString().c_str() );
-        fflush( log );
         emit powerStateChanged();
       }
     } catch ( const std::exception &e ) {
@@ -172,9 +147,6 @@ void ProfileManager::updateProfiles()
           QJsonObject obj = doc.object();
           QString name = obj["name"].toString();
           QString id = obj["id"].toString();
-          fprintf( log, "Got active profile from daemon: name=%s id=%s\n",
-                   name.toStdString().c_str(), id.toStdString().c_str() );
-          fflush( log );
           if ( !name.isEmpty() )
           {
             m_activeProfile = name;
@@ -188,13 +160,8 @@ void ProfileManager::updateProfiles()
   }
 
   // Update combined list and index
-  fprintf( log, "Calling updateAllProfiles()\n" );
-  fflush( log );
   updateAllProfiles();
   updateActiveProfileIndex();
-  fprintf( log, "updateProfiles() done, activeProfile=%s\n", m_activeProfile.toStdString().c_str() );
-  fflush( log );
-  fclose( log );
 
 }
 
@@ -522,30 +489,17 @@ void ProfileManager::onPowerStateChanged( const QString &state )
   m_powerState = state;
   emit powerStateChanged();
 
-  // Resolve mapped profile and apply it
+  // Resolve the mapped profile name for display purposes only.
+  // The daemon (uccd) is responsible for applying the correct profile
+  // when the power state changes — the GUI should not override that.
   QString desiredProfile = resolveStateMapToProfileName( state );
   if ( desiredProfile.isEmpty() )
   {
-    qWarning() << "No profile mapped for state:" << state;
+    qDebug() << "No profile mapped for state:" << state;
     return;
   }
 
-  qDebug() << "Applying profile" << desiredProfile << "for power state" << state;
-  QString profileJson = getProfileDetails( desiredProfile );
-  if ( profileJson.isEmpty() )
-  {
-    qWarning() << "Profile not found for:" << desiredProfile;
-    return;
-  }
-
-  try {
-    m_client->applyProfile( profileJson.toStdString() );
-  } catch (const std::exception &e) {
-    qWarning() << "Failed to apply profile:" << e.what();
-    return;
-  }
-
-  // Update active profile name and notify
+  // Update active profile display if it changed
   if ( m_activeProfile != desiredProfile ) {
     m_activeProfile = desiredProfile;
     emit activeProfileChanged();
@@ -556,68 +510,27 @@ void ProfileManager::onPowerStateChanged( const QString &state )
 
 void ProfileManager::updateAllProfiles()
 {
-  FILE *log = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log, "updateAllProfiles() called\n" );
-  fprintf( log, "  m_defaultProfiles count: %ld\n", (long)m_defaultProfiles.size() );
-  fprintf( log, "  m_customProfiles count: %ld\n", (long)m_customProfiles.size() );
-  fprintf( log, "  m_allProfiles count (before): %ld\n", (long)m_allProfiles.size() );
-  fflush( log );
   
   QStringList newAllProfiles;
   newAllProfiles.append( m_defaultProfiles );
   newAllProfiles.append( m_customProfiles );
-
-  fprintf( log, "  newAllProfiles count: %ld\n", (long)newAllProfiles.size() );
-  for ( int i = 0; i < newAllProfiles.size(); ++i )
-  {
-    fprintf( log, "    Profile %d: %s\n", i, newAllProfiles[i].toStdString().c_str() );
-  }
-  fflush( log );
-
   if ( m_allProfiles != newAllProfiles )
   {
-    fprintf( log, "  Profiles changed! Emitting signal.\n" );
-    fflush( log );
     m_allProfiles = newAllProfiles;
-    fprintf( log, "  About to emit allProfilesChanged()\n" );
-    fflush( log );
     emit allProfilesChanged();
-    fprintf( log, "  allProfilesChanged() emitted\n" );
-    fflush( log );
   }
-  else
-  {
-    fprintf( log, "  Profiles did NOT change. No signal emitted.\n" );
-    fflush( log );
-  }
-  fclose( log );
 }
 
 void ProfileManager::updateActiveProfileIndex()
 {
-  FILE *log = fopen( "/tmp/ucc-debug.log", "a" );
-  fprintf( log, "updateActiveProfileIndex() called\n" );
-  fprintf( log, "  m_activeProfile: %s\n", m_activeProfile.toStdString().c_str() );
-  fprintf( log, "  m_activeProfileIndex (before): %d\n", m_activeProfileIndex );
-  fflush( log );
   
   int newIndex = m_allProfiles.indexOf( m_activeProfile );
-  fprintf( log, "  newIndex: %d\n", newIndex );
-  fflush( log );
 
   if ( m_activeProfileIndex != newIndex )
   {
-    fprintf( log, "  Active profile index changed! Emitting signal.\n" );
-    fflush( log );
     m_activeProfileIndex = newIndex;
     emit activeProfileIndexChanged();
   }
-  else
-  {
-    fprintf( log, "  Active profile index did NOT change.\n" );
-    fflush( log );
-  }
-  fclose( log );
 }
 
 void ProfileManager::setActiveProfileByIndex( int index )

@@ -472,6 +472,14 @@ private:
   bool m_previousWaterCoolerConnected;
   std::atomic< int32_t > m_waterCoolerLedMode{ 0 };  // Tracks the GUI-requested LED mode (may be Temperature)
 
+  // Water cooler debounce – avoids reacting to brief BLE connect/disconnect
+  // glitches that cause rapid power-state oscillation.
+  bool m_wcDebouncePending = false;
+  bool m_wcDebouncedTarget = false;                           // the state we are debouncing towards
+  std::chrono::steady_clock::time_point m_wcDebounceStart{};  // when the pending change was first seen
+  static constexpr int WC_CONNECT_DEBOUNCE_S    = 3;          // seconds stable before accepting "connected"
+  static constexpr int WC_DISCONNECT_DEBOUNCE_S = 10;         // seconds stable before accepting "disconnected"
+
   void setupGpuDataCallback();
   void updateFanData();
   void loadProfiles();

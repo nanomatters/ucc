@@ -213,6 +213,9 @@ void MainWindow::onKeyboardBrightnessChanged( int value )
 {
   m_keyboardBrightnessValueLabel->setText( QString::number( value ) );
 
+  if ( m_initializing )
+    return;
+
   // Update visualizer if it exists
   if ( m_keyboardVisualizer )
     m_keyboardVisualizer->setGlobalBrightness( value );
@@ -274,6 +277,9 @@ void MainWindow::onKeyboardColorClicked()
 
 void MainWindow::onKeyboardVisualizerColorsChanged()
 {
+  if ( m_initializing )
+    return;
+
   if ( not m_keyboardVisualizer )
     return;
 

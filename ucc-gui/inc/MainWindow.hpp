@@ -230,6 +230,7 @@ namespace ucc
     bool m_loadedBatteryAssignment = false;
     bool m_loadedWaterCoolerAssignment = false;
     bool m_saveInProgress = false;
+    bool m_initializing = true;  // true during constructor, prevents hardware writes
 
     // Device capability flags (queried from daemon at startup)
     bool m_waterCoolerSupported = false;

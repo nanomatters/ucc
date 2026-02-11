@@ -124,6 +124,16 @@
 			"label": "rebuild-uccd",
 			"type": "shell",
 			"command": "ninja -j4 -C /opt/devel/git/ucc/build"
+		},
+		{
+			"label": "rebuild-all",
+			"type": "shell",
+			"command": "cd /opt/devel/git/ucc/build && ninja -j4"
+		},
+		{
+			"label": "rebuild-gui",
+			"type": "shell",
+			"command": "cd /opt/devel/git/ucc/build && ninja -j4"
 		}
 	]
 }
