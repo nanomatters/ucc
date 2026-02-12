@@ -1095,7 +1095,7 @@ void MainWindow::onAllProfilesChanged()
 
   // Ensure buttons reflect current profile set (remove button availability etc.)
   updateButtonStates();
-
+  m_saveButton->setEnabled( true );
 }
 
 void MainWindow::onActiveProfileIndexChanged()

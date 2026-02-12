@@ -15,7 +15,13 @@
 
 #pragma once
 
-#include <sdbus-c++/sdbus-c++.h>
+#include <QObject>
+#include <QDBusAbstractAdaptor>
+#include <QDBusArgument>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusError>
+#include <QVariantMap>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -38,7 +44,6 @@
 #include "AutosaveManager.hpp"
 #include "TccSettings.hpp"
 #include "tuxedo_io_lib/tuxedo_io_api.hh"
-#include <atomic>
 
 // Forward declarations
 class HardwareMonitorWorker;
@@ -205,113 +210,117 @@ public:
 /**
  * @brief TCC DBus Interface Adaptor
  *
- * Implements the com.uniwill.uccd DBus interface.
+ * Implements the com.uniwill.uccd DBus interface using Qt's DBus adaptor framework.
  * Handles all method calls from DBus clients and provides access to daemon data.
  */
-class UccDBusInterfaceAdaptor
+class UccDBusInterfaceAdaptor : public QDBusAbstractAdaptor
 {
+  Q_OBJECT
+  Q_CLASSINFO( "D-Bus Interface", "com.uniwill.uccd" )
+
 public:
   static constexpr const char* INTERFACE_NAME = "com.uniwill.uccd";
 
   /**
    * @brief Constructor
-   * @param object DBus object interface
+   * @param parent Parent QObject (the service object registered on D-Bus)
    * @param data Shared data structure (includes mutex)
    * @param service Reference to UccDBusService for profile operations
    */
-  explicit UccDBusInterfaceAdaptor( sdbus::IObject &object,
+  explicit UccDBusInterfaceAdaptor( QObject *parent,
                                     UccDBusData &data,
                                     UccDBusService *service = nullptr );
 
-  ~UccDBusInterfaceAdaptor() = default;
+  ~UccDBusInterfaceAdaptor() override = default;
 
+public slots:
   // device and system information
-  std::string GetDeviceName();
-  std::string GetDisplayModesJSON();
+  QString GetDeviceName();
+  QString GetDisplayModesJSON();
   bool GetIsX11();
   bool TuxedoWmiAvailable();
   bool FanHwmonAvailable();
-  std::string UccdVersion();
+  QString UccdVersion();
 
   // fan data methods
-  std::map< std::string, std::map< std::string, sdbus::Variant > > GetFanDataCPU();
-  std::map< std::string, std::map< std::string, sdbus::Variant > > GetFanDataGPU1();
-  std::map< std::string, std::map< std::string, sdbus::Variant > > GetFanDataGPU2();
+  QVariantMap GetFanDataCPU();
+  QVariantMap GetFanDataGPU1();
+  QVariantMap GetFanDataGPU2();
 
   // webcam and display methods
   bool WebcamSWAvailable();
   bool GetWebcamSWStatus();
   bool GetForceYUV420OutputSwitchAvailable();
-  int32_t GetDisplayBrightness();
-  bool SetDisplayBrightness( int32_t brightness );
-  bool SetDisplayRefreshRate( const std::string &display, int refreshRate );
+  int GetDisplayBrightness();
+  bool SetDisplayBrightness( int brightness );
+  bool SetDisplayRefreshRate( const QString &display, int refreshRate );
 
   // gpu information methods
-  std::string GetDGpuInfoValuesJSON();
-  std::string GetIGpuInfoValuesJSON();
-  std::string GetCpuPowerValuesJSON();
+  QString GetDGpuInfoValuesJSON();
+  QString GetIGpuInfoValuesJSON();
+  QString GetCpuPowerValuesJSON();
 
   // graphics methods
-  std::string GetPrimeState();
+  QString GetPrimeState();
   bool ConsumeModeReapplyPending();
 
   // profile methods
-  std::string GetActiveProfileJSON();
-  std::string GetPowerState();
-  bool SetTempProfile( const std::string &profileName );
-  bool SetTempProfileById( const std::string &id );
-  bool SetActiveProfile( const std::string &id );
-  bool ApplyProfile( const std::string &profileJSON );
-  std::string GetProfilesJSON();
-  std::string GetCustomProfilesJSON();
+  QString GetActiveProfileJSON();
+  QString GetPowerState();
+  bool SetTempProfile( const QString &profileName );
+  bool SetTempProfileById( const QString &id );
+  bool SetActiveProfile( const QString &id );
+  bool ApplyProfile( const QString &profileJSON );
+  QString GetProfilesJSON();
+  QString GetCustomProfilesJSON();
   // Fan profile get/set for editable (custom) profiles only
-  bool SetFanProfileCPU( const std::string &pointsJSON );
-  bool SetFanProfileDGPU( const std::string &pointsJSON );
-  bool ApplyFanProfiles( const std::string &fanProfilesJSON );
+  bool SetFanProfileCPU( const QString &pointsJSON );
+  bool SetFanProfileDGPU( const QString &pointsJSON );
+  bool ApplyFanProfiles( const QString &fanProfilesJSON );
   bool RevertFanProfiles();
-  std::string GetDefaultProfilesJSON();
-  std::string GetCpuFrequencyLimitsJSON();
-  std::string GetDefaultValuesProfileJSON();
-  bool AddCustomProfile( const std::string &profileJSON );
-  bool SaveCustomProfile( const std::string &profileJSON );
-  bool DeleteCustomProfile( const std::string &profileId );
-  bool UpdateCustomProfile( const std::string &profileJSON );
-  std::string GetFanProfile( const std::string &name );
-  std::string GetFanProfileNames();
-  bool SetFanProfile( const std::string &name, const std::string &json );
+  QString GetDefaultProfilesJSON();
+  QString GetCpuFrequencyLimitsJSON();
+  QString GetDefaultValuesProfileJSON();
+  bool AddCustomProfile( const QString &profileJSON );
+  bool SaveCustomProfile( const QString &profileJSON );
+  bool DeleteCustomProfile( const QString &profileId );
+  bool UpdateCustomProfile( const QString &profileJSON );
+  QString GetFanProfile( const QString &name );
+  QString GetFanProfileNames();
+  bool SetFanProfile( const QString &name, const QString &json );
 
   // settings methods
-  std::string GetSettingsJSON();
-  bool SetStateMap( const std::string &state, const std::string &profileId );
+  QString GetSettingsJSON();
+  bool SetStateMap( const QString &state, const QString &profileId );
 
   // odm methods
-  std::vector< std::string > ODMProfilesAvailable();
-  std::string ODMPowerLimitsJSON();
+  QStringList ODMProfilesAvailable();
+  QString ODMPowerLimitsJSON();
 
   // keyboard backlight methods
-  std::string GetKeyboardBacklightCapabilitiesJSON();
-  std::string GetKeyboardBacklightStatesJSON();
-  bool SetKeyboardBacklightStatesJSON( const std::string &keyboardBacklightStatesJSON );
+  QString GetKeyboardBacklightCapabilitiesJSON();
+  QString GetKeyboardBacklightStatesJSON();
+  bool SetKeyboardBacklightStatesJSON( const QString &keyboardBacklightStatesJSON );
 
   // fan control methods
-  int32_t GetFansMinSpeed();
+  int GetFansMinSpeed();
   bool GetFansOffAvailable();
 
   // charging methods
-  std::string GetChargingProfilesAvailable();
-  std::string GetCurrentChargingProfile();
-  bool SetChargingProfile( const std::string &profileDescriptor );
-  std::string GetChargingPrioritiesAvailable();
-  std::string GetCurrentChargingPriority();
-  bool SetChargingPriority( const std::string &priorityDescriptor );
-  std::string GetChargeStartAvailableThresholds();
-  std::string GetChargeEndAvailableThresholds();
-  int32_t GetChargeStartThreshold();
-  int32_t GetChargeEndThreshold();
-  bool SetChargeStartThreshold( int32_t value );
-  bool SetChargeEndThreshold( int32_t value );
-  std::string GetChargeType();
-  bool SetChargeType( const std::string &type );
+  QString GetChargingProfilesAvailable();
+  QString GetCurrentChargingProfile();
+  bool SetChargingProfile( const QString &profileDescriptor );
+  QString GetChargingPrioritiesAvailable();
+  QString GetCurrentChargingPriority();
+  bool SetChargingPriority( const QString &priorityDescriptor );
+  QString GetChargeStartAvailableThresholds();
+  QString GetChargeEndAvailableThresholds();
+  int GetChargeStartThreshold();
+  int GetChargeEndThreshold();
+  bool SetChargeStartThreshold( int value );
+  bool SetChargeEndThreshold( int value );
+  QString GetChargeType();
+  bool SetChargeType( const QString &type );
 
   // fn lock methods
   bool GetFnLockSupported();
@@ -324,20 +333,20 @@ public:
   void SetDGpuD0Metrics( bool status );
 
   // nvidia power control methods
-  int32_t GetNVIDIAPowerCTRLDefaultPowerLimit();
-  int32_t GetNVIDIAPowerCTRLMaxPowerLimit();
+  int GetNVIDIAPowerCTRLDefaultPowerLimit();
+  int GetNVIDIAPowerCTRLMaxPowerLimit();
   bool GetNVIDIAPowerCTRLAvailable();
-  std::string GetAvailableGovernors();
+  QString GetAvailableGovernors();
 
   // water cooler methods
   bool GetWaterCoolerAvailable();
   bool GetWaterCoolerConnected();
-  int32_t GetWaterCoolerFanSpeed();
-  int32_t GetWaterCoolerPumpLevel();
+  int GetWaterCoolerFanSpeed();
+  int GetWaterCoolerPumpLevel();
   bool EnableWaterCooler( bool enable );
-  bool SetWaterCoolerFanSpeed( int32_t dutyCyclePercent );
-  bool SetWaterCoolerPumpVoltage( int32_t voltage );
-  bool SetWaterCoolerLEDColor( int32_t red, int32_t green, int32_t blue, int32_t mode );
+  bool SetWaterCoolerFanSpeed( int dutyCyclePercent );
+  bool SetWaterCoolerPumpVoltage( int voltage );
+  bool SetWaterCoolerLEDColor( int red, int green, int blue, int mode );
   bool TurnOffWaterCoolerLED();
   bool TurnOffWaterCoolerFan();
   bool TurnOffWaterCoolerPump();
@@ -347,24 +356,29 @@ public:
   bool GetWaterCoolerSupported();
   bool GetCTGPAdjustmentSupported();
 
-  // signal emitters
+signals:
+  void ProfileChanged( const QString &profileId );
+  void ModeReapplyPendingChanged( bool pending );
+  void PowerStateChanged( const QString &state );
+  void WaterCoolerStatusChanged( const QString &status );
+
+public:
+  // signal emitters (call these from service code)
   void emitModeReapplyPendingChanged( bool pending );
   void emitProfileChanged( const std::string &profileId );
+  void emitPowerStateChanged( const std::string &state );
+  void emitWaterCoolerStatusChanged( const std::string &status );
 
   // allow UccDBusService to access timeout handling
   friend class UccDBusService;
 
-  // Required for manual vtable registration in sdbus-c++ 2.x
-  void registerAdaptor();
-
 private:
-  sdbus::IObject &m_object;
   UccDBusData &m_data;
   UccDBusService *m_service;
   std::chrono::steady_clock::time_point m_lastDataCollectionAccess;
 
   void resetDataCollectionTimeout();
-  std::map< std::string, std::map< std::string, sdbus::Variant > > exportFanData( const FanData &fanData );
+  QVariantMap exportFanData( const FanData &fanData );
 };
 
 /**
@@ -439,6 +453,8 @@ public:
   friend class UccDBusInterfaceAdaptor;
 
 public:
+  /// Call from the main thread (before start()) to register the D-Bus service.
+  bool initDBus();
   void onStart() override;
 
 protected:
@@ -449,8 +465,7 @@ private:
   static constexpr const char* INTERFACE_NAME = "com.uniwill.uccd";
   UccDBusData m_dbusData;
   TuxedoIOAPI m_io;
-  std::unique_ptr< sdbus::IConnection > m_connection;
-  std::unique_ptr< sdbus::IObject > m_object;
+  std::unique_ptr< QObject > m_dbusObject;  // The QObject registered on the D-Bus bus
   std::unique_ptr< UccDBusInterfaceAdaptor > m_adaptor;
   bool m_started;
 
@@ -491,6 +506,7 @@ private:
   void initializeDisplayModes();
   void serializeProfilesJSON();
   void applyProfileForCurrentState();
+  void applyFanAndPumpSettings( const UccProfile &profile );
   void fillDeviceSpecificDefaults( std::vector< UccProfile > &profiles );
   std::optional< UniwillDeviceID > identifyDevice();
   void computeDeviceCapabilities();

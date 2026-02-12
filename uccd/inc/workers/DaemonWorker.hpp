@@ -113,11 +113,14 @@ public:
   /**
    * @brief Virtual destructor
    *
-   * Automatically stops the timer thread and calls onExit().
-   * The QThread will be joined automatically.
+   * Automatically stops the timer thread.
+   * Note: onExit() is NOT called when the thread stops due to destruction,
+   * because the derived class vtable is no longer valid at this point.
+   * Derived classes that need cleanup should call stop() in their own destructor.
    */
   virtual ~DaemonWorker() noexcept
   {
+    m_destroying = true;
     stop();
   }
 
@@ -192,7 +195,8 @@ protected:
       }
 
       ucc::wDebug("[DEBUG] DaemonWorker: exiting %s", typeid(*this).name());
-      onExit();
+      if ( !m_destroying )
+        onExit();
     }
     catch ( const std::exception & )
     {
@@ -226,4 +230,5 @@ protected:
 private:
   const std::chrono::milliseconds m_timeout;
   std::atomic< bool > m_isRunning;
+  std::atomic< bool > m_destroying { false };
 };

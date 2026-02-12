@@ -176,7 +176,7 @@ private slots:
 
   // Thread-safe invokable implementations (for cross-thread dispatch)
   Q_INVOKABLE bool setFanSpeedImpl( int dutyCyclePercent );
-  Q_INVOKABLE bool setPumpVoltageImpl( ucc::PumpVoltage voltage );
+  Q_INVOKABLE bool setPumpVoltageImpl( int voltage );
   Q_INVOKABLE bool writeCommandImpl( const QByteArray& data, bool withResponse );
 
 private:
@@ -201,6 +201,7 @@ private:
   // BLE helpers
   bool setupBleController( const QBluetoothDeviceInfo& deviceInfo );
   void cleanupBleController();
+  void throttledBleWrite( const QByteArray& data );
   bool writeCommand( const QByteArray& data );
   bool writeReceive( const QByteArray& data );
   bool turnOffDevice( uint8_t cmd );
@@ -271,4 +272,8 @@ private:
 
   bool m_waitingForResponse = false;
   QByteArray m_pendingData;
+
+  // BLE write throttle – minimum gap between successive UART writes
+  static constexpr int BLE_WRITE_GAP_MS = 80;
+  std::chrono::steady_clock::time_point m_lastBleWrite{};
 };

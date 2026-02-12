@@ -228,6 +228,12 @@ int run_daemon()
 
     // Initialize DBus service
     UccDBusService dbusService;
+    if ( !dbusService.initDBus() )
+    {
+      syslog( LOG_ERR, "Failed to initialize D-Bus service" );
+      cleanup_syslog();
+      return 1;
+    }
     dbusService.start();
     syslog( LOG_INFO, "DBus service initialized" );
 

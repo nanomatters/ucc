@@ -14,6 +14,7 @@
  */
 
 #include "SystemMonitor.hpp"
+#include "CommonTypes.hpp"
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -263,11 +264,11 @@ void SystemMonitor::updateMetrics()
     QString wcPump = "--";
     if ( auto level = m_client->getWaterCoolerPumpLevel() )
     {
-      wcPump = *level == 2 ? "Low" :
-               *level == 3 ? "Med" :
-               *level == 0 ? "High" :
-               *level == 1 ? "Max" :
-               *level == 4 ? "Off" : "--";
+      wcPump = *level == static_cast< int >( ucc::PumpVoltage::V7 )  ? "Low" :
+               *level == static_cast< int >( ucc::PumpVoltage::V8 )  ? "Med" :
+               *level == static_cast< int >( ucc::PumpVoltage::V11 ) ? "High" :
+               *level == static_cast< int >( ucc::PumpVoltage::V12 ) ? "Max" :
+               *level == static_cast< int >( ucc::PumpVoltage::Off ) ? "Off" : "--";
     }
     else
     {

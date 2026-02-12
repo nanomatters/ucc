@@ -337,6 +337,18 @@ void LCTWaterCoolerWorker::onConnectionReady()
   setPumpVoltage( static_cast< int >( ucc::PumpVoltage::Off ) );
   setFanSpeed( INITIAL_FAN_SPEED_PERCENT );
   syslog( LOG_INFO, "LCTWaterCoolerWorker: sent initial pump/fan setup commands" );
+
+  // Reapply last known LED settings — hardware starts with LED off after BLE connect.
+  // Exchange the cached values with -1 so the next setLEDColor won't skip as "same".
+  const int savedR    = m_lastLedR.exchange( -1 );
+  const int savedG    = m_lastLedG.exchange( -1 );
+  const int savedB    = m_lastLedB.exchange( -1 );
+  const int savedMode = m_lastLedMode.exchange( -1 );
+  if ( savedR >= 0 && savedG >= 0 && savedB >= 0 && savedMode >= 0 )
+  {
+    setLEDColor( savedR, savedG, savedB, savedMode );
+    syslog( LOG_INFO, "LCTWaterCoolerWorker: reapplied LED R=%d G=%d B=%d mode=%d", savedR, savedG, savedB, savedMode );
+  }
 }
 
 // ── BLE signal handlers ─────────────────────────────────────────────
@@ -384,6 +396,8 @@ void LCTWaterCoolerWorker::onBleConnected()
 void LCTWaterCoolerWorker::onBleDisconnected()
 {
   m_isConnected = false;
+  m_lastPumpVoltage.store( -1 );
+  m_lastFanSpeed.store( -1 );
   m_connectedModel = ucc::LCTDeviceModel::LCT21001; // Reset to default
   std::cout << "[WC-BLE] Disconnected from device (state was "
             << static_cast< int >( m_state ) << ")" << std::endl;
@@ -503,6 +517,8 @@ void LCTWaterCoolerWorker::onBleError( QLowEnergyController::Error error )
   syslog( LOG_ERR, "LCTWaterCoolerWorker: BLE error %d (state %d)",
           static_cast< int >( error ), static_cast< int >( m_state ) );
   m_isConnected = false;
+  m_lastPumpVoltage.store( -1 );
+  m_lastFanSpeed.store( -1 );
 
   // Immediately transition state machine on connection-breaking errors
   // instead of waiting for a timeout in the state handler.
@@ -546,20 +562,19 @@ bool LCTWaterCoolerWorker::setPumpVoltage( int voltage )
 {
   const auto pv = static_cast< ucc::PumpVoltage >( voltage );
 
-  if ( not m_isConnected.load() or getLastPumpVoltage() == voltage )
+  if ( not m_isConnected.load() or getLastPumpVoltage() == voltage || pv == ucc::PumpVoltage::V12 )
     return false;
-
-  std::cout << "LCTWaterCoolerWorker: setting pump voltage to " << voltage << std::endl;
 
   if ( pv == ucc::PumpVoltage::Off )
     return turnOffPump();
 
+  const int pvInt = static_cast< int >( pv );
   bool result = false;
   if ( QThread::currentThread() == thread() )
-    result = setPumpVoltageImpl( pv );
+    result = setPumpVoltageImpl( pvInt );
   else
     QMetaObject::invokeMethod( this, "setPumpVoltageImpl", Qt::BlockingQueuedConnection, Q_RETURN_ARG( bool, result ),
-                               Q_ARG( ucc::PumpVoltage, pv ) );
+                               Q_ARG( int, pvInt ) );
 
   if ( result )
     m_lastPumpVoltage.store( voltage );
@@ -720,13 +735,15 @@ bool LCTWaterCoolerWorker::setFanSpeedImpl( int dutyCyclePercent )
   data.append( static_cast< char >( 0x00 ) );
   data.append( static_cast< char >( 0xef ) );
 
-  m_uartService->writeCharacteristic( m_txCharacteristic, data, QLowEnergyService::WriteWithoutResponse );
+  throttledBleWrite( data );
   return true;
 }
 
-bool LCTWaterCoolerWorker::setPumpVoltageImpl( ucc::PumpVoltage voltage )
+bool LCTWaterCoolerWorker::setPumpVoltageImpl( int voltageInt )
 {
-  if ( not m_isConnected.load() )
+  const auto voltage = static_cast< ucc::PumpVoltage >( voltageInt );
+
+  if ( not m_isConnected.load() || voltage == ucc::PumpVoltage::V12 )
     return false;
 
   if ( not m_uartService or not m_txCharacteristic.isValid() )
@@ -748,17 +765,27 @@ bool LCTWaterCoolerWorker::setPumpVoltageImpl( ucc::PumpVoltage voltage )
   data.append( static_cast< char >( 0x00 ) );
   data.append( static_cast< char >( 0xef ) );
 
-  m_uartService->writeCharacteristic( m_txCharacteristic, data, QLowEnergyService::WriteWithResponse );
+  throttledBleWrite( data );
   return true;
+}
+
+void LCTWaterCoolerWorker::throttledBleWrite( const QByteArray& data )
+{
+  const auto now = std::chrono::steady_clock::now();
+  const auto elapsed = std::chrono::duration_cast< std::chrono::milliseconds >( now - m_lastBleWrite ).count();
+  if ( elapsed < BLE_WRITE_GAP_MS )
+    QThread::msleep( BLE_WRITE_GAP_MS - static_cast< int >( elapsed ) );
+  m_uartService->writeCharacteristic( m_txCharacteristic, data, QLowEnergyService::WriteWithoutResponse );
+  m_lastBleWrite = std::chrono::steady_clock::now();
 }
 
 bool LCTWaterCoolerWorker::writeCommandImpl( const QByteArray& data, bool withResponse )
 {
+  Q_UNUSED( withResponse )
   if ( not m_isConnected.load() or not m_txCharacteristic.isValid() or not m_uartService )
     return false;
 
-  const auto mode = withResponse ? QLowEnergyService::WriteWithResponse : QLowEnergyService::WriteWithoutResponse;
-  m_uartService->writeCharacteristic( m_txCharacteristic, data, mode );
+  throttledBleWrite( data );
   return true;
 }
 

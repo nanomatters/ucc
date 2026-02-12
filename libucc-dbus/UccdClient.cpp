@@ -809,40 +809,39 @@ std::optional< int > readFanDataValue( QDBusInterface *iface, const QString &met
     return std::nullopt;
   }
 
-  const QDBusArgument arg = reply.arguments().at( 0 ).value< QDBusArgument >();
-  arg.beginMap();
-  while ( !arg.atEnd() )
-  {
-    arg.beginMapEntry();
-    QString entryKey;
-    QVariantMap innerMap;
-    arg >> entryKey;
-    arg >> innerMap;
-    arg.endMapEntry();
+  // The adaptor returns QVariantMap (D-Bus a{sv}).
+  // Each value in the outer map is a variant wrapping another a{sv}.
+  // Demarshall the outer map first.
+  QVariantMap outerMap = qdbus_cast< QVariantMap >( reply.arguments().at( 0 ).value< QDBusArgument >() );
+  if ( !outerMap.contains( key ) )
+    return std::nullopt;
 
-    if ( entryKey == key )
+  // The inner value is a variant containing a QDBusArgument for the nested a{sv}.
+  QVariant innerVariant = outerMap.value( key );
+  QVariantMap innerMap;
+  if ( innerVariant.canConvert< QDBusArgument >() )
+    innerMap = qdbus_cast< QVariantMap >( innerVariant.value< QDBusArgument >() );
+  else
+    innerMap = innerVariant.toMap();
+
+  if ( !innerMap.contains( "data" ) )
+    return std::nullopt;
+
+  int value = innerMap.value( "data" ).toInt();
+
+  // Treat entries with a zero timestamp as missing data
+  if ( innerMap.contains( "timestamp" ) )
+  {
+    qint64 ts = innerMap.value( "timestamp" ).toLongLong();
+    if ( ts == 0 )
     {
-      if ( innerMap.contains( "data" ) )
-      {
-        int value = innerMap.value( "data" ).toInt();        // Treat entries with a zero timestamp as missing data (timestamp==0 means not available)
-        if ( innerMap.contains( "timestamp" ) )
-        {
-          qint64 ts = innerMap.value( "timestamp" ).toLongLong();
-          if ( ts == 0 )
-          {
-            qDebug() << "[UccdClient] readFanDataValue: key" << key << "has timestamp 0 - treating as missing";
-            return std::nullopt;
-          }
-        }
-        if ( value >= 0 )
-        {
-          return value;
-        }
-      }
+      qDebug() << "[UccdClient] readFanDataValue: key" << key << "has timestamp 0 - treating as missing";
       return std::nullopt;
     }
   }
-  arg.endMap();
+
+  if ( value >= 0 )
+    return value;
 
   return std::nullopt;
 }

@@ -276,115 +276,20 @@ static std::string buildSettingsJSON( const std::string &keyboardBacklightStates
 
 // UccDBusInterfaceAdaptor implementation
 
-UccDBusInterfaceAdaptor::UccDBusInterfaceAdaptor( sdbus::IObject &object,
+UccDBusInterfaceAdaptor::UccDBusInterfaceAdaptor( QObject *parent,
                                                   UccDBusData &data,
                                                   UccDBusService *service )
-  : m_object( object ),
+  : QDBusAbstractAdaptor( parent ),
     m_data( data ),
     m_service( service ),
     m_lastDataCollectionAccess( std::chrono::steady_clock::now() )
 {
-  registerAdaptor();
-}
-
-void UccDBusInterfaceAdaptor::registerAdaptor()
-{
-  using namespace sdbus;
-  
-  // register all methods directly on the object for sdbus-c++ 2.x
-  m_object.addVTable(
-    registerMethod("GetDeviceName").implementedAs([this](){ return this->GetDeviceName(); }),
-    registerMethod("GetDisplayModesJSON").implementedAs([this](){ return this->GetDisplayModesJSON(); }),
-    registerMethod("GetIsX11").implementedAs([this](){ return this->GetIsX11(); }),
-    registerMethod("TuxedoWmiAvailable").implementedAs([this](){ return this->TuxedoWmiAvailable(); }),
-    registerMethod("FanHwmonAvailable").implementedAs([this](){ return this->FanHwmonAvailable(); }),
-    registerMethod("UccdVersion").implementedAs([this](){ return this->UccdVersion(); }),
-    registerMethod("GetFanDataCPU").implementedAs([this](){ return this->GetFanDataCPU(); }),
-    registerMethod("GetFanDataGPU1").implementedAs([this](){ return this->GetFanDataGPU1(); }),
-    registerMethod("GetFanDataGPU2").implementedAs([this](){ return this->GetFanDataGPU2(); }),
-    registerMethod("WebcamSWAvailable").implementedAs([this](){ return this->WebcamSWAvailable(); }),
-    registerMethod("GetWebcamSWStatus").implementedAs([this](){ return this->GetWebcamSWStatus(); }),
-    registerMethod("GetForceYUV420OutputSwitchAvailable").implementedAs([this](){ return this->GetForceYUV420OutputSwitchAvailable(); }),
-    registerMethod("SetDisplayRefreshRate").implementedAs([this](const std::string &display, int refreshRate){ return this->SetDisplayRefreshRate(display, refreshRate); }),
-    registerMethod("GetDisplayBrightness").implementedAs([this](){ return this->GetDisplayBrightness(); }),
-    registerMethod("SetDisplayBrightness").implementedAs([this](int32_t brightness){ return this->SetDisplayBrightness(brightness); }),
-    registerMethod("GetDGpuInfoValuesJSON").implementedAs([this](){ return this->GetDGpuInfoValuesJSON(); }),
-    registerMethod("GetIGpuInfoValuesJSON").implementedAs([this](){ return this->GetIGpuInfoValuesJSON(); }),
-    registerMethod("GetCpuPowerValuesJSON").implementedAs([this](){ return this->GetCpuPowerValuesJSON(); }),
-    registerMethod("GetPrimeState").implementedAs([this](){ return this->GetPrimeState(); }),
-    registerMethod("ConsumeModeReapplyPending").implementedAs([this](){ return this->ConsumeModeReapplyPending(); }),
-    registerMethod("GetActiveProfileJSON").implementedAs([this](){ return this->GetActiveProfileJSON(); }),
-    registerMethod("SetFanProfileCPU").implementedAs([this](const std::string &json){ return this->SetFanProfileCPU(json); }),
-    registerMethod("SetFanProfileDGPU").implementedAs([this](const std::string &json){ return this->SetFanProfileDGPU(json); }),
-    registerMethod("ApplyFanProfiles").implementedAs([this](const std::string &json){ return this->ApplyFanProfiles(json); }),
-    registerMethod("RevertFanProfiles").implementedAs([this](){ return this->RevertFanProfiles(); }),
-    registerMethod("SetTempProfile").implementedAs([this](const std::string &profileName){ return this->SetTempProfile(profileName); }),
-    registerMethod("SetTempProfileById").implementedAs([this](const std::string &id){ return this->SetTempProfileById(id); }),
-    registerMethod("SetActiveProfile").implementedAs([this](const std::string &id){ return this->SetActiveProfile(id); }),
-    registerMethod("ApplyProfile").implementedAs([this](const std::string &profileJSON){ return this->ApplyProfile(profileJSON); }),
-
-    registerMethod("GetProfilesJSON").implementedAs([this](){ return this->GetProfilesJSON(); }),
-    registerMethod("GetDefaultProfilesJSON").implementedAs([this](){ return this->GetDefaultProfilesJSON(); }),
-    registerMethod("GetCpuFrequencyLimitsJSON").implementedAs([this](){ return this->GetCpuFrequencyLimitsJSON(); }),
-    registerMethod("GetDefaultValuesProfileJSON").implementedAs([this](){ return this->GetDefaultValuesProfileJSON(); }),
-    registerMethod("SaveCustomProfile").implementedAs([this](const std::string &profileJSON){ return this->SaveCustomProfile(profileJSON); }),
-    registerMethod("GetFanProfile").implementedAs([this](const std::string &name){ return this->GetFanProfile(name); }),
-    registerMethod("GetFanProfileNames").implementedAs([this](){ return this->GetFanProfileNames(); }),
-    registerMethod("SetFanProfile").implementedAs([this](const std::string &name, const std::string &json){ return this->SetFanProfile(name, json); }),
-    registerMethod("GetSettingsJSON").implementedAs([this](){ return this->GetSettingsJSON(); }),
-    registerMethod("GetPowerState").implementedAs([this](){ return this->GetPowerState(); }),
-    registerMethod("SetStateMap").implementedAs([this](const std::string &state, const std::string &profileId){ return this->SetStateMap(state, profileId); }),
-    registerMethod("ODMProfilesAvailable").implementedAs([this](){ return this->ODMProfilesAvailable(); }),
-    registerMethod("ODMPowerLimitsJSON").implementedAs([this](){ return this->ODMPowerLimitsJSON(); }),
-    registerMethod("GetKeyboardBacklightCapabilitiesJSON").implementedAs([this](){ return this->GetKeyboardBacklightCapabilitiesJSON(); }),
-    registerMethod("GetKeyboardBacklightStatesJSON").implementedAs([this](){ return this->GetKeyboardBacklightStatesJSON(); }),
-    registerMethod("SetKeyboardBacklightStatesJSON").implementedAs([this](const std::string &json){ return this->SetKeyboardBacklightStatesJSON(json); }),
-    registerMethod("GetFansMinSpeed").implementedAs([this](){ return this->GetFansMinSpeed(); }),
-    registerMethod("GetFansOffAvailable").implementedAs([this](){ return this->GetFansOffAvailable(); }),
-    registerMethod("GetChargingProfilesAvailable").implementedAs([this](){ return this->GetChargingProfilesAvailable(); }),
-    registerMethod("GetCurrentChargingProfile").implementedAs([this](){ return this->GetCurrentChargingProfile(); }),
-    registerMethod("SetChargingProfile").implementedAs([this](const std::string &profileDescriptor){ return this->SetChargingProfile(profileDescriptor); }),
-    registerMethod("GetChargingPrioritiesAvailable").implementedAs([this](){ return this->GetChargingPrioritiesAvailable(); }),
-    registerMethod("GetCurrentChargingPriority").implementedAs([this](){ return this->GetCurrentChargingPriority(); }),
-    registerMethod("SetChargingPriority").implementedAs([this](const std::string &priorityDescriptor){ return this->SetChargingPriority(priorityDescriptor); }),
-    registerMethod("GetChargeStartAvailableThresholds").implementedAs([this](){ return this->GetChargeStartAvailableThresholds(); }),
-    registerMethod("GetChargeEndAvailableThresholds").implementedAs([this](){ return this->GetChargeEndAvailableThresholds(); }),
-    registerMethod("GetChargeStartThreshold").implementedAs([this](){ return this->GetChargeStartThreshold(); }),
-    registerMethod("GetChargeEndThreshold").implementedAs([this](){ return this->GetChargeEndThreshold(); }),
-    registerMethod("SetChargeStartThreshold").implementedAs([this](int32_t value){ return this->SetChargeStartThreshold(value); }),
-    registerMethod("SetChargeEndThreshold").implementedAs([this](int32_t value){ return this->SetChargeEndThreshold(value); }),
-    registerMethod("GetChargeType").implementedAs([this](){ return this->GetChargeType(); }),
-    registerMethod("SetChargeType").implementedAs([this](const std::string &type){ return this->SetChargeType(type); }),
-    registerMethod("GetFnLockSupported").implementedAs([this](){ return this->GetFnLockSupported(); }),
-    registerMethod("GetFnLockStatus").implementedAs([this](){ return this->GetFnLockStatus(); }),
-    registerMethod("SetFnLockStatus").implementedAs([this](bool status){ this->SetFnLockStatus(status); }),
-    registerMethod("SetSensorDataCollectionStatus").implementedAs([this](bool status){ this->SetSensorDataCollectionStatus(status); }),
-    registerMethod("GetSensorDataCollectionStatus").implementedAs([this](){ return this->GetSensorDataCollectionStatus(); }),
-    registerMethod("SetDGpuD0Metrics").implementedAs([this](bool status){ this->SetDGpuD0Metrics(status); }),
-    registerMethod("GetNVIDIAPowerCTRLDefaultPowerLimit").implementedAs([this](){ return this->GetNVIDIAPowerCTRLDefaultPowerLimit(); }),
-    registerMethod("GetNVIDIAPowerCTRLMaxPowerLimit").implementedAs([this](){ return this->GetNVIDIAPowerCTRLMaxPowerLimit(); }),
-    registerMethod("GetNVIDIAPowerCTRLAvailable").implementedAs([this](){ return this->GetNVIDIAPowerCTRLAvailable(); }),
-    registerMethod("GetAvailableGovernors").implementedAs([this](){ return this->GetAvailableGovernors(); }),
-    registerMethod("GetWaterCoolerAvailable").implementedAs([this](){ return this->GetWaterCoolerAvailable(); }),
-    registerMethod("GetWaterCoolerConnected").implementedAs([this](){ return this->GetWaterCoolerConnected(); }),
-    registerMethod("GetWaterCoolerFanSpeed").implementedAs([this](){ return this->GetWaterCoolerFanSpeed(); }),
-    registerMethod("GetWaterCoolerPumpLevel").implementedAs([this](){ return this->GetWaterCoolerPumpLevel(); }),
-    registerMethod("EnableWaterCooler").implementedAs([this](bool enable){ return this->EnableWaterCooler(enable); }),
-    registerMethod("SetWaterCoolerFanSpeed").implementedAs([this](int32_t dutyCyclePercent){ return this->SetWaterCoolerFanSpeed(dutyCyclePercent); }),
-    registerMethod("SetWaterCoolerPumpVoltage").implementedAs([this](int32_t voltage){ return this->SetWaterCoolerPumpVoltage(voltage); }),
-    registerMethod("SetWaterCoolerLEDColor").implementedAs([this](int32_t red, int32_t green, int32_t blue, int32_t mode){ return this->SetWaterCoolerLEDColor(red, green, blue, mode); }),
-    registerMethod("TurnOffWaterCoolerLED").implementedAs([this](){ return this->TurnOffWaterCoolerLED(); }),
-    registerMethod("TurnOffWaterCoolerFan").implementedAs([this](){ return this->TurnOffWaterCoolerFan(); }),
-    registerMethod("TurnOffWaterCoolerPump").implementedAs([this](){ return this->TurnOffWaterCoolerPump(); }),
-    registerMethod("IsWaterCoolerAutoControlEnabled").implementedAs([this](){ return this->IsWaterCoolerAutoControlEnabled(); }),
-    registerMethod("GetWaterCoolerSupported").implementedAs([this](){ return this->GetWaterCoolerSupported(); }),
-    registerMethod("GetCTGPAdjustmentSupported").implementedAs([this](){ return this->GetCTGPAdjustmentSupported(); }),
-    registerSignal("ProfileChanged").withParameters<std::string>(),
-    registerSignal("ModeReapplyPendingChanged").withParameters<bool>(),
-    registerSignal("PowerStateChanged").withParameters<std::string>()
-  ).forInterface(UccDBusInterfaceAdaptor::INTERFACE_NAME);
+  // Qt's MOC handles introspection and method dispatch automatically
+  // via Q_CLASSINFO and public slots declarations
+  setAutoRelaySignals( true );
   syslog( LOG_INFO, "UccDBusInterfaceAdaptor: registered interface %s", UccDBusInterfaceAdaptor::INTERFACE_NAME );
 }
+
 
 void UccDBusInterfaceAdaptor::resetDataCollectionTimeout()
 {
@@ -393,36 +298,38 @@ void UccDBusInterfaceAdaptor::resetDataCollectionTimeout()
   m_data.sensorDataCollectionStatus = true;
 }
 
-std::map< std::string, std::map< std::string, sdbus::Variant > >
+QVariantMap
 UccDBusInterfaceAdaptor::exportFanData( const FanData &fanData )
 {
-  std::map< std::string, std::map< std::string, sdbus::Variant > > result;
+  // Cast int64_t → qlonglong and int32_t → int so QtDBus can marshal them.
+  // int64_t is 'long' on x86_64 Linux which QtDBus does not recognise,
+  // whereas qlonglong ('long long') maps to D-Bus 'x' (INT64).
+  QVariantMap speedData;
+  speedData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( fanData.speed.timestamp ) );
+  speedData[ "data" ] = QVariant::fromValue( static_cast< int >( fanData.speed.data ) );
 
-  std::map< std::string, sdbus::Variant > speedData;
-  speedData[ "timestamp" ] = sdbus::Variant( fanData.speed.timestamp );
-  speedData[ "data" ] = sdbus::Variant( fanData.speed.data );
-  result[ "speed" ] = speedData;
+  QVariantMap tempData;
+  tempData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( fanData.temp.timestamp ) );
+  tempData[ "data" ] = QVariant::fromValue( static_cast< int >( fanData.temp.data ) );
 
-  std::map< std::string, sdbus::Variant > tempData;
-  tempData[ "timestamp" ] = sdbus::Variant( fanData.temp.timestamp );
-  tempData[ "data" ] = sdbus::Variant( fanData.temp.data );
-  result[ "temp" ] = tempData;
-
+  QVariantMap result;
+  result[ "speed" ] = QVariant::fromValue( speedData );
+  result[ "temp" ] = QVariant::fromValue( tempData );
   return result;
 }
 
 // device and system information methods
 
-std::string UccDBusInterfaceAdaptor::GetDeviceName()
+QString UccDBusInterfaceAdaptor::GetDeviceName()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.device;
+  return QString::fromStdString( m_data.device );
 }
 
-std::string UccDBusInterfaceAdaptor::GetDisplayModesJSON()
+QString UccDBusInterfaceAdaptor::GetDisplayModesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.displayModes;
+  return QString::fromStdString( m_data.displayModes );
 }
 
 bool UccDBusInterfaceAdaptor::GetIsX11()
@@ -440,15 +347,15 @@ bool UccDBusInterfaceAdaptor::FanHwmonAvailable()
   return m_data.fanHwmonAvailable;
 }
 
-std::string UccDBusInterfaceAdaptor::UccdVersion()
+QString UccDBusInterfaceAdaptor::UccdVersion()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.uccdVersion;
+  return QString::fromStdString( m_data.uccdVersion );
 }
 
 // fan data methods
 
-std::map< std::string, std::map< std::string, sdbus::Variant > >
+QVariantMap
 UccDBusInterfaceAdaptor::GetFanDataCPU()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
@@ -458,7 +365,7 @@ UccDBusInterfaceAdaptor::GetFanDataCPU()
   return {};
 }
 
-std::map< std::string, std::map< std::string, sdbus::Variant > >
+QVariantMap
 UccDBusInterfaceAdaptor::GetFanDataGPU1()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
@@ -468,7 +375,7 @@ UccDBusInterfaceAdaptor::GetFanDataGPU1()
   return {};
 }
 
-std::map< std::string, std::map< std::string, sdbus::Variant > >
+QVariantMap
 UccDBusInterfaceAdaptor::GetFanDataGPU2()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
@@ -495,7 +402,7 @@ bool UccDBusInterfaceAdaptor::GetForceYUV420OutputSwitchAvailable()
   return m_data.forceYUV420OutputSwitchAvailable;
 }
 
-bool UccDBusInterfaceAdaptor::SetDisplayRefreshRate( const std::string &display, int refreshRate )
+bool UccDBusInterfaceAdaptor::SetDisplayRefreshRate( const QString &display, int refreshRate )
 {
   // Note: display parameter is currently ignored - only works with primary display
   // TODO: Support multiple displays in the future
@@ -509,7 +416,7 @@ bool UccDBusInterfaceAdaptor::SetDisplayRefreshRate( const std::string &display,
   return false;
 }
 
-int32_t UccDBusInterfaceAdaptor::GetDisplayBrightness()
+int UccDBusInterfaceAdaptor::GetDisplayBrightness()
 {
   if ( m_service )
   {
@@ -519,7 +426,7 @@ int32_t UccDBusInterfaceAdaptor::GetDisplayBrightness()
   return -1;
 }
 
-bool UccDBusInterfaceAdaptor::SetDisplayBrightness( int32_t brightness )
+bool UccDBusInterfaceAdaptor::SetDisplayBrightness( int brightness )
 {
   if ( m_service )
   {
@@ -544,33 +451,33 @@ bool UccDBusInterfaceAdaptor::SetDisplayBrightness( int32_t brightness )
 
 // gpu information methods
 
-std::string UccDBusInterfaceAdaptor::GetDGpuInfoValuesJSON()
+QString UccDBusInterfaceAdaptor::GetDGpuInfoValuesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   resetDataCollectionTimeout();
-  return m_data.dGpuInfoValuesJSON;
+  return QString::fromStdString( m_data.dGpuInfoValuesJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetIGpuInfoValuesJSON()
+QString UccDBusInterfaceAdaptor::GetIGpuInfoValuesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   resetDataCollectionTimeout();
-  return m_data.iGpuInfoValuesJSON;
+  return QString::fromStdString( m_data.iGpuInfoValuesJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetCpuPowerValuesJSON()
+QString UccDBusInterfaceAdaptor::GetCpuPowerValuesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   resetDataCollectionTimeout();
-  return m_data.cpuPowerValuesJSON;
+  return QString::fromStdString( m_data.cpuPowerValuesJSON );
 }
 
 // graphics methods
 
-std::string UccDBusInterfaceAdaptor::GetPrimeState()
+QString UccDBusInterfaceAdaptor::GetPrimeState()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.primeState;
+  return QString::fromStdString( m_data.primeState );
 }
 
 bool UccDBusInterfaceAdaptor::ConsumeModeReapplyPending()
@@ -580,22 +487,23 @@ bool UccDBusInterfaceAdaptor::ConsumeModeReapplyPending()
 
 // profile methods
 
-std::string UccDBusInterfaceAdaptor::GetActiveProfileJSON()
+QString UccDBusInterfaceAdaptor::GetActiveProfileJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.activeProfileJSON;
+  return QString::fromStdString( m_data.activeProfileJSON );
 }
 
-bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const std::string &pointsJSON )
+bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
 {
   if ( !m_service )
     return false;
 
-  std::cerr << "[DBus] SetFanProfileCPU called with JSON: " << pointsJSON << std::endl;
+  const std::string json = pointsJSON.toStdString();
+  std::cerr << "[DBus] SetFanProfileCPU called with JSON: " << json << std::endl;
 
   try
   {
-    auto table = ProfileManager::parseFanTableFromJSON( pointsJSON );
+    auto table = ProfileManager::parseFanTableFromJSON( json );
     std::cerr << "[DBus] Parsed table size: " << table.size() << std::endl;
     if ( table.size() != 17 )
       return false;
@@ -626,16 +534,17 @@ bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const std::string &pointsJSON )
   }
 }
 
-bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const std::string &pointsJSON )
+bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const QString &pointsJSON )
 {
   if ( !m_service )
     return false;
 
-  std::cerr << "[DBus] SetFanProfileDGPU called with JSON: " << pointsJSON << std::endl;
+  const std::string json = pointsJSON.toStdString();
+  std::cerr << "[DBus] SetFanProfileDGPU called with JSON: " << json << std::endl;
 
   try
   {
-    auto table = ProfileManager::parseFanTableFromJSON( pointsJSON );
+    auto table = ProfileManager::parseFanTableFromJSON( json );
     std::cerr << "[DBus] Parsed table size: " << table.size() << std::endl;
     if ( table.size() != 17 )
       return false;
@@ -666,11 +575,12 @@ bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const std::string &pointsJSON )
   }
 }
 
-bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const std::string &fanProfilesJSON )
+bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq )
 {
   if ( !m_service )
     return false;
 
+  const std::string fanProfilesJSON = fanProfilesJSONq.toStdString();
   std::cerr << "[DBus] ApplyFanProfiles called with JSON: " << fanProfilesJSON << std::endl;
 
   try
@@ -749,72 +659,72 @@ bool UccDBusInterfaceAdaptor::RevertFanProfiles()
   }
 }
 
-bool UccDBusInterfaceAdaptor::SetTempProfile( const std::string &profileName )
+bool UccDBusInterfaceAdaptor::SetTempProfile( const QString &profileName )
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  m_data.tempProfileName = profileName;
+  m_data.tempProfileName = profileName.toStdString();
   return true;
 }
 
-bool UccDBusInterfaceAdaptor::SetTempProfileById( const std::string &id )
+bool UccDBusInterfaceAdaptor::SetTempProfileById( const QString &id )
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  m_data.tempProfileId = id;
+  m_data.tempProfileId = id.toStdString();
   // trigger state check would be called here
   return true;
 }
 
-bool UccDBusInterfaceAdaptor::SetActiveProfile( const std::string &id )
+bool UccDBusInterfaceAdaptor::SetActiveProfile( const QString &id )
 {
   // Immediately set the active profile
-  return m_service->setCurrentProfileById( id );
+  return m_service->setCurrentProfileById( id.toStdString() );
 }
 
-bool UccDBusInterfaceAdaptor::ApplyProfile( const std::string &profileJSON )
+bool UccDBusInterfaceAdaptor::ApplyProfile( const QString &profileJSON )
 {
   // Apply the profile configuration sent by the GUI
-  return m_service->applyProfileJSON( profileJSON );
+  return m_service->applyProfileJSON( profileJSON.toStdString() );
 }
 
 
 
-std::string UccDBusInterfaceAdaptor::GetProfilesJSON()
+QString UccDBusInterfaceAdaptor::GetProfilesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.profilesJSON;
+  return QString::fromStdString( m_data.profilesJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetCustomProfilesJSON()
+QString UccDBusInterfaceAdaptor::GetCustomProfilesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   //std::cout << "[DBus] GetCustomProfilesJSON called, returning " 
   //          << m_data.customProfilesJSON.length() << " bytes" << std::endl;
-  return m_data.customProfilesJSON;
+  return QString::fromStdString( m_data.customProfilesJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetDefaultProfilesJSON()
+QString UccDBusInterfaceAdaptor::GetDefaultProfilesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.defaultProfilesJSON;
+  return QString::fromStdString( m_data.defaultProfilesJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetCpuFrequencyLimitsJSON()
+QString UccDBusInterfaceAdaptor::GetCpuFrequencyLimitsJSON()
 {
   const int32_t minFreq = getCpuMinFrequency();
   const int32_t maxFreq = getCpuMaxFrequency();
   
   std::ostringstream json;
   json << "{\"min\":" << minFreq << ",\"max\":" << maxFreq << "}";
-  return json.str();
+  return QString::fromStdString( json.str() );
 }
 
-std::string UccDBusInterfaceAdaptor::GetDefaultValuesProfileJSON()
+QString UccDBusInterfaceAdaptor::GetDefaultValuesProfileJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.defaultValuesProfileJSON;
+  return QString::fromStdString( m_data.defaultValuesProfileJSON );
 }
 
-bool UccDBusInterfaceAdaptor::AddCustomProfile( const std::string &profileJSON )
+bool UccDBusInterfaceAdaptor::AddCustomProfile( const QString &profileJSON )
 {
   if ( !m_service )
   {
@@ -825,7 +735,7 @@ bool UccDBusInterfaceAdaptor::AddCustomProfile( const std::string &profileJSON )
   try
   {
     // Parse the profile JSON and add it
-    auto profile = ProfileManager::parseProfileJSON( profileJSON );
+    auto profile = ProfileManager::parseProfileJSON( profileJSON.toStdString() );
     
     // Generate new ID if empty
     if ( profile.id.empty() )
@@ -861,7 +771,7 @@ bool UccDBusInterfaceAdaptor::AddCustomProfile( const std::string &profileJSON )
   }
 }
 
-bool UccDBusInterfaceAdaptor::DeleteCustomProfile( const std::string &profileId )
+bool UccDBusInterfaceAdaptor::DeleteCustomProfile( const QString &profileId )
 {
   if ( !m_service )
   {
@@ -869,23 +779,24 @@ bool UccDBusInterfaceAdaptor::DeleteCustomProfile( const std::string &profileId 
     return false;
   }
 
-  std::cout << "[Profile] Deleting custom profile with id: " << profileId << std::endl;
+  const std::string id = profileId.toStdString();
+  std::cout << "[Profile] Deleting custom profile with id: " << id << std::endl;
   
-  bool result = m_service->deleteCustomProfile( profileId );
+  bool result = m_service->deleteCustomProfile( id );
 
   if ( result )
   {
-    std::cout << "[Profile] Successfully deleted profile '" << profileId << "'" << std::endl;
+    std::cout << "[Profile] Successfully deleted profile '" << id << "'" << std::endl;
   }
   else
   {
-    std::cerr << "[Profile] Failed to delete profile '" << profileId << "' (not found or error)" << std::endl;
+    std::cerr << "[Profile] Failed to delete profile '" << id << "' (not found or error)" << std::endl;
   }
   
   return result;
 }
 
-bool UccDBusInterfaceAdaptor::UpdateCustomProfile( const std::string &profileJSON )
+bool UccDBusInterfaceAdaptor::UpdateCustomProfile( const QString &profileJSON )
 {
   if ( !m_service )
   {
@@ -895,11 +806,12 @@ bool UccDBusInterfaceAdaptor::UpdateCustomProfile( const std::string &profileJSO
 
   try
   {
+    const std::string jsonStr = profileJSON.toStdString();
     std::cout << "[Profile] Received profile JSON (first 200 chars): " 
-              << profileJSON.substr(0, 200) << "..." << std::endl;
+              << jsonStr.substr(0, 200) << "..." << std::endl;
     
     // Parse the profile JSON and update it
-    auto profile = ProfileManager::parseProfileJSON( profileJSON );
+    auto profile = ProfileManager::parseProfileJSON( jsonStr );
     
     if ( profile.id.empty() )
     {
@@ -940,7 +852,7 @@ bool UccDBusInterfaceAdaptor::UpdateCustomProfile( const std::string &profileJSO
   }
 }
 
-bool UccDBusInterfaceAdaptor::SaveCustomProfile( const std::string &profileJSON )
+bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
 {
   if ( !m_service )
   {
@@ -950,11 +862,12 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const std::string &profileJSON 
 
   try
   {
+    const std::string jsonStr = profileJSON.toStdString();
     std::cout << "[Profile] Received SaveCustomProfile JSON (first 200 chars): "
-              << profileJSON.substr(0, 200) << "..." << std::endl;
+              << jsonStr.substr(0, 200) << "..." << std::endl;
 
     // Parse the profile JSON
-    auto profile = ProfileManager::parseProfileJSON( profileJSON );
+    auto profile = ProfileManager::parseProfileJSON( jsonStr );
 
     // Check if name collides with a built-in profile
     for ( const auto &builtIn : m_service->m_defaultProfiles )
@@ -1147,12 +1060,12 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const std::string &profileJSON 
   }
 }
 
-std::string UccDBusInterfaceAdaptor::GetFanProfile( const std::string &name )
+QString UccDBusInterfaceAdaptor::GetFanProfile( const QString &name )
 {
-  return getFanProfileJson(name);
+  return QString::fromStdString( getFanProfileJson(name.toStdString()) );
 }
 
-std::string UccDBusInterfaceAdaptor::GetFanProfileNames()
+QString UccDBusInterfaceAdaptor::GetFanProfileNames()
 {
   std::vector< std::string > names;
   for (const auto &p : defaultFanProfiles) {
@@ -1166,50 +1079,52 @@ std::string UccDBusInterfaceAdaptor::GetFanProfileNames()
     json += "\"" + names[i] + "\"";
   }
   json += "]";
-  return json;
+  return QString::fromStdString( json );
 }
 
-bool UccDBusInterfaceAdaptor::SetFanProfile( const std::string &name, const std::string &json )
+bool UccDBusInterfaceAdaptor::SetFanProfile( const QString &name, const QString &json )
 {
-  return setFanProfileJson(name, json);
+  return setFanProfileJson(name.toStdString(), json.toStdString());
 }
 
 // settings methods
 
-std::string UccDBusInterfaceAdaptor::GetSettingsJSON()
+QString UccDBusInterfaceAdaptor::GetSettingsJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.settingsJSON;
+  return QString::fromStdString( m_data.settingsJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetPowerState()
+QString UccDBusInterfaceAdaptor::GetPowerState()
 {
   // Return the current power state string (e.g. "power_ac" or "power_bat")
   try {
     // m_service owns m_currentState
     if ( m_service )
     {
-      return profileStateToString( m_service->m_currentState );
+      return QString::fromStdString( profileStateToString( m_service->m_currentState ) );
     }
   }
   catch ( const std::exception &e )
   {
     std::cerr << "[DBus] GetPowerState exception: " << e.what() << std::endl;
   }
-  return std::string("power_ac");
+  return QString("power_ac");
 }
 
-bool UccDBusInterfaceAdaptor::SetStateMap( const std::string &state, const std::string &profileId )
+bool UccDBusInterfaceAdaptor::SetStateMap( const QString &state, const QString &profileId )
 {
   if ( !m_service )
   {
     return false;
   }
   
-  std::cout << "[DBus] SetStateMap: " << state << " -> " << profileId << std::endl;
+  const std::string stateStr = state.toStdString();
+  const std::string profileIdStr = profileId.toStdString();
+  std::cout << "[DBus] SetStateMap: " << stateStr << " -> " << profileIdStr << std::endl;
   
   // Verify the profile exists before updating stateMap
-  if ( state == "power_ac" || state == "power_bat" || state == "power_wc" )
+  if ( stateStr == "power_ac" || stateStr == "power_bat" || stateStr == "power_wc" )
   {
     // Check if profile exists in:
     // 1. m_customProfiles (parsed objects)
@@ -1219,14 +1134,14 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const std::string &state, const std::
     
     for ( const auto &profile : m_service->m_customProfiles )
     {
-      if ( profile.id == profileId )
+      if ( profile.id == profileIdStr )
       {
         profileExists = true;
         break;
       }
     }
     
-    if ( !profileExists && m_service->m_settings.profiles.find( profileId ) != m_service->m_settings.profiles.end() )
+    if ( !profileExists && m_service->m_settings.profiles.find( profileIdStr ) != m_service->m_settings.profiles.end() )
     {
       profileExists = true;
     }
@@ -1235,7 +1150,7 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const std::string &state, const std::
     {
       for ( const auto &profile : m_service->m_defaultProfiles )
       {
-        if ( profile.id == profileId )
+        if ( profile.id == profileIdStr )
         {
           profileExists = true;
           break;
@@ -1245,12 +1160,12 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const std::string &state, const std::
     
     if ( !profileExists )
     {
-      std::cerr << "[DBus] SetStateMap: Profile ID '" << profileId << "' does not exist, rejecting" << std::endl;
+      std::cerr << "[DBus] SetStateMap: Profile ID '" << profileIdStr << "' does not exist, rejecting" << std::endl;
       return false;
     }
     
     // Profile exists, safe to update
-    m_service->m_settings.stateMap[state] = profileId;
+    m_service->m_settings.stateMap[stateStr] = profileIdStr;
     const bool wrote = m_service->m_settingsManager.writeSettings( m_service->m_settings );
     if ( !wrote )
       std::cerr << "[Settings] Failed to persist stateMap update" << std::endl;
@@ -1263,36 +1178,39 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const std::string &state, const std::
 
 // odm methods
 
-std::vector< std::string > UccDBusInterfaceAdaptor::ODMProfilesAvailable()
+QStringList UccDBusInterfaceAdaptor::ODMProfilesAvailable()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.odmProfilesAvailable;
+  QStringList result;
+  for ( const auto &s : m_data.odmProfilesAvailable )
+    result.append( QString::fromStdString( s ) );
+  return result;
 }
 
-std::string UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
+QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.odmPowerLimitsJSON;
+  return QString::fromStdString( m_data.odmPowerLimitsJSON );
 }
 
 // keyboard backlight methods
 
-std::string UccDBusInterfaceAdaptor::GetKeyboardBacklightCapabilitiesJSON()
+QString UccDBusInterfaceAdaptor::GetKeyboardBacklightCapabilitiesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.keyboardBacklightCapabilitiesJSON;
+  return QString::fromStdString( m_data.keyboardBacklightCapabilitiesJSON );
 }
 
-std::string UccDBusInterfaceAdaptor::GetKeyboardBacklightStatesJSON()
+QString UccDBusInterfaceAdaptor::GetKeyboardBacklightStatesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.keyboardBacklightStatesJSON;
+  return QString::fromStdString( m_data.keyboardBacklightStatesJSON );
 }
 
-bool UccDBusInterfaceAdaptor::SetKeyboardBacklightStatesJSON( const std::string &keyboardBacklightStatesJSON )
+bool UccDBusInterfaceAdaptor::SetKeyboardBacklightStatesJSON( const QString &keyboardBacklightStatesJSON )
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  m_data.keyboardBacklightStatesNewJSON = keyboardBacklightStatesJSON;
+  m_data.keyboardBacklightStatesNewJSON = keyboardBacklightStatesJSON.toStdString();
   return true;
 }
 
@@ -1300,7 +1218,7 @@ bool UccDBusInterfaceAdaptor::SetKeyboardBacklightStatesJSON( const std::string 
 
 // fan control methods
 
-int32_t UccDBusInterfaceAdaptor::GetFansMinSpeed()
+int UccDBusInterfaceAdaptor::GetFansMinSpeed()
 {
   return m_data.fansMinSpeed;
 }
@@ -1312,21 +1230,21 @@ bool UccDBusInterfaceAdaptor::GetFansOffAvailable()
 
 // charging methods (stubs for now)
 
-std::string UccDBusInterfaceAdaptor::GetChargingProfilesAvailable()
+QString UccDBusInterfaceAdaptor::GetChargingProfilesAvailable()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.chargingProfilesAvailable;
+  return QString::fromStdString( m_data.chargingProfilesAvailable );
 }
 
-std::string UccDBusInterfaceAdaptor::GetCurrentChargingProfile()
+QString UccDBusInterfaceAdaptor::GetCurrentChargingProfile()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.currentChargingProfile;
+  return QString::fromStdString( m_data.currentChargingProfile );
 }
 
-bool UccDBusInterfaceAdaptor::SetChargingProfile( const std::string &profileDescriptor )
+bool UccDBusInterfaceAdaptor::SetChargingProfile( const QString &profileDescriptor )
 {
-  bool result = m_service->m_profileSettingsWorker->applyChargingProfile( profileDescriptor );
+  bool result = m_service->m_profileSettingsWorker->applyChargingProfile( profileDescriptor.toStdString() );
   
   if ( result )
   {
@@ -1337,21 +1255,21 @@ bool UccDBusInterfaceAdaptor::SetChargingProfile( const std::string &profileDesc
   return result;
 }
 
-std::string UccDBusInterfaceAdaptor::GetChargingPrioritiesAvailable()
+QString UccDBusInterfaceAdaptor::GetChargingPrioritiesAvailable()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.chargingPrioritiesAvailable;
+  return QString::fromStdString( m_data.chargingPrioritiesAvailable );
 }
 
-std::string UccDBusInterfaceAdaptor::GetCurrentChargingPriority()
+QString UccDBusInterfaceAdaptor::GetCurrentChargingPriority()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.currentChargingPriority;
+  return QString::fromStdString( m_data.currentChargingPriority );
 }
 
-bool UccDBusInterfaceAdaptor::SetChargingPriority( const std::string &priorityDescriptor )
+bool UccDBusInterfaceAdaptor::SetChargingPriority( const QString &priorityDescriptor )
 {
-  bool result = m_service->m_profileSettingsWorker->applyChargingPriority( priorityDescriptor );
+  bool result = m_service->m_profileSettingsWorker->applyChargingPriority( priorityDescriptor.toStdString() );
   
   if ( result )
   {
@@ -1362,31 +1280,31 @@ bool UccDBusInterfaceAdaptor::SetChargingPriority( const std::string &priorityDe
   return result;
 }
 
-std::string UccDBusInterfaceAdaptor::GetChargeStartAvailableThresholds()
+QString UccDBusInterfaceAdaptor::GetChargeStartAvailableThresholds()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.chargeStartAvailableThresholds;
+  return QString::fromStdString( m_data.chargeStartAvailableThresholds );
 }
 
-std::string UccDBusInterfaceAdaptor::GetChargeEndAvailableThresholds()
+QString UccDBusInterfaceAdaptor::GetChargeEndAvailableThresholds()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return m_data.chargeEndAvailableThresholds;
+  return QString::fromStdString( m_data.chargeEndAvailableThresholds );
 }
 
-int32_t UccDBusInterfaceAdaptor::GetChargeStartThreshold()
+int UccDBusInterfaceAdaptor::GetChargeStartThreshold()
 {
   // Read current value directly from hardware
   return m_service->m_profileSettingsWorker->getChargeStartThreshold();
 }
 
-int32_t UccDBusInterfaceAdaptor::GetChargeEndThreshold()
+int UccDBusInterfaceAdaptor::GetChargeEndThreshold()
 {
   // Read current value directly from hardware
   return m_service->m_profileSettingsWorker->getChargeEndThreshold();
 }
 
-bool UccDBusInterfaceAdaptor::SetChargeStartThreshold( int32_t value )
+bool UccDBusInterfaceAdaptor::SetChargeStartThreshold( int value )
 {
   bool result = m_service->m_profileSettingsWorker->setChargeStartThreshold( value );
   
@@ -1396,7 +1314,7 @@ bool UccDBusInterfaceAdaptor::SetChargeStartThreshold( int32_t value )
   return result;
 }
 
-bool UccDBusInterfaceAdaptor::SetChargeEndThreshold( int32_t value )
+bool UccDBusInterfaceAdaptor::SetChargeEndThreshold( int value )
 {
   bool result = m_service->m_profileSettingsWorker->setChargeEndThreshold( value );
   
@@ -1406,20 +1324,20 @@ bool UccDBusInterfaceAdaptor::SetChargeEndThreshold( int32_t value )
   return result;
 }
 
-std::string UccDBusInterfaceAdaptor::GetChargeType()
+QString UccDBusInterfaceAdaptor::GetChargeType()
 {
   // Read current value directly from hardware
-  return m_service->m_profileSettingsWorker->getChargeType();
+  return QString::fromStdString( m_service->m_profileSettingsWorker->getChargeType() );
 }
 
-bool UccDBusInterfaceAdaptor::SetChargeType( const std::string &type )
+bool UccDBusInterfaceAdaptor::SetChargeType( const QString &type )
 {
-  bool result = m_service->m_profileSettingsWorker->setChargeType( type );
+  bool result = m_service->m_profileSettingsWorker->setChargeType( type.toStdString() );
   
   if ( result )
   {
     std::lock_guard< std::mutex > lock( m_data.dataMutex );
-    m_data.chargeType = type;
+    m_data.chargeType = type.toStdString();
   }
   
   return result;
@@ -1461,12 +1379,12 @@ void UccDBusInterfaceAdaptor::SetDGpuD0Metrics( bool status )
 
 // nvidia power control methods
 
-int32_t UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLDefaultPowerLimit()
+int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLDefaultPowerLimit()
 {
   return m_data.nvidiaPowerCTRLDefaultPowerLimit;
 }
 
-int32_t UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLMaxPowerLimit()
+int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLMaxPowerLimit()
 {
   return m_data.nvidiaPowerCTRLMaxPowerLimit;
 }
@@ -1476,7 +1394,7 @@ bool UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLAvailable()
   return m_data.nvidiaPowerCTRLAvailable;
 }
 
-std::string UccDBusInterfaceAdaptor::GetAvailableGovernors()
+QString UccDBusInterfaceAdaptor::GetAvailableGovernors()
 {
   if ( m_service && m_service->getCpuWorker() )
   {
@@ -1490,10 +1408,10 @@ std::string UccDBusInterfaceAdaptor::GetAvailableGovernors()
         json += "\"" + (*governors)[i] + "\"";
       }
       json += "]";
-      return json;
+      return QString::fromStdString( json );
     }
   }
-  return "[]";
+  return QStringLiteral("[]");
 }
 
 // water cooler methods
@@ -1508,11 +1426,11 @@ bool UccDBusInterfaceAdaptor::GetWaterCoolerConnected()
   return m_data.waterCoolerConnected;
 }
 
-int32_t UccDBusInterfaceAdaptor::GetWaterCoolerFanSpeed()
-{ return m_service ? static_cast< int32_t >( m_service->m_waterCoolerWorker->getLastFanSpeed() ) : -1; }
+int UccDBusInterfaceAdaptor::GetWaterCoolerFanSpeed()
+{ return m_service ? static_cast< int >( m_service->m_waterCoolerWorker->getLastFanSpeed() ) : -1; }
 
-int32_t UccDBusInterfaceAdaptor::GetWaterCoolerPumpLevel()
-{ return m_service ? static_cast< int32_t >( m_service->m_waterCoolerWorker->getLastPumpVoltage() ) : -1; }
+int UccDBusInterfaceAdaptor::GetWaterCoolerPumpLevel()
+{ return m_service ? static_cast< int >( m_service->m_waterCoolerWorker->getLastPumpVoltage() ) : -1; }
 
 bool UccDBusInterfaceAdaptor::EnableWaterCooler( bool enable )
 {
@@ -1533,7 +1451,7 @@ bool UccDBusInterfaceAdaptor::EnableWaterCooler( bool enable )
   return true;
 }
 
-bool UccDBusInterfaceAdaptor::SetWaterCoolerFanSpeed( int32_t dutyCyclePercent )
+bool UccDBusInterfaceAdaptor::SetWaterCoolerFanSpeed( int dutyCyclePercent )
 {
   if ( m_service && m_service->m_waterCoolerWorker )
     return m_service->m_waterCoolerWorker->setFanSpeed( dutyCyclePercent );
@@ -1541,7 +1459,7 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerFanSpeed( int32_t dutyCyclePercent )
   return false;
 }
 
-bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int32_t voltage )
+bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int voltage )
 {
   if ( m_service && m_service->m_waterCoolerWorker )
     return m_service->m_waterCoolerWorker->setPumpVoltage( voltage );
@@ -1549,15 +1467,15 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int32_t voltage )
   return false;
 }
 
-bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int32_t red, int32_t green, int32_t blue, int32_t mode )
+bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int red, int green, int blue, int mode )
 {
   if ( m_service && m_service->m_waterCoolerWorker )
   {
     m_service->m_waterCoolerLedMode.store( mode );
 
     // Temperature mode: internally use Static, daemon auto-sets color from fan speed
-    const int32_t hwMode = ( mode == static_cast< int32_t >( ucc::RGBState::Temperature ) )
-                             ? static_cast< int32_t >( ucc::RGBState::Static )
+    const int hwMode = ( mode == static_cast< int >( ucc::RGBState::Temperature ) )
+                             ? static_cast< int >( ucc::RGBState::Static )
                              : mode;
 
     return m_service->m_waterCoolerWorker->setLEDColor( red, green, blue, hwMode );
@@ -1612,17 +1530,39 @@ bool UccDBusInterfaceAdaptor::GetCTGPAdjustmentSupported()
 }
 
 // signal emitters
+// These may be called from the DaemonWorker thread, but the adaptor lives in
+// the main thread.  Use QMetaObject::invokeMethod with a queued connection so
+// the actual emit happens in the object's owning thread.
 
 void UccDBusInterfaceAdaptor::emitModeReapplyPendingChanged( bool pending )
 {
-  // signal emission to be implemented
-  ( void ) pending;
+  QMetaObject::invokeMethod( this, [this, pending]() {
+    emit ModeReapplyPendingChanged( pending );
+  }, Qt::QueuedConnection );
 }
 
 void UccDBusInterfaceAdaptor::emitProfileChanged( const std::string &profileId )
 {
-  // Emit ProfileChanged signal
-  m_object.emitSignal("ProfileChanged").onInterface("com.uniwill.uccd").withArguments(profileId);
+  QString id = QString::fromStdString( profileId );
+  QMetaObject::invokeMethod( this, [this, id]() {
+    emit ProfileChanged( id );
+  }, Qt::QueuedConnection );
+}
+
+void UccDBusInterfaceAdaptor::emitPowerStateChanged( const std::string &state )
+{
+  QString s = QString::fromStdString( state );
+  QMetaObject::invokeMethod( this, [this, s]() {
+    emit PowerStateChanged( s );
+  }, Qt::QueuedConnection );
+}
+
+void UccDBusInterfaceAdaptor::emitWaterCoolerStatusChanged( const std::string &status )
+{
+  QString s = QString::fromStdString( status );
+  QMetaObject::invokeMethod( this, [this, s]() {
+    emit WaterCoolerStatusChanged( s );
+  }, Qt::QueuedConnection );
 }
 
 // UccDBusService implementation
@@ -1631,8 +1571,7 @@ UccDBusService::UccDBusService()
   : DaemonWorker( std::chrono::milliseconds( 1000 ), false ),
     m_dbusData(),
     m_io(),
-    m_connection( nullptr ),
-    m_object( nullptr ),
+    m_dbusObject( nullptr ),
     m_adaptor( nullptr ),
     m_started( false ),
     m_profileManager(),
@@ -1855,8 +1794,8 @@ UccDBusService::UccDBusService()
           const ucc::PumpVoltage pumpSpeedValue = fp.getPumpSpeedForTemp( temp );
           m_waterCoolerWorker->setPumpVoltage( static_cast<int>(pumpSpeedValue) );
 
-          std::cout << "[Auto WC] Temp: " << temp << "°C, Fan: " << wcFanSpeed
-                    << "%, Pump Voltage: " << static_cast<int>(pumpSpeedValue) << std::endl;
+          //std::cout << "[Auto WC] Temp: " << temp << "°C, Fan: " << wcFanSpeed
+          //          << "%, Pump Voltage: " << static_cast<int>(pumpSpeedValue) << std::endl;
         }
         catch ( ... ) { /* ignore errors in water cooler auto-control */ }
       }
@@ -2021,31 +1960,60 @@ void UccDBusService::updateFanData()
   }
 }
 
+bool UccDBusService::initDBus()
+{
+  // Must be called from the main thread (before start()) so that
+  // m_dbusObject lives in the main thread's event loop and
+  // QDBusConnection::registerObject() can create child QObjects there.
+  try
+  {
+    QDBusConnection bus = QDBusConnection::systemBus();
+    if ( !bus.isConnected() )
+    {
+      syslog( LOG_ERR, "Failed to connect to system D-Bus" );
+      return false;
+    }
+
+    // Create the D-Bus object in the main thread
+    m_dbusObject = std::make_unique< QObject >();
+
+    // Create the adaptor (attaches to m_dbusObject automatically)
+    m_adaptor = std::make_unique< UccDBusInterfaceAdaptor >( m_dbusObject.get(), m_dbusData, this );
+
+    // Register the object on the bus
+    if ( !bus.registerObject( OBJECT_PATH, m_dbusObject.get() ) )
+    {
+      syslog( LOG_ERR, "Failed to register D-Bus object at %s: %s",
+              OBJECT_PATH, qPrintable( bus.lastError().message() ) );
+      m_adaptor.reset();
+      m_dbusObject.reset();
+      return false;
+    }
+
+    // Request the service name
+    if ( !bus.registerService( SERVICE_NAME ) )
+    {
+      syslog( LOG_ERR, "Failed to register D-Bus service name %s: %s",
+              SERVICE_NAME, qPrintable( bus.lastError().message() ) );
+      bus.unregisterObject( OBJECT_PATH );
+      m_adaptor.reset();
+      m_dbusObject.reset();
+      return false;
+    }
+
+    syslog( LOG_INFO, "DBus service registered on %s (Qt D-Bus)", SERVICE_NAME );
+    return true;
+  }
+  catch ( const std::exception &e )
+  {
+    syslog( LOG_ERR, "DBus service error: %s", e.what() );
+    return false;
+  }
+}
+
 void UccDBusService::onStart()
 {
-  if ( not m_started )
-  {
-    try
-    {
-      m_connection = sdbus::createSystemBusConnection();
-      m_object = sdbus::createObject( *m_connection, sdbus::ObjectPath{ OBJECT_PATH } );
-      m_adaptor = std::make_unique< UccDBusInterfaceAdaptor >( *m_object, m_dbusData, this );
-      syslog( LOG_INFO, "Requesting DBus name %s", SERVICE_NAME );
-      m_connection->requestName( sdbus::ServiceName{ SERVICE_NAME } );
-      syslog( LOG_INFO, "Requested DBus name %s", SERVICE_NAME );
-      
-      // Enter event loop asynchronously to process incoming method calls
-      m_connection->enterEventLoopAsync();
-      
-      m_started = true;
-      syslog( LOG_INFO, "DBus service started on %s", SERVICE_NAME );
-    }
-    catch ( const sdbus::Error &e )
-    {
-      syslog( LOG_ERR, "DBus service error: %s", e.what() );
-      m_started = false;
-    }
-  }
+  m_started = true;
 }
 
 void UccDBusService::onWork()
@@ -2100,7 +2068,7 @@ void UccDBusService::onWork()
       std::cout << "[State] Power state changed to " << stateKey << std::endl;
       
       // Emit signal for UCC to handle profile switching
-      m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
+      m_adaptor->emitPowerStateChanged( stateKey );
     }
   }
   
@@ -2207,7 +2175,7 @@ void UccDBusService::onWork()
         syslog( LOG_INFO, "Water cooler status changed to: %s (debounced)", status.c_str() );
 
         // Emit signal for applications to handle water cooler status changes
-        m_object->emitSignal("WaterCoolerStatusChanged").onInterface("com.uniwill.uccd").withArguments(status);
+        m_adaptor->emitWaterCoolerStatusChanged( status );
 
         // Switch power state based on water cooler connection and apply the
         // corresponding profile so the system actually transitions.
@@ -2216,14 +2184,14 @@ void UccDBusService::onWork()
           m_currentState = ProfileState::WC;
           const std::string stateKey = "power_wc";
           std::cout << "[State] Water cooler connected, switching to " << stateKey << std::endl;
-          m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
+          m_adaptor->emitPowerStateChanged( stateKey );
         }
         else
         {
           m_currentState = determineState();
           const std::string stateKey = profileStateToString( m_currentState );
           std::cout << "[State] Water cooler disconnected, reverting to " << stateKey << std::endl;
-          m_object->emitSignal("PowerStateChanged").onInterface("com.uniwill.uccd").withArguments(stateKey);
+          m_adaptor->emitPowerStateChanged( stateKey );
         }
 
         applyProfileForCurrentState();
@@ -2263,25 +2231,23 @@ void UccDBusService::onExit()
   // Save autosave data
   saveAutosave();
   
-  if ( m_started and m_connection )
+  if ( m_started )
   {
     try
     {
-      // Leave event loop before releasing resources
-      m_connection->leaveEventLoop();
-      
-      m_connection->releaseName( sdbus::ServiceName{ SERVICE_NAME } );
+      QDBusConnection bus = QDBusConnection::systemBus();
+      bus.unregisterService( SERVICE_NAME );
+      bus.unregisterObject( OBJECT_PATH );
       std::cout << "dbus service stopped" << std::endl;
     }
-    catch ( const sdbus::Error &e )
+    catch ( const std::exception &e )
     {
       syslog( LOG_ERR, "DBus service error on exit: %s", e.what() );
     }
   }
 
   m_adaptor.reset();
-  m_object.reset();
-  m_connection.reset();
+  m_dbusObject.reset();
   m_started = false;
 }
 
@@ -2446,6 +2412,9 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
       std::cout << "[Profile] Switching to profile: " << profile.name << " (ID: " << id << ")" << std::endl;
       m_activeProfile = profile;
       updateDBusActiveProfileData();
+      
+      // apply fan curves and pump auto-control
+      applyFanAndPumpSettings( profile );
       
       // apply new profile to workers
       if ( m_cpuWorker )
@@ -3154,6 +3123,9 @@ void UccDBusService::applyStartupProfile()
       
       std::cout << "[Startup] Applied profile from settings: " << profile.name << " (ID: " << profile.id << ")" << std::endl;
       
+      // Apply fan curves and pump auto-control
+      applyFanAndPumpSettings( profile );
+      
       // Apply to workers
       if ( m_cpuWorker )
       {
@@ -3196,6 +3168,9 @@ void UccDBusService::applyStartupProfile()
       
       std::cout << "[Startup] Applied built-in profile: " << profile.name << " (ID: " << profile.id << ")" << std::endl;
       
+      // Apply fan curves and pump auto-control
+      applyFanAndPumpSettings( profile );
+      
       // Apply to workers (they should pick up the active profile automatically)
       // But we can trigger a reapply to be sure
       if ( m_cpuWorker )
@@ -3224,6 +3199,76 @@ void UccDBusService::applyStartupProfile()
   if ( !profileFound )
   {
     std::cerr << "[Startup] WARNING: Profile ID '" << profileId << "' not found!" << std::endl;
+  }
+}
+
+void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
+{
+  // Apply sameSpeed setting to fan worker
+  if ( m_fanControlWorker )
+    m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
+
+  // Resolve and apply fan curves: prefer embedded tables, fallback to named profile
+  try
+  {
+    std::vector< FanTableEntry > cpuTable;
+    std::vector< FanTableEntry > gpuTable;
+    std::vector< FanTableEntry > wcFanTable;
+    std::vector< FanTableEntry > pumpTable;
+
+    if ( profile.fan.hasEmbeddedTables() )
+    {
+      cpuTable = profile.fan.tableCPU;
+      gpuTable = profile.fan.tableGPU;
+      wcFanTable = profile.fan.tableWaterCoolerFan;
+      pumpTable = profile.fan.tablePump;
+      std::cout << "[FanPump] Using embedded fan tables from profile" << std::endl;
+    }
+    else
+    {
+      const std::string &fpName = profile.fan.fanProfile;
+      if ( !fpName.empty() )
+      {
+        FanProfile fp = getDefaultFanProfileByName( fpName );
+        if ( fp.isValid() )
+        {
+          cpuTable = fp.tableCPU;
+          gpuTable = fp.tableGPU;
+          wcFanTable = fp.tableWaterCoolerFan;
+          pumpTable = fp.tablePump;
+          std::cout << "[FanPump] Using fan tables from named profile '" << fpName << "'" << std::endl;
+        }
+      }
+    }
+
+    if ( m_fanControlWorker && !cpuTable.empty() )
+    {
+      m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
+      std::cout << "[FanPump] Applied fan curves (CPU=" << cpuTable.size()
+                << " GPU=" << gpuTable.size()
+                << " WCFan=" << wcFanTable.size()
+                << " Pump=" << pumpTable.size() << ")" << std::endl;
+    }
+
+    // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
+    if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+         && !pumpTable.empty() )
+    {
+      int maxTemp = 0;
+      {
+        std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+        for ( const auto &fan : m_dbusData.fans )
+          maxTemp = std::max( maxTemp, fan.temp.data );
+      }
+      FanProfile tempFp;
+      tempFp.tablePump = pumpTable;
+      m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
+      std::cout << "[FanPump] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+    }
+  }
+  catch ( const std::exception &e )
+  {
+    std::cerr << "[FanPump] Failed to apply fan/pump settings: " << e.what() << std::endl;
   }
 }
 

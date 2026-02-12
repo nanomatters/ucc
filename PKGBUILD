@@ -8,7 +8,7 @@ pkgdesc='Uniwill Control Center - System control application suite'
 arch=('x86_64')
 url='https://github.com/nanomatters/ucc'
 license=('GPL3')
-depends=('qt6-base' 'systemd' 'sdbus-c++' 'tuxedo-drivers')
+depends=('qt6-base' 'systemd' 'tuxedo-drivers')
 makedepends=('cmake' 'extra-cmake-modules' 'qt6-declarative' 'qt6-connectivity'
              'kf6-plasma')
 source=("${pkgbase}-${pkgver}.tar.gz::https://github.com/nanomatters/ucc/archive/v${pkgver}.tar.gz")

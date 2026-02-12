@@ -186,7 +186,7 @@ public:
    * @brief Get pump speed value for a given temperature from tablePump
    *
    * Uses step-wise (floor) lookup rather than interpolation, since pump speed
-   * values are discrete voltage levels (0=Off, 1=V11, 2=V12, 3=V7).
+   * values are discrete voltage levels (0=Off, 1=V7, 2=V8, 3=V11, 4=V12).
    *
    * @param temp Temperature in degrees Celsius
    * @return Pump speed value (0-3), or -1 if pump table is empty

@@ -17,7 +17,6 @@ BuildRequires:  qt6-qtdeclarative-devel
 BuildRequires:  qt6-qtconnectivity-devel
 BuildRequires:  kf6-kwindowsystem-devel
 BuildRequires:  libplasma-devel
-BuildRequires:  sdbus-cpp-devel
 BuildRequires:  systemd-devel
 BuildRequires:  libXrandr-devel
 BuildRequires:  libgudev-devel
@@ -26,7 +25,6 @@ Requires:       systemd
 Requires:       qt6-qtbase >= 6.0
 Requires:       qt6-qtdeclarative
 Requires:       qt6-qtconnectivity
-Requires:       sdbus-cpp
 Requires:       tuxedo-drivers
 Requires(post): systemd
 Requires(preun): systemd
@@ -90,7 +88,7 @@ systemctl daemon-reload > /dev/null 2>&1 || true
 %dir %{_sysconfdir}/ucc
 %{_datadir}/applications/ucc-gui.desktop
 %{_datadir}/applications/ucc-tray.desktop
-%{_datadir}/plasma/plasmoids/org.uniwill.ucc.*/
+# WIDDGET # %{_datadir}/plasma/plasmoids/org.uniwill.ucc.*/
 # Icons (SVG and PNG, all sizes)
 %{_datadir}/icons/hicolor/scalable/apps/ucc-gui.svg
 %{_datadir}/icons/hicolor/scalable/apps/ucc-gui_16.svg

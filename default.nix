@@ -6,7 +6,6 @@
 , stdenv
 , fetchFromGitHub
 , pkg-config
-, sdbus-c++
 , libxrandr
 , systemd
 , makeWrapper
@@ -34,7 +33,6 @@ stdenv.mkDerivation rec {
     qt6.full
     kf6.plasma-framework
     kf6.kwindowsystem
-    sdbus-c++
     libxrandr
     systemd
     # Runtime kernel/user drivers required for hardware control
