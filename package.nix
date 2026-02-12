@@ -83,7 +83,7 @@ stdenv.mkDerivation {
     fi
     if [ -f "$out/lib/systemd/system/uccd-sleep.service" ]; then
       substituteInPlace "$out/lib/systemd/system/uccd-sleep.service" \
-        --replace "/usr/bin/systemctl" "${systemd}/bin/systemctl"
+        --replace-fail "/usr/bin/systemctl" "${systemd}/bin/systemctl"
     fi
   '';
 
