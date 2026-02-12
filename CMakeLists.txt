@@ -91,7 +91,19 @@ include( KDECMakeSettings )
 # Options
 option( BUILD_GUI "Build the main GUI application" ON )
 option( BUILD_TRAY "Build the system tray applet" ON )
-option( BUILD_WIDGETS "Build Plasma widgets" ON )
+option( BUILD_WIDGETS "Build Plasma widgets" OFF )
+
+# Try to find Plasma if widget build is requested
+if(BUILD_WIDGETS)
+  find_package(KF5Plasma QUIET)
+  if(KF5Plasma_FOUND)
+    message(STATUS "Plasma found, building widgets.")
+    add_subdirectory(ucc-widgets)
+  else()
+    message(WARNING "Plasma not found, widgets will not be built.")
+    set(BUILD_WIDGETS OFF)
+  endif()
+endif()
 
 # Subdirectories
 add_subdirectory( libucc-dbus )
@@ -104,9 +116,7 @@ if( BUILD_TRAY )
   add_subdirectory( ucc-tray )
 endif()
 
-if( BUILD_WIDGETS )
-  add_subdirectory( ucc-widgets )
-endif()
+
 
 # Summary
 message(STATUS "")
