@@ -11,10 +11,21 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 		-DBUILD_GUI=ON \
 		-DBUILD_TRAY=ON \
-		-DBUILD_WIDGETS=ON
+		-DBUILD_WIDGETS=OFF
 
 override_dh_auto_install:
-	dh_auto_install
+	@echo "=== [1] Check cmake_install.cmake exists ==="
+	@ls -la obj-x86_64-linux-gnu/cmake_install.cmake 2>&1 || echo "MISSING cmake_install.cmake!"
+	@echo "=== [2] First 80 lines of cmake_install.cmake ==="
+	@head -80 obj-x86_64-linux-gnu/cmake_install.cmake 2>/dev/null || true
+	@echo "=== [3] Check binaries were built ==="
+	@ls -la obj-x86_64-linux-gnu/uccd/uccd obj-x86_64-linux-gnu/ucc-gui/ucc-gui obj-x86_64-linux-gnu/ucc-tray/ucc-tray 2>&1 || true
+	@find obj-x86_64-linux-gnu -name 'libucc-dbus.so*' 2>/dev/null || echo "libucc-dbus.so NOT found in build tree"
+	@echo "=== [4] Running cmake --install MANUALLY with --verbose ==="
+	DESTDIR=$(CURDIR)/debian/tmp cmake --install obj-x86_64-linux-gnu --verbose 2>&1 || echo "*** cmake --install FAILED with exit code $$? ***"
+	@echo "=== [5] Contents of debian/tmp after install ==="
+	@find debian/tmp -type f 2>/dev/null || echo "debian/tmp has NO files!"
+	@echo "=== [6] End diagnostics ==="
 	# Create configuration directory
 	mkdir -p debian/tmp/etc/ucc
 	chmod 755 debian/tmp/etc/ucc

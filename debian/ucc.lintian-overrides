@@ -1,0 +1,5 @@
+ucc: systemd-service-file-refers-to-unusual-wantedby-target hibernate.target [usr/lib/systemd/system/uccd-sleep.service]
+ucc: systemd-service-file-refers-to-unusual-wantedby-target hybrid-sleep.target [usr/lib/systemd/system/uccd-sleep.service]
+ucc: systemd-service-file-refers-to-unusual-wantedby-target suspend-then-hibernate.target [usr/lib/systemd/system/uccd-sleep.service]
+ucc: systemd-service-file-refers-to-unusual-wantedby-target suspend.target [usr/lib/systemd/system/uccd-sleep.service]
+ucc: link-to-shared-library-in-wrong-package usr/lib/x86_64-linux-gnu/libucc-dbus.so.0.1.0 [usr/lib/x86_64-linux-gnu/libucc-dbus.so]
