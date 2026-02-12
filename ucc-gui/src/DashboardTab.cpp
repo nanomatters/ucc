@@ -208,25 +208,54 @@ void DashboardTab::setupUI()
   cpuGrid->setHorizontalSpacing( 24 );
   cpuGrid->setVerticalSpacing( 16 );
   cpuGrid->addWidget( makeGauge( "CPU - Temp", "°C", m_cpuTempLabel ), 0, 0 );
-  cpuGrid->addWidget( makeGauge( "CPU - Frequency", "GHz", m_cpuFrequencyLabel ), 0, 1 );
-  cpuGrid->addWidget( makeGauge( "CPU - Fan", "%", m_fanSpeedLabel ), 0, 2 );
+  cpuGrid->addWidget( makeGauge( "CPU - Fan", "%", m_fanSpeedLabel ), 0, 1 );
+  cpuGrid->addWidget( makeGauge( "CPU - Frequency", "GHz", m_cpuFrequencyLabel ), 0, 2 );
   cpuGrid->addWidget( makeGauge( "CPU - Power", "W", m_cpuPowerLabel ), 0, 3 );
   layout->addLayout( cpuGrid );
 
-  // GPU section
+  // GPU section — single section with toggle between dGPU and iGPU
+  QHBoxLayout *gpuHeaderLayout = new QHBoxLayout();
+  gpuHeaderLayout->setContentsMargins( 0, 0, 0, 0 );
   QLabel *gpuHeader = new QLabel( "Graphics card monitor" );
   gpuHeader->setStyleSheet( "font-size: 14px; font-weight: bold;" );
-  gpuHeader->setAlignment( Qt::AlignCenter );
-  layout->addWidget( gpuHeader );
+  gpuHeaderLayout->addStretch();
+  gpuHeaderLayout->addWidget( gpuHeader );
+  gpuHeaderLayout->addSpacing( 12 );
 
-  QGridLayout *gpuGrid = new QGridLayout();
+  m_gpuToggleButton = new QPushButton( "Show iGPU" );
+  m_gpuToggleButton->setFixedHeight( 24 );
+  m_gpuToggleButton->setStyleSheet(
+    QString("QPushButton { font-size: 11px; padding: 2px 12px; border: 1px solid %1; border-radius: 4px; }"
+            "QPushButton:hover { background-color: %2; }").arg(midHex, highlightHex) );
+  m_gpuToggleButton->setVisible( false );  // Hidden until both GPUs detected
+  gpuHeaderLayout->addWidget( m_gpuToggleButton );
+  gpuHeaderLayout->addStretch();
+  layout->addLayout( gpuHeaderLayout );
+
+  // dGPU gauges (default view)
+  m_dGpuGaugeContainer = new QWidget();
+  QGridLayout *gpuGrid = new QGridLayout( m_dGpuGaugeContainer );
+  gpuGrid->setContentsMargins( 0, 0, 0, 0 );
   gpuGrid->setHorizontalSpacing( 24 );
   gpuGrid->setVerticalSpacing( 16 );
   gpuGrid->addWidget( makeGauge( "dGPU - Temp", "°C", m_gpuTempLabel ), 0, 0 );
-  gpuGrid->addWidget( makeGauge( "dGPU - Frequency", "GHz", m_gpuFrequencyLabel ), 0, 1 );
-  gpuGrid->addWidget( makeGauge( "dGPU - Fan", "%", m_gpuFanSpeedLabel ), 0, 2 );
+  gpuGrid->addWidget( makeGauge( "dGPU - Fan", "%", m_gpuFanSpeedLabel ), 0, 1 );
+  gpuGrid->addWidget( makeGauge( "dGPU - Frequency", "GHz", m_gpuFrequencyLabel ), 0, 2 );
   gpuGrid->addWidget( makeGauge( "dGPU - Power", "W", m_gpuPowerLabel ), 0, 3 );
-  layout->addLayout( gpuGrid );
+  layout->addWidget( m_dGpuGaugeContainer );
+
+  // iGPU gauges (hidden by default)
+  m_iGpuGaugeContainer = new QWidget();
+  QGridLayout *iGpuGrid = new QGridLayout( m_iGpuGaugeContainer );
+  iGpuGrid->setContentsMargins( 0, 0, 0, 0 );
+  iGpuGrid->setHorizontalSpacing( 24 );
+  iGpuGrid->setVerticalSpacing( 16 );
+  iGpuGrid->addWidget( makeGauge( "iGPU - Temp", "°C", m_iGpuTempLabel ), 0, 0 );
+  iGpuGrid->addWidget( makeGauge( "iGPU - Fan", "%", m_iGpuFanSpeedLabel ), 0, 1 );
+  iGpuGrid->addWidget( makeGauge( "iGPU - Frequency", "GHz", m_iGpuFrequencyLabel ), 0, 2 );
+  iGpuGrid->addWidget( makeGauge( "iGPU - Power", "W", m_iGpuPowerLabel ), 0, 3 );
+  m_iGpuGaugeContainer->setVisible( false );
+  layout->addWidget( m_iGpuGaugeContainer );
 
   // Water cooler section
   m_waterCoolerHeader = new QLabel( "Water Cooler Monitor" );
@@ -270,6 +299,12 @@ void DashboardTab::connectSignals()
            this, &DashboardTab::onGpuFrequencyChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuPowerChanged,
            this, &DashboardTab::onGpuPowerChanged );
+  connect( m_systemMonitor, &SystemMonitor::iGpuFrequencyChanged,
+           this, &DashboardTab::onIGpuFrequencyChanged );
+  connect( m_systemMonitor, &SystemMonitor::iGpuPowerChanged,
+           this, &DashboardTab::onIGpuPowerChanged );
+  connect( m_systemMonitor, &SystemMonitor::iGpuTempChanged,
+           this, &DashboardTab::onIGpuTempChanged );
   connect( m_systemMonitor, &SystemMonitor::fanSpeedChanged,
            this, &DashboardTab::onFanSpeedChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuFanSpeedChanged,
@@ -290,6 +325,11 @@ void DashboardTab::connectSignals()
   // Water cooler enable checkbox → emit signal for cross-tab sync
   connect( m_waterCoolerEnableCheckBox, &QCheckBox::toggled,
            this, &DashboardTab::waterCoolerEnableChanged );
+
+  // GPU toggle button switches between dGPU and iGPU views
+  connect( m_gpuToggleButton, &QPushButton::clicked, this, [this]() {
+    switchGpuView( !m_showingIGpu );
+  } );
 }
 
 void DashboardTab::updateWaterCoolerStatus()
@@ -403,6 +443,7 @@ void DashboardTab::onGpuTempChanged()
   if ( ok && tempValue > 0 )
   {
     m_gpuTempLabel->setText( temp );
+    if ( !m_hasDGpuData ) { m_hasDGpuData = true; updateGpuSwitchVisibility(); }
   }
   else
   {
@@ -425,6 +466,7 @@ void DashboardTab::onGpuFrequencyChanged()
       {
         double ghz = mhz / 1000.0;
         m_gpuFrequencyLabel->setText( QString::number( ghz, 'f', 1 ) );
+        if ( !m_hasDGpuData ) { m_hasDGpuData = true; updateGpuSwitchVisibility(); }
         return;
       }
       m_gpuFrequencyLabel->setText( "--" );
@@ -447,6 +489,64 @@ void DashboardTab::onGpuPowerChanged()
     return;
   }
   m_gpuPowerLabel->setText( "--" );
+}
+
+void DashboardTab::onIGpuFrequencyChanged()
+{
+  QString freq = m_systemMonitor->iGpuFrequency();
+
+  if ( freq.endsWith( " MHz" ) )
+  {
+    bool ok = false;
+    double mhz = freq.left( freq.size() - 4 ).trimmed().toDouble( &ok );
+
+    if ( ok )
+    {
+      if ( mhz > 0.0 )
+      {
+        double ghz = mhz / 1000.0;
+        m_iGpuFrequencyLabel->setText( QString::number( ghz, 'f', 2 ) );
+        if ( !m_hasIGpuData ) { m_hasIGpuData = true; updateGpuSwitchVisibility(); }
+        return;
+      }
+      m_iGpuFrequencyLabel->setText( "--" );
+      return;
+    }
+  }
+  m_iGpuFrequencyLabel->setText( freq.isEmpty() ? "--" : freq );
+}
+
+void DashboardTab::onIGpuPowerChanged()
+{
+  QString power = m_systemMonitor->iGpuPower();
+  QString trimmed = power.replace( " W", "" ).trimmed();
+  bool ok = false;
+  double watts = trimmed.toDouble( &ok );
+
+  if ( ok && watts > 0.0 )
+  {
+    m_iGpuPowerLabel->setText( QString::number( watts, 'f', 1 ) );
+    if ( !m_hasIGpuData ) { m_hasIGpuData = true; updateGpuSwitchVisibility(); }
+    return;
+  }
+  m_iGpuPowerLabel->setText( "--" );
+}
+
+void DashboardTab::onIGpuTempChanged()
+{
+  QString temp = m_systemMonitor->iGpuTemp().replace( "°C", "" ).trimmed();
+  bool ok = false;
+  int tempValue = temp.toInt( &ok );
+
+  if ( ok && tempValue > 0 )
+  {
+    m_iGpuTempLabel->setText( temp );
+    if ( !m_hasIGpuData ) { m_hasIGpuData = true; updateGpuSwitchVisibility(); }
+  }
+  else
+  {
+    m_iGpuTempLabel->setText( "---" );
+  }
 }
 
 // Water cooler status slots
@@ -512,6 +612,25 @@ void DashboardTab::setWaterCoolerEnabled( bool enabled )
   m_waterCoolerEnableCheckBox->blockSignals( true );
   m_waterCoolerEnableCheckBox->setChecked( enabled );
   m_waterCoolerEnableCheckBox->blockSignals( false );
+}
+
+void DashboardTab::switchGpuView( bool showIGpu )
+{
+  m_showingIGpu = showIGpu;
+  m_dGpuGaugeContainer->setVisible( !showIGpu );
+  m_iGpuGaugeContainer->setVisible( showIGpu );
+  m_gpuToggleButton->setText( showIGpu ? "Show dGPU" : "Show iGPU" );
+}
+
+void DashboardTab::updateGpuSwitchVisibility()
+{
+  // Show the toggle button only when both dGPU and iGPU data is available
+  const bool bothAvailable = m_hasDGpuData && m_hasIGpuData;
+  m_gpuToggleButton->setVisible( bothAvailable );
+
+  // If only iGPU data exists (no dGPU), automatically show iGPU view
+  if ( m_hasIGpuData && !m_hasDGpuData )
+    switchGpuView( true );
 }
 
 }

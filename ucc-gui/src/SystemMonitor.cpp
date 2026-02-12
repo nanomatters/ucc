@@ -154,6 +154,48 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get iGPU Frequency
+  {
+    QString iGpuFreq = "--";
+
+    if ( auto freq = m_client->getIGpuFrequency(); freq && *freq > 0 )  
+      iGpuFreq = QString::number( *freq ) + " MHz";
+
+    if ( m_iGpuFrequency != iGpuFreq )
+    {
+      m_iGpuFrequency = iGpuFreq;
+      emit iGpuFrequencyChanged();
+    }
+  }
+
+  // Get iGPU Power
+  {
+    QString iGpuPow = "--";
+
+    if ( auto power = m_client->getIGpuPower(); power && *power > 0.0 )
+      iGpuPow = QString::number( *power, 'f', 1 ) + " W";
+
+    if ( m_iGpuPower != iGpuPow )
+    {
+      m_iGpuPower = iGpuPow;
+      emit iGpuPowerChanged();
+    }
+  }
+
+  // Get iGPU Temperature
+  {
+    QString iGpuTmp = "--";
+
+    if ( auto temp = m_client->getIGpuTemperature(); temp && *temp > 0 )
+      iGpuTmp = QString::number( *temp ) + "°C";
+
+    if ( m_iGpuTemp != iGpuTmp )
+    {
+      m_iGpuTemp = iGpuTmp;
+      emit iGpuTempChanged();
+    }
+  }
+
   // Get Fan Speed (percentage)
   {
     QString fanSpd = "--";

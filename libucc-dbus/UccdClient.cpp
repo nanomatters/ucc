@@ -922,6 +922,11 @@ std::optional< int > UccdClient::getGpuTemperature()
   return readJsonInt( m_interface.get(), "GetIGpuInfoValuesJSON", "temp" );
 }
 
+std::optional< int > UccdClient::getIGpuTemperature()
+{
+  return readJsonInt( m_interface.get(), "GetIGpuInfoValuesJSON", "temp" );
+}
+
 std::optional< int > UccdClient::getCpuFrequency()
 {
   QFile file( "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" );
@@ -947,6 +952,11 @@ std::optional< int > UccdClient::getGpuFrequency()
   return readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "coreFreq" );
 }
 
+std::optional< int > UccdClient::getIGpuFrequency()
+{
+  return readJsonInt( m_interface.get(), "GetIGpuInfoValuesJSON", "coreFrequency" );
+}
+
 std::optional< double > UccdClient::getCpuPower()
 {
   return readJsonDouble( m_interface.get(), "GetCpuPowerValuesJSON", "powerDraw" );
@@ -958,6 +968,11 @@ std::optional< double > UccdClient::getGpuPower()
   {
     return power;
   }
+  return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
+}
+
+std::optional< double > UccdClient::getIGpuPower()
+{
   return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
 }
 

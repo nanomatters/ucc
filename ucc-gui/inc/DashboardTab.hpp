@@ -18,6 +18,7 @@
 #include <QWidget>
 #include <QLabel>
 #include <QCheckBox>
+#include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -54,6 +55,9 @@ namespace ucc
     void onGpuTempChanged();
     void onGpuFrequencyChanged();
     void onGpuPowerChanged();
+    void onIGpuFrequencyChanged();
+    void onIGpuPowerChanged();
+    void onIGpuTempChanged();
     void onFanSpeedChanged();
     void onGpuFanSpeedChanged();
     void onWaterCoolerConnected();
@@ -68,6 +72,8 @@ namespace ucc
     void setupUI();
     void connectSignals();
     void updateWaterCoolerStatus();
+    void switchGpuView( bool showIGpu );
+    void updateGpuSwitchVisibility();
 
     SystemMonitor *m_systemMonitor;
     ProfileManager *m_profileManager;
@@ -86,11 +92,23 @@ namespace ucc
     QLabel *m_gpuFanSpeedLabel = nullptr;
     QLabel *m_cpuPowerLabel = nullptr;
     QLabel *m_gpuPowerLabel = nullptr;
+    QLabel *m_iGpuTempLabel = nullptr;
+    QLabel *m_iGpuFanSpeedLabel = nullptr;
+    QLabel *m_iGpuFrequencyLabel = nullptr;
+    QLabel *m_iGpuPowerLabel = nullptr;
     QLabel *m_waterCoolerFanSpeedLabel = nullptr;
     QLabel *m_waterCoolerPumpLabel = nullptr;
     QGridLayout *m_waterCoolerGrid = nullptr;
     QLabel *m_waterCoolerHeader = nullptr;
     QCheckBox *m_waterCoolerEnableCheckBox = nullptr;
+
+    // GPU view toggle (dGPU / iGPU)
+    QPushButton *m_gpuToggleButton = nullptr;
+    QWidget *m_dGpuGaugeContainer = nullptr;
+    QWidget *m_iGpuGaugeContainer = nullptr;
+    bool m_showingIGpu = false;
+    bool m_hasDGpuData = false;
+    bool m_hasIGpuData = false;
 
     bool m_waterCoolerSupported = false;
   };

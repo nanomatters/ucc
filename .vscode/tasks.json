@@ -134,6 +134,12 @@
 			"label": "rebuild-gui",
 			"type": "shell",
 			"command": "cd /opt/devel/git/ucc/build && ninja -j4"
+		},
+		{
+			"label": "build-all",
+			"type": "shell",
+			"command": "cd /opt/devel/git/ucc/build && ninja -j4 2>&1; echo EXIT_CODE=$?",
+			"isBackground": false
 		}
 	]
 }

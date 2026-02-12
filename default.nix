@@ -42,7 +42,7 @@ stdenv.mkDerivation rec {
   ];
 
   cmakeFlags = [
-    "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+    "-DCMAKE_BUILD_TYPE=Release"
     "-DBUILD_GUI=ON"
     "-DBUILD_TRAY=ON"
     "-DBUILD_WIDGETS=ON"
@@ -67,7 +67,7 @@ stdenv.mkDerivation rec {
 
   meta = with lib; {
     description = "Uniwill Control Center - System control application suite";
-    homepage = "https://github.com/tuxedocomputers/uniwill-control-center";
+    homepage = "https://github.com/nanomatters/ucc";
     license = licenses.gpl3Plus;
     platforms = platforms.linux;
     maintainers = [ ];

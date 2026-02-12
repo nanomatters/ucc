@@ -40,6 +40,9 @@ class SystemMonitor : public QObject
   Q_PROPERTY( QString gpuTemp READ gpuTemp NOTIFY gpuTempChanged )
   Q_PROPERTY( QString gpuFrequency READ gpuFrequency NOTIFY gpuFrequencyChanged )
   Q_PROPERTY( QString gpuPower READ gpuPower NOTIFY gpuPowerChanged )
+  Q_PROPERTY( QString iGpuFrequency READ iGpuFrequency NOTIFY iGpuFrequencyChanged )
+  Q_PROPERTY( QString iGpuPower READ iGpuPower NOTIFY iGpuPowerChanged )
+  Q_PROPERTY( QString iGpuTemp READ iGpuTemp NOTIFY iGpuTempChanged )
   Q_PROPERTY( QString cpuFanSpeed READ cpuFanSpeed NOTIFY fanSpeedChanged )
   Q_PROPERTY( QString gpuFanSpeed READ gpuFanSpeed NOTIFY gpuFanSpeedChanged )
   Q_PROPERTY( QString waterCoolerFanSpeed READ waterCoolerFanSpeed NOTIFY waterCoolerFanSpeedChanged )
@@ -71,6 +74,9 @@ public:
   QString gpuTemp() const { return m_gpuTemp; }
   QString gpuFrequency() const { return m_gpuFrequency; }
   QString gpuPower() const { return m_gpuPower; }
+  QString iGpuFrequency() const { return m_iGpuFrequency; }
+  QString iGpuPower() const { return m_iGpuPower; }
+  QString iGpuTemp() const { return m_iGpuTemp; }
   QString cpuFanSpeed() const { return m_fanSpeed; }
   QString gpuFanSpeed() const { return m_gpuFanSpeed; }
   QString waterCoolerFanSpeed() const { return m_waterCoolerFanSpeed; }
@@ -113,6 +119,9 @@ signals:
   void gpuTempChanged();
   void gpuFrequencyChanged();
   void gpuPowerChanged();
+  void iGpuFrequencyChanged();
+  void iGpuPowerChanged();
+  void iGpuTempChanged();
   void fanSpeedChanged();
   void gpuFanSpeedChanged();
   void waterCoolerFanSpeedChanged();
@@ -149,6 +158,9 @@ private:
   QString m_gpuTemp = "0°C";
   QString m_gpuFrequency = "0 MHz";
   QString m_gpuPower = "0 W";
+  QString m_iGpuFrequency = "0 MHz";
+  QString m_iGpuPower = "0 W";
+  QString m_iGpuTemp = "0\u00b0C";
   QString m_fanSpeed = "0 RPM";
   QString m_gpuFanSpeed = "0 RPM";
   QString m_waterCoolerFanSpeed = "--";

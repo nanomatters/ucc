@@ -145,10 +145,13 @@ public:
   // System Monitoring
   std::optional< int > getCpuTemperature();
   std::optional< int > getGpuTemperature();
+  std::optional< int > getIGpuTemperature();
   std::optional< int > getCpuFrequency();
   std::optional< int > getGpuFrequency();
+  std::optional< int > getIGpuFrequency();
   std::optional< double > getCpuPower();
   std::optional< double > getGpuPower();
+  std::optional< double > getIGpuPower();
   std::optional< int > getFanSpeedRPM();
   std::optional< int > getGpuFanSpeedRPM();
   std::optional< int > getFanSpeedPercent();
