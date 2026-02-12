@@ -55,6 +55,12 @@ stdenv.mkDerivation rec {
     cp uccd/uccd.service $out/lib/systemd/system/
     cp uccd/uccd-sleep.service $out/lib/systemd/system/
 
+    # Install D-Bus service and policy files
+    mkdir -p $out/share/dbus-1/system-services
+    cp uccd/com.uniwill.uccd.service $out/share/dbus-1/system-services/
+    mkdir -p $out/share/dbus-1/system.d
+    cp uccd/com.uniwill.uccd.conf $out/share/dbus-1/system.d/
+
     # Install desktop files and icons
     mkdir -p $out/share/applications
     cp ucc-gui/ucc-gui.desktop $out/share/applications/

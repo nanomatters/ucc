@@ -85,6 +85,7 @@ systemctl daemon-reload > /dev/null 2>&1 || true
 %{_unitdir}/uccd.service
 %{_unitdir}/uccd-sleep.service
 %{_datadir}/dbus-1/system-services/com.uniwill.uccd.service
+%{_datadir}/dbus-1/system.d/com.uniwill.uccd.conf
 %dir %{_sysconfdir}/ucc
 %{_datadir}/applications/ucc-gui.desktop
 %{_datadir}/applications/ucc-tray.desktop

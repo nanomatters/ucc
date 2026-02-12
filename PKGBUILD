@@ -1,5 +1,3 @@
-# Maintainer: Uniwill <support@uniwill.io>
-
 pkgname=ucc
 pkgbase=ucc
 pkgver=0.1.0
@@ -36,6 +34,10 @@ package() {
   # Install systemd service files
   install -Dm644 "uccd/uccd.service" "${pkgdir}/usr/lib/systemd/system/uccd.service"
   install -Dm644 "uccd/uccd-sleep.service" "${pkgdir}/usr/lib/systemd/system/uccd-sleep.service"
+
+  # Install D-Bus service and policy files
+  install -Dm644 "uccd/com.uniwill.uccd.service" "${pkgdir}/usr/share/dbus-1/system-services/com.uniwill.uccd.service"
+  install -Dm644 "uccd/com.uniwill.uccd.conf" "${pkgdir}/usr/share/dbus-1/system.d/com.uniwill.uccd.conf"
 
   # Create configuration directory
   install -d "${pkgdir}/etc/ucc"

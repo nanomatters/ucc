@@ -122,6 +122,8 @@ deb: dist
 	@mkdir -p dist/deb
 	@cd dist && tar xzf $(ARCHIVE)
 	@cp -r debian dist/ucc-$(VERSION)/
+	@# Update changelog with timestamp
+	@sed -i '1s/(.*)/(0.1.0+$(RELEASE_TS))/' dist/ucc-$(VERSION)/debian/changelog
 	@cd dist/ucc-$(VERSION) && debuild -uc -us
 	@echo "Debian packages created in dist/"
 
