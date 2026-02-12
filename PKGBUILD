@@ -1,5 +1,3 @@
-# Maintainer: Uniwill <support@uniwill.io>
-
 pkgname=ucc
 pkgbase=ucc
 pkgver=0.1.0
