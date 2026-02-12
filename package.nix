@@ -4,33 +4,21 @@
 , kdePackages
 , kf6 ? null
 , stdenv
-, fetchFromGitHub
 , nlohmann_json
 , pkg-config
 , libxrandr
 , systemd
 , makeWrapper
 , tuxedo-drivers ? null
-, src ? null
+, src ? ./.   # default to the source tree containing this file
 , version ? "0.0.1"
-, rev ? null
-, hash ? lib.fakeHash
 }:
 
-let
-  upstreamRev = if rev != null then rev else version;
-  upstreamSrc = fetchFromGitHub {
-    owner = "nanomatters";
-    repo = "ucc";
-    rev = upstreamRev;
-    inherit hash;
-  };
-in
 stdenv.mkDerivation {
   pname = "ucc";
   inherit version;
 
-  src = if src != null then src else upstreamSrc;
+  inherit src;
 
   dontWrapQtApps = true;
 
