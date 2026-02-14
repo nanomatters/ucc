@@ -712,7 +712,6 @@ QString ProfileManager::getFanProfile( const QString &name )
               for ( int i = 0; i < arr.size() && i < 8; ++i ) {
                 if ( arr[i].isObject() ) temps << QString::number( arr[i].toObject()["temp"].toInt() );
               }
-              qDebug() << "[ProfileManager] Returning CUSTOM fan profile" << name << "CPU points:" << arr.size() << "sample temps:" << temps;
 
               // check spacing
               if ( arr.size() > 1 ) {
@@ -751,7 +750,6 @@ QString ProfileManager::getFanProfile( const QString &name )
         for ( int i = 0; i < arr.size() && i < 8; ++i ) {
           if ( arr[i].isObject() ) temps << QString::number( arr[i].toObject()["temp"].toInt() );
         }
-        qDebug() << "[ProfileManager] Returning BUILT-IN fan profile" << name << "CPU points:" << arr.size() << "sample temps:" << temps;
 
         // check spacing
         if ( arr.size() > 1 ) {

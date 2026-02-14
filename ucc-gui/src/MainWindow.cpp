@@ -137,9 +137,6 @@ MainWindow::MainWindow( QWidget *parent )
   m_currentFanProfile = ( m_fanControlTab && m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
     ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
 
-  // Update fan tab visibility now that profiles are loaded
-  updateFanTabVisibility();
-
   // Startup complete — allow hardware interaction from now on
   m_initializing = false;
 
@@ -168,7 +165,6 @@ void MainWindow::setupUI()
 
   // Place the Fan Control tab directly after Profiles and rename it
   setupFanControlTab();
-  updateFanTabVisibility(); // Set initial visibility based on current profile
   setupKeyboardBacklightPage();
   setupHardwarePage();
 }
@@ -184,7 +180,8 @@ void MainWindow::setupFanControlTab()
   m_fanControlTab = new FanControlTab( m_UccdClient.get(), m_profileManager.get(), m_waterCoolerSupported, this );
   connectFanControlTab();
 
-  // Load initial fan profile selection if available
+  m_tabs->addTab( m_fanControlTab, "Profile Fan Control" );
+
   if ( m_fanControlTab->fanProfileCombo()->count() > 0 )
     onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentText() );
 }
@@ -234,20 +231,7 @@ void MainWindow::connectFanControlTab()
   } );
 }
 
-void MainWindow::updateFanTabVisibility()
-{
-  qDebug() << "=== updateFanTabVisibility called (modified: always show fan tab) ===";
-  bool currentlyVisible = (m_tabs->indexOf(m_fanControlTab) != -1);
 
-  qDebug() << "updateFanTabVisibility: currentlyVisible=" << currentlyVisible;
-
-  // Always ensure the fan tab is available; do not hide it for built-in profiles
-  if ( !currentlyVisible )
-  {
-    qDebug() << "Adding fan tab (always visible now)";
-    m_tabs->addTab(m_fanControlTab, "Profile Fan Control");
-  }
-}
 
 void MainWindow::setupProfilesPage()
 {
@@ -769,7 +753,6 @@ void MainWindow::connectSignals()
     if ( m_initializing ) return;  // defer to onAllProfilesChanged after init
     qDebug() << "activeProfileChanged signal received, updating UI";
     loadProfileDetails( m_profileManager->activeProfile() );
-    updateFanTabVisibility();
   } );
 
   connect( m_profileManager.get(), &ProfileManager::customKeyboardProfilesChanged,
@@ -817,16 +800,14 @@ void MainWindow::connectSignals()
   connect( m_minFrequencySlider, &QSlider::sliderReleased,
            this, [this]() {
     int currentValue = m_minFrequencySlider->value();
-    int snapped = snapToAvailableFrequency( currentValue );
-    if ( snapped != currentValue )
+    if ( int snapped = snapToAvailableFrequency( currentValue ); snapped != currentValue )
       m_minFrequencySlider->setValue( snapped );
   } );
 
   connect( m_maxFrequencySlider, &QSlider::sliderReleased,
            this, [this]() {
     int currentValue = m_maxFrequencySlider->value();
-    int snapped = snapToAvailableFrequency( currentValue );
-    if ( snapped != currentValue )
+    if ( int snapped = snapToAvailableFrequency( currentValue ); snapped != currentValue )
       m_maxFrequencySlider->setValue( snapped );
   } );
 

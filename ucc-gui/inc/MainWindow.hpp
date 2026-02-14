@@ -130,7 +130,6 @@ namespace ucc
     void updateButtonStates();
     void setupFanControlTab();
     void connectFanControlTab();
-    void updateFanTabVisibility();
     void updateProfileEditingWidgets( bool isCustom );
 
     std::unique_ptr< ProfileManager > m_profileManager;
