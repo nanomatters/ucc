@@ -116,14 +116,6 @@ MainWindow::MainWindow( QWidget *parent )
   // Initialize status bar
   statusBar()->showMessage( "Ready" );
 
-  // Initialize hardware limits first before loading profiles
-  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  qDebug() << "Constructor: Hardware limits initialized:";
-  for ( size_t i = 0; i < hardwareLimits.size(); ++i )
-  {
-    qDebug() << "  Limit" << (int)i << "=" << hardwareLimits[i];
-  }
-
   // Load initial data — refresh() emits signals that populate the UI.
   // Block the profile combo to avoid cascading loadProfileDetails calls.
   m_profileCombo->blockSignals( true );
@@ -133,9 +125,9 @@ MainWindow::MainWindow( QWidget *parent )
   // Now populate the combo and load the active profile exactly once.
   onAllProfilesChanged();
 
-  // Initialize current fan profile to first available fan profile (if any)
+  // Initialize current fan profile ID to first available fan profile (if any)
   m_currentFanProfile = ( m_fanControlTab && m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
-    ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
+    ? m_fanControlTab->fanProfileCombo()->currentData().toString() : QString();
 
   // Startup complete — allow hardware interaction from now on
   m_initializing = false;
@@ -183,7 +175,7 @@ void MainWindow::setupFanControlTab()
   m_tabs->addTab( m_fanControlTab, "Profile Fan Control" );
 
   if ( m_fanControlTab->fanProfileCombo()->count() > 0 )
-    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentText() );
+    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentData().toString() );
 }
 
 void MainWindow::connectFanControlTab()
@@ -459,8 +451,11 @@ void MainWindow::setupProfilesPage()
   QLabel *keyboardProfileLabel = new QLabel( "Keyboard profile" );
   m_profileKeyboardProfileCombo = new QComboBox();
 
-  for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-    m_profileKeyboardProfileCombo->addItem( name );
+  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  {
+    QJsonObject o = v.toObject();
+    m_profileKeyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+  }
 
   detailsLayout->addWidget( keyboardProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileKeyboardProfileCombo, row, 1 );
@@ -499,16 +494,25 @@ void MainWindow::setupProfilesPage()
 
   QLabel *fanProfileLabel = new QLabel( "Fan profile" );
   m_profileFanProfileCombo = new QComboBox();
-  if ( auto names = m_UccdClient->getFanProfileNames() )
+  // Add built-in fan profiles from daemon (id + name)
+  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
   {
-    for ( const auto &name : *names )
-      m_profileFanProfileCombo->addItem( QString::fromStdString( name ) );
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      m_profileFanProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
   }
   // Append persisted custom fan profiles loaded from settings
-  for ( const auto &name : m_profileManager->customFanProfiles() )
+  for ( const auto &v : m_profileManager->customFanProfilesData() )
   {
-    if ( m_profileFanProfileCombo->findText( name ) == -1 )
-      m_profileFanProfileCombo->addItem( name );
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      QString name = o["name"].toString();
+      if ( m_profileFanProfileCombo->findText( name ) == -1 )
+        m_profileFanProfileCombo->addItem( name, o["id"].toString() );
+    }
   }
   detailsLayout->addWidget( fanProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileFanProfileCombo, row, 1 );
@@ -752,7 +756,7 @@ void MainWindow::connectSignals()
            this, [this]() {
     if ( m_initializing ) return;  // defer to onAllProfilesChanged after init
     qDebug() << "activeProfileChanged signal received, updating UI";
-    loadProfileDetails( m_profileManager->activeProfile() );
+    loadProfileDetails( m_profileManager->activeProfileId() );
   } );
 
   connect( m_profileManager.get(), &ProfileManager::customKeyboardProfilesChanged,
@@ -887,7 +891,7 @@ void MainWindow::connectSignals()
              m_fanControlTab->fanProfileCombo()->setCurrentIndex(index);
              m_fanControlTab->fanProfileCombo()->blockSignals(false);
              // Load the fan curves for the new profile
-             onFanProfileChanged(m_profileFanProfileCombo->currentText());
+             onFanProfileChanged(m_profileFanProfileCombo->currentData().toString());
            } );
 
   connect( m_offsetFanSpeedSlider, &QSlider::valueChanged,
@@ -1014,10 +1018,10 @@ void MainWindow::onTabChanged( int index )
     reloadKeyboardProfiles();
 
     // Auto-load the keyboard profile from the active profile's settings
-    QString activeProfile = m_profileManager->activeProfile();
-    if ( !activeProfile.isEmpty() )
+    QString activeProfileId = m_profileManager->activeProfileId();
+    if ( !activeProfileId.isEmpty() )
     {
-      QString profileJson = m_profileManager->getProfileDetails( m_profileManager->getProfileIdByName( activeProfile ) );
+      QString profileJson = m_profileManager->getProfileDetails( activeProfileId );
       if ( !profileJson.isEmpty() )
       {
         QJsonDocument doc = QJsonDocument::fromJson( profileJson.toUtf8() );
@@ -1027,10 +1031,20 @@ void MainWindow::onTabChanged( int index )
           // Check for embedded keyboard profile name
           if ( obj.contains( "selectedKeyboardProfile" ) )
           {
-            QString keyboardProfile = obj["selectedKeyboardProfile"].toString();
-            if ( !keyboardProfile.isEmpty() && m_keyboardProfileCombo->findText( keyboardProfile ) != -1 )
+            QString keyboardProfileId = obj["selectedKeyboardProfile"].toString();
+            // Find by ID in combo userData
+            int kbIdx = -1;
+            for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
             {
-              m_keyboardProfileCombo->setCurrentText( keyboardProfile );
+              if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+              { kbIdx = i; break; }
+            }
+            // Fallback: try matching by name (legacy data)
+            if ( kbIdx < 0 )
+              kbIdx = m_keyboardProfileCombo->findText( keyboardProfileId );
+            if ( kbIdx >= 0 )
+            {
+              m_keyboardProfileCombo->setCurrentIndex( kbIdx );
               // This triggers onKeyboardProfileChanged to load the profile data
             }
           }
@@ -1039,9 +1053,17 @@ void MainWindow::onTabChanged( int index )
           {
             QJsonObject keyboardObj = obj["keyboard"].toObject();
             QString keyboardProfile = keyboardObj["profile"].toString();
-            if ( !keyboardProfile.isEmpty() && m_keyboardProfileCombo->findText( keyboardProfile ) != -1 )
+            int kbIdx = -1;
+            for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
             {
-              m_keyboardProfileCombo->setCurrentText( keyboardProfile );
+              if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfile )
+              { kbIdx = i; break; }
+            }
+            if ( kbIdx < 0 )
+              kbIdx = m_keyboardProfileCombo->findText( keyboardProfile );
+            if ( kbIdx >= 0 )
+            {
+              m_keyboardProfileCombo->setCurrentIndex( kbIdx );
               // This triggers onKeyboardProfileChanged to load the profile data
             }
           }
@@ -1054,10 +1076,16 @@ void MainWindow::onTabChanged( int index )
 // Profile page slots
 void MainWindow::onCustomKeyboardProfilesChanged()
 {
-  // Repopulate keyboard profile combos
+  // Repopulate keyboard profile combos with ID userData
   m_profileKeyboardProfileCombo->clear();
-  for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-    m_profileKeyboardProfileCombo->addItem( name );
+  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  {
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      m_profileKeyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
+  }
 
   reloadKeyboardProfiles();
 }
@@ -1067,10 +1095,11 @@ void MainWindow::onProfileIndexChanged( int index )
   if ( index >= 0 )
   {
     QString profileName = m_profileCombo->currentText();
+    QString profileId = m_profileCombo->currentData().toString();
     qDebug() << "Profile selected:" << profileName << "at index" << index;
     m_selectedProfileIndex = index;
-    loadProfileDetails( profileName );
-    m_removeProfileButton->setEnabled( m_profileManager->customProfiles().contains( profileName ) );
+    loadProfileDetails( profileId );
+    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( profileId ) );
     m_copyProfileButton->setEnabled( true );
     m_saveButton->setEnabled( true );
     statusBar()->showMessage( "Profile selected: " + profileName + " (click Apply to activate)" );
@@ -1079,24 +1108,33 @@ void MainWindow::onProfileIndexChanged( int index )
 
 void MainWindow::onAllProfilesChanged()
 {
-
-  // First, ensure hardware limits are loaded
-  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-
   // Block combo signals to prevent cascading loadProfileDetails calls
   // while we repopulate the list.
   m_profileCombo->blockSignals( true );
   m_profileCombo->clear();
-  m_profileCombo->addItems( m_profileManager->allProfiles() );
+  // Populate combo with name + ID userData
+  const QStringList &names = m_profileManager->allProfiles();
+  const QJsonArray &defaultData = m_profileManager->defaultProfilesData();
+  const QJsonArray &customData = m_profileManager->customProfilesData();
+  for ( const auto &p : defaultData )
+  {
+    if ( p.isObject() )
+      m_profileCombo->addItem( p.toObject()["name"].toString(), p.toObject()["id"].toString() );
+  }
+  for ( const auto &p : customData )
+  {
+    if ( p.isObject() )
+      m_profileCombo->addItem( p.toObject()["name"].toString(), p.toObject()["id"].toString() );
+  }
   m_profileCombo->setCurrentIndex( m_profileManager->activeProfileIndex() );
   m_profileCombo->blockSignals( false );
   m_selectedProfileIndex = m_profileManager->activeProfileIndex();
 
   // Load the active profile details
-  QString activeProfile = m_profileManager->activeProfile();
-  if ( !activeProfile.isEmpty() )
+  QString activeProfileId = m_profileManager->activeProfileId();
+  if ( !activeProfileId.isEmpty() )
   {
-    loadProfileDetails( activeProfile );
+    loadProfileDetails( activeProfileId );
   }
   // Custom profiles may have changed; reload fan profiles (adds custom entries to the fan combo)
   reloadFanProfiles();
@@ -1190,16 +1228,12 @@ void MainWindow::onGpuPowerChanged( int value )
   m_gpuPowerValue->setText( QString::number( value ) + " W" );
 }
 
-void MainWindow::loadProfileDetails( const QString &profileName )
+void MainWindow::loadProfileDetails( const QString &profileId )
 {
   // Reset change flag when loading a new profile
   m_profileChanged = false;
-  m_currentLoadedProfile = profileName;
+  m_currentLoadedProfile = profileId;
   updateButtonStates();
-
-
-  // Get the profile ID from the profile name
-  QString profileId = m_profileManager->getProfileIdByName( profileName );
 
 
   if ( profileId.isEmpty() )
@@ -1278,14 +1312,25 @@ void MainWindow::loadProfileDetails( const QString &profileName )
 
     if ( fanObj.contains( "fanProfile" ) )
     {
-      QString fanProfile = fanObj["fanProfile"].toString( "Balanced" );
-      int idx = m_profileFanProfileCombo->findText( fanProfile );
+      QString fanProfileRef = fanObj["fanProfile"].toString( "fan-balanced" );
+      // Try finding by ID userData first (new format), then by text (legacy/name)
+      int idx = -1;
+      for ( int i = 0; i < m_profileFanProfileCombo->count(); ++i )
+      {
+        if ( m_profileFanProfileCombo->itemData( i ).toString() == fanProfileRef )
+        {
+          idx = i;
+          break;
+        }
+      }
+      if ( idx < 0 )
+        idx = m_profileFanProfileCombo->findText( fanProfileRef );
 
       if ( idx >= 0 )
       {
         m_profileFanProfileCombo->setCurrentIndex( idx );
         m_fanControlTab->fanProfileCombo()->setCurrentIndex( idx );
-        loadedFanProfile = fanProfile;
+        loadedFanProfile = m_profileFanProfileCombo->itemData( idx ).toString();
       }
     }
 
@@ -1523,12 +1568,21 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   QString loadedKeyboardProfile;
   if ( obj.contains( "selectedKeyboardProfile" ) )
   {
-    QString keyboardProfile = obj["selectedKeyboardProfile"].toString();
-    int idx = m_profileKeyboardProfileCombo->findText( keyboardProfile );
+    QString keyboardProfileId = obj["selectedKeyboardProfile"].toString();
+    // Find by ID in combo userData
+    int idx = -1;
+    for ( int i = 0; i < m_profileKeyboardProfileCombo->count(); ++i )
+    {
+      if ( m_profileKeyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+      { idx = i; break; }
+    }
+    // Fallback: try matching by name (legacy data)
+    if ( idx < 0 )
+      idx = m_profileKeyboardProfileCombo->findText( keyboardProfileId );
     if ( idx >= 0 )
     {
       m_profileKeyboardProfileCombo->setCurrentIndex( idx );
-      loadedKeyboardProfile = keyboardProfile;
+      loadedKeyboardProfile = m_profileKeyboardProfileCombo->itemData( idx ).toString();
     }
   }
   // Fallback: check for old format keyboard.profile field
@@ -1537,12 +1591,19 @@ void MainWindow::loadProfileDetails( const QString &profileName )
     QJsonObject keyboardObj = obj["keyboard"].toObject();
     if ( keyboardObj.contains( "profile" ) )
     {
-      QString keyboardProfile = keyboardObj["profile"].toString();
-      int idx = m_profileKeyboardProfileCombo->findText( keyboardProfile );
+      QString keyboardProfileId = keyboardObj["profile"].toString();
+      int idx = -1;
+      for ( int i = 0; i < m_profileKeyboardProfileCombo->count(); ++i )
+      {
+        if ( m_profileKeyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+        { idx = i; break; }
+      }
+      if ( idx < 0 )
+        idx = m_profileKeyboardProfileCombo->findText( keyboardProfileId );
       if ( idx >= 0 )
       {
         m_profileKeyboardProfileCombo->setCurrentIndex( idx );
-        loadedKeyboardProfile = keyboardProfile;
+        loadedKeyboardProfile = m_profileKeyboardProfileCombo->itemData( idx ).toString();
       }
     }
   }
@@ -1647,7 +1708,7 @@ void MainWindow::loadProfileDetails( const QString &profileName )
 
 
   // Enable/disable editing widgets based on whether profile is custom
-  const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileName ) : false;
+  const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileId ) : false;
   updateProfileEditingWidgets( isCustom );
 
 }
@@ -1712,7 +1773,7 @@ void MainWindow::updateButtonStates( void)
   // Update profile page buttons if available
   if ( profileTopWidgetsAvailable() )
   {
-    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( m_profileCombo->currentText() ) );
+    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( m_profileCombo->currentData().toString() ) );
   }
 
   // Delegate fan profile button states to FanControlTab
@@ -1737,8 +1798,8 @@ void MainWindow::onApplyClicked()
 void MainWindow::onSaveClicked()
 {
   QString profileName = m_profileCombo->currentText();
-  QString profileId = m_profileManager->getProfileIdByName( profileName );
-  const bool isCustom = m_profileManager->isCustomProfile( profileName );
+  QString profileId = m_profileCombo->currentData().toString();
+  const bool isCustom = m_profileManager->isCustomProfile( profileId );
 
   if ( isCustom )
   {
@@ -1761,8 +1822,9 @@ void MainWindow::onSaveClicked()
     QJsonObject fanObj;
 
     // Get the full fan profile JSON and embed tableCPU/tableGPU
+    QString fanProfileId = m_profileFanProfileCombo->currentData().toString();
     QString fanProfileName = m_profileFanProfileCombo->currentText();
-    QString fanProfileJSON = m_profileManager->getFanProfile(fanProfileName);
+    QString fanProfileJSON = m_profileManager->getFanProfile(fanProfileId);
 
     if (!fanProfileJSON.isEmpty() && fanProfileJSON != "{}")
     {
@@ -1786,8 +1848,8 @@ void MainWindow::onSaveClicked()
       }
     }
 
-    // Store fan profile name using the key the daemon expects
-    fanObj["fanProfile"] = fanProfileName;
+    // Store fan profile ID using the key the daemon expects
+    fanObj["fanProfile"] = fanProfileId;
     fanObj["offsetFanspeed"] = m_offsetFanSpeedSlider->value();
     // Persist same-speed setting
     fanObj["sameSpeed"] = m_sameFanSpeedCheckBox ? m_sameFanSpeedCheckBox->isChecked() : true;
@@ -1823,10 +1885,11 @@ void MainWindow::onSaveClicked()
   // Keyboard settings - embed complete keyboard profile data
   QJsonObject keyboardObj;
 
+  QString keyboardProfileId = m_profileKeyboardProfileCombo->currentData().toString();
   QString keyboardProfileName = m_profileKeyboardProfileCombo->currentText();
 
   // Get the selected keyboard profile data
-  QString keyboardProfileJSON = m_profileManager->getKeyboardProfile(keyboardProfileName);
+  QString keyboardProfileJSON = m_profileManager->getKeyboardProfile(keyboardProfileId);
   if (!keyboardProfileJSON.isEmpty() && keyboardProfileJSON != "{}") {
     QJsonDocument kbDoc = QJsonDocument::fromJson(keyboardProfileJSON.toUtf8());
     if (kbDoc.isObject()) {
@@ -1858,8 +1921,8 @@ void MainWindow::onSaveClicked()
 
   profileObj["keyboard"] = keyboardObj;
 
-  // Embed the selected keyboard profile name at profile level
-  profileObj["selectedKeyboardProfile"] = keyboardProfileName;
+  // Embed the selected keyboard profile ID at profile level
+  profileObj["selectedKeyboardProfile"] = keyboardProfileId;
 
   // Charging profile setting
   if ( m_profileChargingProfileCombo )
@@ -1907,18 +1970,17 @@ void MainWindow::onSaveClicked()
   }
 
   // For both custom and built-in profiles, update stateMap based on mains/battery button states
+  // Batch all stateMap changes into a single D-Bus call (single backup + write)
+  std::map< QString, QString > stateMapUpdates;
   if ( m_mainsButton->isChecked() )
-  {
-    m_profileManager->setStateMap( "power_ac", profileId );
-  }
+    stateMapUpdates["power_ac"] = profileId;
   if ( m_batteryButton->isChecked() )
-  {
-    m_profileManager->setStateMap( "power_bat", profileId );
-  }
+    stateMapUpdates["power_bat"] = profileId;
   if ( m_waterCoolerButton->isChecked() )
-  {
-    m_profileManager->setStateMap( "power_wc", profileId );
-  }
+    stateMapUpdates["power_wc"] = profileId;
+
+  if ( !stateMapUpdates.empty() )
+    m_profileManager->setBatchStateMap( stateMapUpdates );
 
   // Indicate saving; actual success will be reflected when ProfileManager signals
   m_saveInProgress = true;
@@ -1964,7 +2026,7 @@ void MainWindow::onCopyProfileClicked()
   QString current = m_profileCombo->currentText();
 
   // Allow copying any profile (built-in or custom)
-  QString profileId = m_profileManager->getProfileIdByName(current);
+  QString profileId = m_profileCombo->currentData().toString();
   QString json = m_profileManager->getProfileDetails(profileId);
   if (json.isEmpty()) {
     QMessageBox::warning(this, "Error", "Failed to get profile data.");
@@ -2020,9 +2082,10 @@ void MainWindow::onCopyProfileClicked()
 void MainWindow::onRemoveProfileClicked()
 {
   QString currentProfile = m_profileCombo->currentText();
+  QString currentProfileId = m_profileCombo->currentData().toString();
 
   // Check if it's a built-in profile
-  if (!m_profileManager->isCustomProfile(currentProfile)) {
+  if (!m_profileManager->isCustomProfile(currentProfileId)) {
     QMessageBox::information(this, "Cannot Remove",
                             "Built-in profiles cannot be removed.");
     return;
@@ -2036,8 +2099,7 @@ void MainWindow::onRemoveProfileClicked()
   );
 
   if (reply == QMessageBox::Yes) {
-    QString profileId = m_profileManager->getProfileIdByName(currentProfile);
-    m_profileManager->deleteProfile(profileId);
+    m_profileManager->deleteProfile(currentProfileId);
     statusBar()->showMessage( QString("Profile '%1' removed").arg(currentProfile) );
   }
 }
@@ -2058,14 +2120,14 @@ void MainWindow::onProfileComboRenamed()
     return;
   }
 
-  if ( !m_profileManager->isCustomProfile( oldName ) ) {
+  if ( !m_profileManager->isCustomProfile( m_profileCombo->itemData( idx ).toString() ) ) {
     // Cannot rename built-in profiles
     m_profileCombo->setEditText( oldName );
     return;
   }
 
   // Get profile data and update the name
-  QString profileId = m_profileManager->getProfileIdByName( oldName );
+  QString profileId = m_profileCombo->itemData( idx ).toString();
   QString json = m_profileManager->getProfileDetails( profileId );
   if ( json.isEmpty() ) {
     m_profileCombo->setEditText( oldName );
@@ -2109,12 +2171,13 @@ void MainWindow::onKeyboardProfileComboRenamed()
   }
 
   // "Default" is built-in
-  if ( !m_profileManager->customKeyboardProfiles().contains( oldName ) ) {
+  QString keyboardProfileId = m_keyboardProfileCombo->itemData( idx ).toString();
+  if ( keyboardProfileId.isEmpty() || !m_profileManager->customKeyboardProfiles().contains( oldName ) ) {
     m_keyboardProfileCombo->setEditText( oldName );
     return;
   }
 
-  if ( m_profileManager->renameKeyboardProfile( oldName, newName ) ) {
+  if ( m_profileManager->renameKeyboardProfile( keyboardProfileId, newName ) ) {
     m_keyboardProfileCombo->setItemText( idx, newName );
     statusBar()->showMessage( QString("Keyboard profile renamed from '%1' to '%2'").arg( oldName, newName ) );
     updateKeyboardProfileButtonStates();
@@ -2136,8 +2199,9 @@ void MainWindow::onAddFanProfileClicked()
     counter++;
   } while (m_fanControlTab->fanProfileCombo()->findText(profileName) != -1);
 
-  // Add to combo
-  m_fanControlTab->fanProfileCombo()->addItem(profileName);
+  // Add to combo with generated ID
+  QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+  m_fanControlTab->fanProfileCombo()->addItem(profileName, newId);
   m_fanControlTab->fanProfileCombo()->setCurrentText(profileName);
   statusBar()->showMessage( QString("Fan profile '%1' created").arg(profileName) );
 }
@@ -2162,7 +2226,8 @@ void MainWindow::onRemoveFanProfileClicked()
 
   if (reply == QMessageBox::Yes) {
     // Remove from persistent storage and UI
-    if ( m_profileManager->deleteFanProfile( currentProfile ) ) {
+    QString fanProfileId = m_fanControlTab->fanProfileCombo()->currentData().toString();
+    if ( m_profileManager->deleteFanProfile( fanProfileId ) ) {
       // Remove from both fan profile lists
       int idx = m_fanControlTab->fanProfileCombo()->currentIndex();
       if ( idx >= 0 ) m_fanControlTab->fanProfileCombo()->removeItem( idx );
@@ -2177,11 +2242,9 @@ void MainWindow::onRemoveFanProfileClicked()
   }
 }
 
-void MainWindow::onFanProfileChanged(const QString& profileName)
+void MainWindow::onFanProfileChanged(const QString& fanProfileId)
 {
-  Q_UNUSED(profileName);
-
-  QString json = m_profileManager->getFanProfile(profileName);
+  QString json = m_profileManager->getFanProfile(fanProfileId);
   QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
   if (doc.isObject()) {
     QJsonObject obj = doc.object();
@@ -2247,19 +2310,27 @@ void MainWindow::onFanProfileChanged(const QString& profileName)
     }
   }
 
-  // Update the current profile selection
-  m_currentFanProfile = profileName;
+  // Update the current fan profile ID
+  m_currentFanProfile = fanProfileId;
 
-  // Synchronize profile tab fan profile combo with fan tab selection
+  // Synchronize profile tab fan profile combo with fan tab selection (match by ID userData)
   m_profileFanProfileCombo->blockSignals(true);
-  int idx = m_profileFanProfileCombo->findText(profileName);
+  int idx = -1;
+  for ( int i = 0; i < m_profileFanProfileCombo->count(); ++i )
+  {
+    if ( m_profileFanProfileCombo->itemData( i ).toString() == fanProfileId )
+    {
+      idx = i;
+      break;
+    }
+  }
   if (idx >= 0) {
     m_profileFanProfileCombo->setCurrentIndex(idx);
   }
   m_profileFanProfileCombo->blockSignals(false);
 
   // Set editors editable only for custom profiles (those not in built-ins)
-  bool isEditable = !m_fanControlTab->builtinFanProfiles().contains( profileName );
+  bool isEditable = !m_fanControlTab->builtinFanProfiles().contains( m_profileFanProfileCombo->currentText() );
   m_fanControlTab->setEditorsEditable( isEditable );
 
   // Update button states
@@ -2276,8 +2347,6 @@ void MainWindow::onCpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point
 
 void MainWindow::reloadFanProfiles()
 {
-  qDebug() << "Reloading fan profiles from daemon and custom profiles";
-
   // Delegate to FanControlTab which owns the combo and builtin list
   m_fanControlTab->reloadFanProfiles();
 
@@ -2287,13 +2356,14 @@ void MainWindow::reloadFanProfiles()
     m_profileFanProfileCombo->blockSignals(true);
     m_profileFanProfileCombo->clear();
     for ( int i = 0; i < m_fanControlTab->fanProfileCombo()->count(); ++i )
-      m_profileFanProfileCombo->addItem( m_fanControlTab->fanProfileCombo()->itemText(i) );
+      m_profileFanProfileCombo->addItem( m_fanControlTab->fanProfileCombo()->itemText(i),
+                                         m_fanControlTab->fanProfileCombo()->itemData(i) );
     m_profileFanProfileCombo->blockSignals(false);
   }
 
   // Trigger change handler to update editors/buttons
   if ( m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
-    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentText() );
+    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentData().toString() );
   else
     updateButtonStates();
 }
@@ -2335,11 +2405,11 @@ void MainWindow::onPumpPointsChanged(const QVector<PumpCurveEditorWidget::Point>
 
 void MainWindow::onCopyFanProfileClicked()
 {
-  QString currentProfile = m_fanControlTab->fanProfileCombo()->currentText();
-  if ( currentProfile.isEmpty() ) return;
+  QString currentProfileId = m_fanControlTab->fanProfileCombo()->currentData().toString();
+  if ( currentProfileId.isEmpty() ) return;
 
   // Get the current profile data
-  QString json = m_profileManager->getFanProfile( currentProfile );
+  QString json = m_profileManager->getFanProfile( currentProfileId );
   if ( json.isEmpty() ) {
     QMessageBox::warning(this, "Error", "Failed to get fan profile data.");
     return;
@@ -2354,13 +2424,14 @@ void MainWindow::onCopyFanProfileClicked()
     counter++;
   } while ( m_fanControlTab->fanProfileCombo()->findText( profileName ) != -1 );
 
-  // Save it under the new name
-  if ( m_profileManager->setFanProfile( profileName, json ) ) {
-    m_fanControlTab->fanProfileCombo()->addItem( profileName );
+  // Save it under the new name with a new ID
+  QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+  if ( m_profileManager->setFanProfile( newId, profileName, json ) ) {
+    m_fanControlTab->fanProfileCombo()->addItem( profileName, newId );
     if ( m_profileFanProfileCombo && m_profileFanProfileCombo->findText( profileName ) == -1 )
-      m_profileFanProfileCombo->addItem( profileName );
+      m_profileFanProfileCombo->addItem( profileName, newId );
     m_fanControlTab->fanProfileCombo()->setCurrentText( profileName );
-    statusBar()->showMessage( QString("Copied '%1' profile to '%2'").arg(currentProfile).arg(profileName) );
+    statusBar()->showMessage( QString("Copied fan profile to '%1'").arg(profileName) );
   }
   else {
     QMessageBox::warning(this, "Error", "Failed to copy profile to new custom profile.");
@@ -2598,19 +2669,20 @@ void MainWindow::saveFanPoints()
   QJsonDocument doc(obj);
   QString json = doc.toJson(QJsonDocument::Compact);
 
-  const QString current = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
-  if ( current.isEmpty() ) {
+  const QString currentId = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentData().toString() : QString();
+  const QString currentName = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
+  if ( currentId.isEmpty() ) {
     QMessageBox::warning(this, "Save Failed", "No fan profile selected to save to.");
     return;
   }
 
-  if ( m_fanControlTab->builtinFanProfiles().contains( current ) ) {
+  if ( m_fanControlTab->builtinFanProfiles().contains( currentName ) ) {
     QMessageBox::warning(this, "Save Failed", "Cannot overwrite built-in fan profile. Copy it to a custom profile first.");
     return;
   }
 
-  // Save into selected custom profile
-  m_profileManager->setFanProfile( current, json );
+  // Save into selected custom profile (by ID)
+  m_profileManager->setFanProfile( currentId, currentName, json );
 }
 
 

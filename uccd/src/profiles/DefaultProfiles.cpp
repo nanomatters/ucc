@@ -37,7 +37,7 @@ const UccProfile maxEnergySave = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Silent";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
   profile.fan.offsetFanspeed = 0;
 
   profile.odmProfile.name = "power_save";
@@ -64,7 +64,7 @@ const UccProfile silent = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Silent";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -92,7 +92,7 @@ const UccProfile office = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Quiet";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -120,7 +120,7 @@ const UccProfile highPerformance = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -149,7 +149,7 @@ const UccProfile defaultCustomProfile = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -178,7 +178,7 @@ const UccProfile defaultMobileCustomProfileTDP = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -208,7 +208,7 @@ const UccProfile defaultMobileCustomProfileCl = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -235,7 +235,7 @@ const UccProfile highPerformance25WcTGP = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -264,7 +264,7 @@ const UccProfile defaultCustomProfile25WcTGP = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -292,7 +292,7 @@ const UccProfile legacyDefault = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Balanced";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -320,7 +320,7 @@ const UccProfile legacyCoolAndBreezy = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Quiet";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 
@@ -348,7 +348,7 @@ const UccProfile legacyPowersaveExtreme = []()
   profile.webcam.useStatus = true;
 
   profile.fan.useControl = true;
-  profile.fan.fanProfile = "Silent";
+  profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
   profile.fan.autoControlWC = true;
   profile.fan.offsetFanspeed = 0;
 

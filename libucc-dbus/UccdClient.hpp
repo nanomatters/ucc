@@ -25,6 +25,7 @@
 #include <optional>
 #include <functional>
 #include <vector>
+#include <map>
 
 namespace ucc
 {
@@ -55,15 +56,14 @@ public:
   std::optional< std::string > getSettingsJSON();
   std::optional< std::string > getPowerState();
   bool setStateMap( const std::string &state, const std::string &profileId );
+  bool setBatchStateMap( const std::map< std::string, std::string > &entries );
   bool setActiveProfile( const std::string &profileId );
-  bool setActiveProfileByName( const std::string &profileName );
   bool applyProfile( const std::string &profileJSON );
-  std::optional< std::string > getProfileIdByName( const std::string &profileName );
   bool saveCustomProfile( const std::string &profileJSON );
   bool deleteCustomProfile( const std::string &profileId );
-  std::optional< std::string > getFanProfile( const std::string &name );
-  std::optional< std::vector< std::string > > getFanProfileNames();
-  std::optional< bool > setFanProfile( const std::string &name, const std::string &json );
+  std::optional< std::string > getFanProfile( const std::string &fanProfileId );
+  std::optional< std::string > getFanProfilesJSON();
+  std::optional< bool > setFanProfile( const std::string &fanProfileId, const std::string &json );
 
   // Display Control
   bool setDisplayBrightness( int brightness );

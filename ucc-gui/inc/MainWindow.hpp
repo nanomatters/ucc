@@ -34,6 +34,7 @@
 #include <QStackedWidget>
 #include <QtWidgets/QTableWidget>
 #include <memory>
+#include <map>
 #include "ProfileManager.hpp"
 #include "SystemMonitor.hpp"
 #include "../libucc-dbus/UccdClient.hpp"
@@ -85,7 +86,7 @@ namespace ucc
     void onGpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
     void onWaterCoolerFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
     void onPumpPointsChanged(const QVector<PumpCurveEditorWidget::Point>& points);
-    void onFanProfileChanged(const QString& profileName);
+    void onFanProfileChanged(const QString& fanProfileId);
     void onCopyFanProfileClicked();
 
     // Dashboard page slots
@@ -93,7 +94,7 @@ namespace ucc
     void onKeyboardBrightnessChanged( int value );
     void onKeyboardColorClicked();
     void onKeyboardVisualizerColorsChanged();
-    void onKeyboardProfileChanged(const QString& profileName);
+    void onKeyboardProfileChanged(const QString& profileId);
     void onAddKeyboardProfileClicked();
     void onCopyKeyboardProfileClicked();
     void onSaveKeyboardProfileClicked();
@@ -125,7 +126,7 @@ namespace ucc
 
     // Slot: called when DBus connection status changes
     void onUccdConnectionChanged( bool connected );
-    void loadProfileDetails( const QString &profileName );
+    void loadProfileDetails( const QString &profileId );
     void markChanged();
     void updateButtonStates();
     void setupFanControlTab();

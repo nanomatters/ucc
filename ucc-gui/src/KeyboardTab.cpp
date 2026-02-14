@@ -29,6 +29,7 @@
 #include <QJsonArray>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QUuid>
 
 namespace ucc
 {
@@ -47,7 +48,7 @@ void MainWindow::connectKeyboardBacklightPageWidgets()
   connect( m_keyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this]( int index ) {
     if ( index >= 0 )
-      onKeyboardProfileChanged( m_keyboardProfileCombo->itemText( index ) );
+      onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( index ).toString() );
   } );
 
   connect( m_keyboardProfileCombo->lineEdit(), &QLineEdit::editingFinished,
@@ -81,8 +82,11 @@ void MainWindow::setupKeyboardBacklightPage()
   m_keyboardProfileCombo->setInsertPolicy( QComboBox::NoInsert );
   
   // Add custom keyboard profiles from settings
-  for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-    m_keyboardProfileCombo->addItem( name );
+  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  {
+    QJsonObject o = v.toObject();
+    m_keyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+  }
   
   m_addKeyboardProfileButton = new QPushButton("Add");  
   m_copyKeyboardProfileButton = new QPushButton("Copy");  
@@ -182,11 +186,14 @@ void MainWindow::reloadKeyboardProfiles()
   if ( m_keyboardProfileCombo )
   {
     m_keyboardProfileCombo->clear();
-    // Add "Default" profile
-    m_keyboardProfileCombo->addItem( "Default" );
+    // Add "Default" profile (no ID)
+    m_keyboardProfileCombo->addItem( "Default", QString() );
     // Add custom keyboard profiles from settings
-    for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-      m_keyboardProfileCombo->addItem( name );
+    for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+    {
+      QJsonObject o = v.toObject();
+      m_keyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
   }
 
   // Update button states
@@ -198,8 +205,8 @@ void MainWindow::updateKeyboardProfileButtonStates()
   if ( not m_keyboardProfileCombo or not m_copyKeyboardProfileButton or not m_removeKeyboardProfileButton )
     return;
 
-  QString current = m_keyboardProfileCombo->currentText();
-  bool isCustom = m_profileManager->customKeyboardProfiles().contains( current );
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  bool isCustom = !currentId.isEmpty();   // Default has empty ID
 
   m_copyKeyboardProfileButton->setEnabled( isCustom );
   m_removeKeyboardProfileButton->setEnabled( isCustom );
@@ -297,16 +304,16 @@ void MainWindow::onKeyboardVisualizerColorsChanged()
   }
 }
 
-void MainWindow::onKeyboardProfileChanged(const QString& profileName)
+void MainWindow::onKeyboardProfileChanged(const QString& profileId)
 {
-  if ( profileName.isEmpty() )
+  if ( profileId.isEmpty() )
     return;
 
-  // Get the keyboard profile data
-  QString json = m_profileManager->getKeyboardProfile( profileName );
+  // Get the keyboard profile data by ID
+  QString json = m_profileManager->getKeyboardProfile( profileId );
   if ( json.isEmpty() or json == "{}" )
   {
-    qDebug() << "No keyboard profile data for" << profileName;
+    qDebug() << "No keyboard profile data for" << profileId;
     return;
   }
 
@@ -375,10 +382,12 @@ void MainWindow::onAddKeyboardProfileClicked()
                                         "Enter profile name:", QLineEdit::Normal, "", &ok );
   if ( ok and not name.isEmpty() )
   {
-    if ( m_profileManager->setKeyboardProfile( name, "{}" ) )  // Add empty profile
+    QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    if ( m_profileManager->setKeyboardProfile( newId, name, "{}" ) )
     {
-      m_keyboardProfileCombo->addItem( name );
-      m_keyboardProfileCombo->setCurrentText( name );
+      m_keyboardProfileCombo->addItem( name, newId );
+      // Select the newly added item
+      m_keyboardProfileCombo->setCurrentIndex( m_keyboardProfileCombo->count() - 1 );
       statusBar()->showMessage( QString("Keyboard profile '%1' added").arg(name) );
       updateKeyboardProfileButtonStates();
     }
@@ -391,22 +400,24 @@ void MainWindow::onAddKeyboardProfileClicked()
 
 void MainWindow::onCopyKeyboardProfileClicked()
 {
-  QString current = m_keyboardProfileCombo->currentText();
-  if ( current.isEmpty() )
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  QString currentName = m_keyboardProfileCombo->currentText();
+  if ( currentId.isEmpty() )
     return;
 
   bool ok;
   QString name = QInputDialog::getText( this, "Copy Keyboard Profile",
-                                        "Enter new profile name:", QLineEdit::Normal, current + " Copy", &ok );
+                                        "Enter new profile name:", QLineEdit::Normal, currentName + " Copy", &ok );
   if ( ok and not name.isEmpty() )
   {
-    // Get the current profile data and save it with the new name
-    QString json = m_profileManager->getKeyboardProfile( current );
-    if ( not json.isEmpty() and m_profileManager->setKeyboardProfile( name, json ) )
+    // Get the current profile data and save it with a new ID
+    QString json = m_profileManager->getKeyboardProfile( currentId );
+    QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    if ( not json.isEmpty() and m_profileManager->setKeyboardProfile( newId, name, json ) )
     {
-      m_keyboardProfileCombo->addItem( name );
-      m_keyboardProfileCombo->setCurrentText( name );
-      statusBar()->showMessage( QString("Keyboard profile '%1' copied to '%2'").arg(current, name) );
+      m_keyboardProfileCombo->addItem( name, newId );
+      m_keyboardProfileCombo->setCurrentIndex( m_keyboardProfileCombo->count() - 1 );
+      statusBar()->showMessage( QString("Keyboard profile '%1' copied to '%2'").arg(currentName, name) );
       updateKeyboardProfileButtonStates();
     }
     else
@@ -418,10 +429,11 @@ void MainWindow::onCopyKeyboardProfileClicked()
 
 void MainWindow::onSaveKeyboardProfileClicked()
 {
-  QString current = m_keyboardProfileCombo->currentText();
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  QString currentName = m_keyboardProfileCombo->currentText();
   QString json;
 
-  if ( current.isEmpty() )
+  if ( currentId.isEmpty() )
     return;
 
   // Get current keyboard state
@@ -441,34 +453,35 @@ void MainWindow::onSaveKeyboardProfileClicked()
     return;
   }
 
-  if ( m_profileManager->setKeyboardProfile( current, json ) )
-    statusBar()->showMessage( QString("Keyboard profile '%1' saved").arg(current) );
+  if ( m_profileManager->setKeyboardProfile( currentId, currentName, json ) )
+    statusBar()->showMessage( QString("Keyboard profile '%1' saved").arg(currentName) );
   else
     QMessageBox::warning( this, "Save Failed", "Failed to save keyboard profile." );
 }
 
 void MainWindow::onRemoveKeyboardProfileClicked()
 {
-  QString currentProfile = m_keyboardProfileCombo->currentText();
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  QString currentName = m_keyboardProfileCombo->currentText();
   
   // Confirm deletion
   QMessageBox::StandardButton reply = QMessageBox::question(
     this, "Remove Keyboard Profile",
-    QString("Are you sure you want to remove the keyboard profile '%1'?").arg(currentProfile),
+    QString("Are you sure you want to remove the keyboard profile '%1'?").arg(currentName),
     QMessageBox::Yes | QMessageBox::No
   );
   
   if ( reply == QMessageBox::Yes )
   {
     // Remove from persistent storage and UI
-    if ( not m_profileManager->deleteKeyboardProfile( currentProfile ) )
+    if ( not m_profileManager->deleteKeyboardProfile( currentId ) )
       QMessageBox::warning(this, "Remove Failed", "Failed to remove custom keyboard profile.");
     else
     {
       if ( int idx = m_keyboardProfileCombo->currentIndex(); idx >= 0 )
         m_keyboardProfileCombo->removeItem( idx );
 
-      statusBar()->showMessage( QString("Keyboard profile '%1' removed").arg(currentProfile) );
+      statusBar()->showMessage( QString("Keyboard profile '%1' removed").arg(currentName) );
       updateKeyboardProfileButtonStates();
     }
   }

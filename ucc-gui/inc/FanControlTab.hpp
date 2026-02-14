@@ -95,7 +95,7 @@ signals:
   void addRequested();
   void copyRequested();
   void removeRequested();
-  void fanProfileChanged( const QString &profileName );
+  void fanProfileChanged( const QString &fanProfileId );
   void fanProfileRenamed( const QString &oldName, const QString &newName );
   void cpuPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );
   void gpuPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );

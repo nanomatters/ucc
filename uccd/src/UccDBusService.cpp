@@ -31,6 +31,8 @@
 #include <libudev.h>
 #include <functional>
 #include <algorithm>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace
 {
@@ -1088,21 +1090,18 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
 
 QString UccDBusInterfaceAdaptor::GetFanProfile( const QString &name )
 {
-  return QString::fromStdString( getFanProfileJson(name.toStdString()) );
+  return QString::fromStdString( getFanProfileJson( name.toStdString() ) );
 }
 
 QString UccDBusInterfaceAdaptor::GetFanProfileNames()
 {
-  std::vector< std::string > names;
-  for (const auto &p : defaultFanProfiles) {
-    names.push_back(p.name);
-  }
-  
-  // Return as JSON array
+  // Return JSON array of objects with id and name for each built-in fan profile
   std::string json = "[";
-  for (size_t i = 0; i < names.size(); ++i) {
-    if (i > 0) json += ",";
-    json += "\"" + names[i] + "\"";
+  for ( size_t i = 0; i < defaultFanProfiles.size(); ++i )
+  {
+    if ( i > 0 ) json += ",";
+    json += "{\"id\":\"" + defaultFanProfiles[i].id + "\","
+            "\"name\":\"" + defaultFanProfiles[i].name + "\"}";
   }
   json += "]";
   return QString::fromStdString( json );
@@ -1110,7 +1109,7 @@ QString UccDBusInterfaceAdaptor::GetFanProfileNames()
 
 bool UccDBusInterfaceAdaptor::SetFanProfile( const QString &name, const QString &json )
 {
-  return setFanProfileJson(name.toStdString(), json.toStdString());
+  return setFanProfileJson( name.toStdString(), json.toStdString() );
 }
 
 // settings methods
@@ -1200,6 +1199,70 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const QString &state, const QString &
   }
   
   return false;
+}
+
+bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QString &stateMapJSON )
+{
+  if ( !m_service )
+    return false;
+
+  QJsonDocument doc = QJsonDocument::fromJson( stateMapJSON.toUtf8() );
+  if ( !doc.isObject() )
+  {
+    std::cerr << "[DBus] SetBatchStateMap: Invalid JSON" << std::endl;
+    return false;
+  }
+
+  QJsonObject map = doc.object();
+  static const QStringList validStates = { "power_ac", "power_bat", "power_wc" };
+  bool anyChanged = false;
+
+  for ( auto it = map.constBegin(); it != map.constEnd(); ++it )
+  {
+    const std::string stateStr = it.key().toStdString();
+    const std::string profileIdStr = it.value().toString().toStdString();
+
+    if ( !validStates.contains( it.key() ) )
+    {
+      std::cerr << "[DBus] SetBatchStateMap: Invalid state '" << stateStr << "', skipping" << std::endl;
+      continue;
+    }
+
+    // Verify the profile exists (same checks as SetStateMap)
+    bool profileExists = false;
+    for ( const auto &profile : m_service->m_customProfiles )
+    {
+      if ( profile.id == profileIdStr ) { profileExists = true; break; }
+    }
+    if ( !profileExists && m_service->m_settings.profiles.find( profileIdStr ) != m_service->m_settings.profiles.end() )
+      profileExists = true;
+    if ( !profileExists )
+    {
+      for ( const auto &profile : m_service->m_defaultProfiles )
+      {
+        if ( profile.id == profileIdStr ) { profileExists = true; break; }
+      }
+    }
+    if ( !profileExists )
+    {
+      std::cerr << "[DBus] SetBatchStateMap: Profile ID '" << profileIdStr << "' does not exist, skipping" << std::endl;
+      continue;
+    }
+
+    std::cout << "[DBus] SetBatchStateMap: " << stateStr << " -> " << profileIdStr << std::endl;
+    m_service->m_settings.stateMap[stateStr] = profileIdStr;
+    anyChanged = true;
+  }
+
+  if ( !anyChanged )
+    return false;
+
+  // Write settings only once for the entire batch
+  const bool wrote = m_service->m_settingsManager.writeSettings( m_service->m_settings );
+  if ( !wrote )
+    std::cerr << "[Settings] Failed to persist batch stateMap update" << std::endl;
+  m_service->updateDBusSettingsData();
+  return wrote;
 }
 
 // odm methods
@@ -1771,7 +1834,7 @@ UccDBusService::UccDBusService()
         try
         {
           const std::string &fpName = m_activeProfile.fan.fanProfile;
-          FanProfile fp = getDefaultFanProfileByName( fpName );
+          FanProfile fp = getDefaultFanProfile( fpName );
 
           // Overlay water cooler fan table from profile or temporary curves
           if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
@@ -2567,7 +2630,7 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         const std::string fpName = profile.fan.fanProfile;
         if ( !fpName.empty() )
         {
-          FanProfile fp = getDefaultFanProfileByName( fpName );
+          FanProfile fp = getDefaultFanProfile( fpName );
           if ( fp.isValid() )
           {
             cpuTable = fp.tableCPU;
@@ -3238,7 +3301,7 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
       const std::string &fpName = profile.fan.fanProfile;
       if ( !fpName.empty() )
       {
-        FanProfile fp = getDefaultFanProfileByName( fpName );
+        FanProfile fp = getDefaultFanProfile( fpName );
         if ( fp.isValid() )
         {
           cpuTable = fp.tableCPU;
@@ -3329,7 +3392,7 @@ void UccDBusService::applyProfileForCurrentState()
         const std::string &fpName = profile.fan.fanProfile;
         if ( !fpName.empty() )
         {
-          FanProfile fp = getDefaultFanProfileByName( fpName );
+          FanProfile fp = getDefaultFanProfile( fpName );
           if ( fp.isValid() )
           {
             cpuTable = fp.tableCPU;
