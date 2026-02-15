@@ -214,7 +214,7 @@ public:
     if ( !fanJson.empty() )
     {
       profile.fan.useControl = extractBool( fanJson, "useControl", true );
-      profile.fan.fanProfile = extractString( fanJson, "fanProfile", "Balanced" );
+      profile.fan.fanProfile = extractString( fanJson, "fanProfile", "fan-balanced" );
       profile.fan.offsetFanspeed = extractInt( fanJson, "offsetFanspeed", 0 );
       profile.fan.sameSpeed = extractBool( fanJson, "sameSpeed", true );
       profile.fan.autoControlWC = extractBool( fanJson, "autoControlWC", true );

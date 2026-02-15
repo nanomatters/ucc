@@ -1,8 +1,8 @@
 Source: ucc
+Section: utils
 Priority: optional
 Maintainer: Erhan Bilgili <erhan.bilgili@gmail.com>
-Build-Depends: debhelper-compat (= 13),
-               cmake (>= 3.20),
+Build-Depends: cmake (>= 3.20),
                extra-cmake-modules,
                g++ (>= 9),
                nlohmann-json3-dev,
@@ -13,21 +13,22 @@ Build-Depends: debhelper-compat (= 13),
                libsystemd-dev,
                libxrandr-dev,
                libudev-dev,
-               pkg-config
+               pkgconf
 Standards-Version: 4.6.1
 Homepage: https://github.com/tuxedocomputers/uniwill-control-center
 Vcs-Git: https://github.com/tuxedocomputers/uniwill-control-center.git
 
 Package: ucc
 Architecture: any
+Section: utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
          systemd,
          tuxedo-drivers,
          qt6-qpa-plugins
 Description: Uniwill Control Center
  Uniwill Control Center (UCC) is a comprehensive system control application
- suite for Uniwill (Tuxedo, XMG etc.) computers. Includes the system daemon, graphical user
- interface and system tray applet.
+ suite for Uniwill (Tuxedo, XMG etc.) computers. Includes the system daemon,
+ graphical user interface and system tray applet.
  .
  Features:
   - Fan control management

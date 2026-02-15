@@ -30,9 +30,10 @@
 namespace ucc
 {
 
-KeyboardVisualizerWidget::KeyboardVisualizerWidget( int zones, QWidget *parent )
+KeyboardVisualizerWidget::KeyboardVisualizerWidget( int zones, int maxBrightness, QWidget *parent )
   : QWidget( parent )
   , m_zones( zones )
+  , m_maxBrightness( maxBrightness )
 {
   // Detect keyboard layout
   QString layout = detectKeyboardLayout();
@@ -47,7 +48,7 @@ KeyboardVisualizerWidget::KeyboardVisualizerWidget( int zones, QWidget *parent )
     m_keys[i].zoneId = i;
     m_keys[i].label = QString( "Zone %1" ).arg( i );
     m_keys[i].color = Qt::white;
-    m_keys[i].brightness = 255;
+    m_keys[i].brightness = m_maxBrightness;
   }
 
   setupKeyboardLayout();
@@ -201,14 +202,14 @@ void ucc::KeyboardVisualizerWidget::createKeyButton( int zoneId, const QString &
   button->setProperty( "zoneId", zoneId );
 
   // Default white color with full brightness
-  updateKeyAppearance( button, Qt::white, 255 );
+  updateKeyAppearance( button, Qt::white, m_maxBrightness );
 
   // Update key info (m_keys is already initialized)
   if ( zoneId >= 0 && zoneId < static_cast< int >( m_keys.size() ) )
   {
     m_keys[zoneId].label = label;
     m_keys[zoneId].color = Qt::white;
-    m_keys[zoneId].brightness = 255;
+    m_keys[zoneId].brightness = m_maxBrightness;
   }
 
   connect( button, &QPushButton::clicked, this, &KeyboardVisualizerWidget::onKeyClicked );
@@ -314,8 +315,8 @@ void ucc::KeyboardVisualizerWidget::updateKeyAppearance( QPushButton *button, co
 
 QColor ucc::KeyboardVisualizerWidget::applyBrightness( const QColor &color, int brightness ) const
 {
-  // Scale brightness from 0-255 to 0.0-1.0
-  double factor = brightness / 255.0;
+  // Scale brightness relative to hardware max
+  double factor = ( m_maxBrightness > 0 ) ? static_cast< double >( brightness ) / m_maxBrightness : 1.0;
 
   int r = qMin( 255, static_cast< int >( color.red() * factor ) );
   int g = qMin( 255, static_cast< int >( color.green() * factor ) );

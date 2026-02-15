@@ -1,0 +1,53 @@
+## arg 1: new package version
+
+post_install() {
+  echo ":: Reloading systemd manager configuration..."
+  systemctl daemon-reload
+
+  echo ":: Enabling uccd daemon..."
+  systemctl enable uccd.service
+  systemctl enable uccd-sleep.service
+
+  echo ":: Starting uccd daemon..."
+  systemctl start uccd.service
+
+  echo ":: Updating icon caches..."
+  gtk-update-icon-cache -q -t -f usr/share/icons/hicolor 2>/dev/null || true
+  update-desktop-database -q usr/share/applications 2>/dev/null || true
+
+  echo ""
+  echo "==> NOTE: uccd requires tuxedo-drivers kernel module."
+  echo "==>       Install 'tuxedo-drivers' from AUR if not already present."
+  echo ""
+}
+
+pre_upgrade() {
+  :
+}
+
+post_upgrade() {
+  systemctl daemon-reload
+
+  echo ":: Restarting uccd daemon..."
+  systemctl try-restart uccd.service
+
+  gtk-update-icon-cache -q -t -f usr/share/icons/hicolor 2>/dev/null || true
+  update-desktop-database -q usr/share/applications 2>/dev/null || true
+}
+
+pre_remove() {
+  echo ":: Stopping uccd daemon..."
+  systemctl stop uccd.service 2>/dev/null || true
+  systemctl stop uccd-sleep.service 2>/dev/null || true
+
+  echo ":: Disabling uccd services..."
+  systemctl disable uccd.service 2>/dev/null || true
+  systemctl disable uccd-sleep.service 2>/dev/null || true
+}
+
+post_remove() {
+  systemctl daemon-reload
+
+  gtk-update-icon-cache -q -t -f usr/share/icons/hicolor 2>/dev/null || true
+  update-desktop-database -q usr/share/applications 2>/dev/null || true
+}

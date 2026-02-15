@@ -44,20 +44,13 @@ SystemMonitor::~SystemMonitor() = default;
 
 void SystemMonitor::updateMetrics()
 {
-  qDebug() << "[SystemMonitor] updateMetrics() called";
-  
   // Get CPU Temperature
   {
     QString cpuTemp = "--";
 
     if ( auto temp = m_client->getCpuTemperature() )
     {
-      qDebug() << "[SystemMonitor] CPU temp:" << *temp;
       cpuTemp = QString::number( *temp ) + "°C";
-    }
-    else
-    {
-      qDebug() << "[SystemMonitor] Failed to get CPU temperature";
     }
 
     if ( m_cpuTemp != cpuTemp )
@@ -105,12 +98,7 @@ void SystemMonitor::updateMetrics()
 
     if ( auto temp = m_client->getGpuTemperature() )
     {
-      qDebug() << "[SystemMonitor] GPU temp:" << *temp;
       gpuTemp = QString::number( *temp ) + "°C";
-    }
-    else
-    {
-      qDebug() << "[SystemMonitor] Failed to get GPU temperature";
     }
     if ( m_gpuTemp != gpuTemp )
     {
@@ -125,12 +113,7 @@ void SystemMonitor::updateMetrics()
 
     if ( auto freq = m_client->getGpuFrequency() )
     {
-      qDebug() << "[SystemMonitor] GPU freq:" << *freq;
       gpuFreq = QString::number( *freq ) + " MHz";
-    }
-    else
-    {
-      qDebug() << "[SystemMonitor] Failed to get GPU frequency";
     }
 
     if ( m_gpuFrequency != gpuFreq )
@@ -203,12 +186,7 @@ void SystemMonitor::updateMetrics()
 
     if ( auto pct = m_client->getFanSpeedPercent() )
     {
-      qDebug() << "[SystemMonitor] Fan speed:" << *pct << "%";
       fanSpd = QString::number( *pct ) + " %";
-    }
-    else
-    {
-      qDebug() << "[SystemMonitor] Failed to get fan speed (percent)";
     }
 
     if ( m_fanSpeed != fanSpd )
@@ -224,12 +202,7 @@ void SystemMonitor::updateMetrics()
 
     if ( auto pct = m_client->getGpuFanSpeedPercent() )
     {
-      qDebug() << "[SystemMonitor] GPU fan speed:" << *pct << "%";
       fanSpd = QString::number( *pct ) + " %";
-    }
-    else
-    {
-      qDebug() << "[SystemMonitor] Failed to get GPU fan speed (percent)";
     }
     if ( m_gpuFanSpeed != fanSpd )
     {
@@ -243,18 +216,12 @@ void SystemMonitor::updateMetrics()
     QString wcFan = "--";
     if ( auto pct = m_client->getWaterCoolerFanSpeed() )
     {
-      qDebug() << "[SystemMonitor] Water cooler fan speed:" << *pct << "%";
       wcFan = QString::number( *pct ) + " %";
-    }
-    else
-    {
-      qDebug() << "[SystemMonitor] Water cooler fan speed not available from uccd";
     }
 
     if ( m_waterCoolerFanSpeed != wcFan )
     {
       m_waterCoolerFanSpeed = wcFan;
-      qDebug() << "[SystemMonitor] Emitting waterCoolerFanSpeedChanged():" << m_waterCoolerFanSpeed;
       emit waterCoolerFanSpeedChanged();
     }
   }
@@ -270,15 +237,10 @@ void SystemMonitor::updateMetrics()
                *level == static_cast< int >( ucc::PumpVoltage::V12 ) ? "Max" :
                *level == static_cast< int >( ucc::PumpVoltage::Off ) ? "Off" : "--";
     }
-    else
-    {
-      qDebug() << "[SystemMonitor] Water cooler pump level not available from uccd";
-    }
 
     if ( m_waterCoolerPumpLevel != wcPump )
     {
       m_waterCoolerPumpLevel = wcPump;
-      qDebug() << "[SystemMonitor] Emitting waterCoolerPumpLevelChanged():" << m_waterCoolerPumpLevel;
       emit waterCoolerPumpLevelChanged();
     }
   }

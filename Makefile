@@ -16,8 +16,8 @@ endif
 # Get git hash for archive naming
 GITHASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-# Release timestamp: 0.YYYYMMDD_HHMM
-RELEASE_TS := 0.$(shell date +%Y%m%d_%H%M)
+# Release timestamp: 0.YYYYMMDD.HHMM
+RELEASE_TS := 0.$(shell date +%Y%m%d.%H%M)
 
 # Archive name: ucc-<version>-<githash>.tar.gz
 DISTNAME := ucc-$(VERSION)-$(GITHASH)
@@ -122,6 +122,8 @@ deb: dist
 	@mkdir -p dist/deb
 	@cd dist && tar xzf $(ARCHIVE)
 	@cp -r debian dist/ucc-$(VERSION)/
+	@# Update changelog with timestamp
+	@sed -i '1s/(.*)/(0.1.0+$(RELEASE_TS))/' dist/ucc-$(VERSION)/debian/changelog
 	@cd dist/ucc-$(VERSION) && debuild -uc -us
 	@echo "Debian packages created in dist/"
 

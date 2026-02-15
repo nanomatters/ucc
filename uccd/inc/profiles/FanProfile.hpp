@@ -47,6 +47,7 @@ struct FanTableEntry
 class FanProfile
 {
 public:
+  std::string id;
   std::string name;
   std::vector< FanTableEntry > tableCPU;
   std::vector< FanTableEntry > tableGPU;
@@ -55,37 +56,45 @@ public:
 
   FanProfile() = default;
 
-  FanProfile( const std::string &profileName )
-    : name( profileName )
+  FanProfile( const std::string &profileId,
+              const std::string &profileName )
+    : id( profileId ),
+      name( profileName )
   {
   }
 
-  FanProfile( const std::string &profileName,
+  FanProfile( const std::string &profileId,
+              const std::string &profileName,
               const std::vector< FanTableEntry > &cpu,
               const std::vector< FanTableEntry > &gpu )
-    : name( profileName ),
+    : id( profileId ),
+      name( profileName ),
       tableCPU( cpu ),
       tableGPU( gpu )
   {
   }
 
-  FanProfile( const std::string &profileName,
+  FanProfile( const std::string &profileId,
+              const std::string &profileName,
               const std::vector< FanTableEntry > &cpu,
               const std::vector< FanTableEntry > &gpu,
               const std::vector< FanTableEntry > &pump )
-    : name( profileName ),
+    : id( profileId ),
+      name( profileName ),
       tableCPU( cpu ),
       tableGPU( gpu ),
       tablePump( pump )
   {
   }
 
-  FanProfile( const std::string &profileName,
+  FanProfile( const std::string &profileId,
+              const std::string &profileName,
               const std::vector< FanTableEntry > &cpu,
               const std::vector< FanTableEntry > &gpu,
               const std::vector< FanTableEntry > &pump,
               const std::vector< FanTableEntry > &wcFan )
-    : name( profileName ),
+    : id( profileId ),
+      name( profileName ),
       tableCPU( cpu ),
       tableGPU( gpu ),
       tablePump( pump ),
@@ -210,12 +219,22 @@ public:
   }
 };
 
+// Stable built-in fan profile IDs
+namespace DefaultFanProfileIDs
+{
+  inline constexpr const char *Silent   = "fan-silent";
+  inline constexpr const char *Quiet    = "fan-quiet";
+  inline constexpr const char *Balanced = "fan-balanced";
+  inline constexpr const char *Cool     = "fan-cool";
+  inline constexpr const char *Freezy   = "fan-freezy";
+}
+
 // default fan profile presets
 extern const std::vector< FanProfile > defaultFanProfiles;
-extern const FanProfile customFanPreset;
 
-std::string getFanProfileJson(const std::string &name);
-bool setFanProfileJson(const std::string &name, const std::string &json);
+std::string getFanProfileJson( const std::string &idOrName );
+bool setFanProfileJson( const std::string &idOrName, const std::string &json );
 
-// Return a FanProfile by name from the built-in presets. Falls back to Balanced or first profile.
-FanProfile getDefaultFanProfileByName( const std::string &name );
+/// Return a FanProfile by ID or name from the built-in presets.
+/// Tries ID first, then falls back to name match, then Balanced, then first profile.
+FanProfile getDefaultFanProfile( const std::string &idOrName );

@@ -236,9 +236,16 @@ private:
     json << "{\n";
     json << "  \"fahrenheit\": " << ( settings.fahrenheit ? "true" : "false" ) << ",\n";
     json << "  \"stateMap\": {\n";
-    json << "    \"power_ac\": \"" << settings.stateMap.at("power_ac") << "\",\n";
-    json << "    \"power_bat\": \"" << settings.stateMap.at("power_bat") << "\",\n";
-    json << "    \"power_wc\": \"" << settings.stateMap.at("power_wc") << "\"\n";
+    {
+      size_t stateCount = 0;
+      for ( const auto &[key, val] : settings.stateMap )
+      {
+        if ( stateCount > 0 ) json << ",\n";
+        json << "    \"" << key << "\": \"" << val << "\"";
+        stateCount++;
+      }
+      if ( stateCount > 0 ) json << "\n";
+    }
     json << "  },\n";
     
     // Serialize profiles map

@@ -53,7 +53,7 @@ class KeyboardVisualizerWidget : public QWidget
   Q_OBJECT
 
 public:
-  explicit KeyboardVisualizerWidget( int zones, QWidget *parent = nullptr );
+  explicit KeyboardVisualizerWidget( int zones, int maxBrightness = 255, QWidget *parent = nullptr );
   ~KeyboardVisualizerWidget() override = default;
 
   /**
@@ -113,6 +113,7 @@ private:
   void updateKeyAppearance( QPushButton *button, const QColor &color, int brightness );
 
   int m_zones;
+  int m_maxBrightness = 255;
   std::vector< KeyboardKey > m_keys;
   QGridLayout *m_layout = nullptr;
   QScrollArea *m_scrollArea = nullptr;

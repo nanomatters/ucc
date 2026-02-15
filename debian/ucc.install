@@ -5,6 +5,7 @@ usr/lib/*/libucc-dbus.so*
 usr/lib/systemd/system/uccd.service
 usr/lib/systemd/system/uccd-sleep.service
 usr/share/dbus-1/system-services/com.uniwill.uccd.service
+usr/share/dbus-1/system.d/com.uniwill.uccd.conf
 usr/share/applications/ucc-gui.desktop
 usr/share/applications/ucc-tray.desktop
 usr/share/icons/hicolor/*/apps/ucc-gui.png

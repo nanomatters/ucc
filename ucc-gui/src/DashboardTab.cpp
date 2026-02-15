@@ -81,7 +81,7 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   connectSignals();
   
   // Initialize active profile label
-  m_activeProfileLabel->setText( m_profileManager->activeProfile() );
+  m_activeProfileLabel->setText( m_profileManager->activeProfileName() );
   
   // Initialize water cooler status polling only if supported
   if ( m_waterCoolerSupported )
@@ -317,7 +317,7 @@ void DashboardTab::connectSignals()
   // Connect to profile manager for active profile changes
   connect( m_profileManager, &ProfileManager::activeProfileIndexChanged,
            this, [this]() {
-             m_activeProfileLabel->setText( m_profileManager->activeProfile() );
+             m_activeProfileLabel->setText( m_profileManager->activeProfileName() );
            } );
 
   Q_UNUSED(m_waterCoolerDbus)

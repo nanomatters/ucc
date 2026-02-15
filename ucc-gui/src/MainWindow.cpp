@@ -31,7 +31,6 @@
 #include <QJsonObject>
 #include <QJsonArray>
 
-
 // Helper widget for rotated y-axis label
 class RotatedLabel : public QLabel
 {
@@ -88,7 +87,6 @@ protected:
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>
-#include <cstdio>
 #include <QPainter>
 
 namespace ucc
@@ -118,14 +116,6 @@ MainWindow::MainWindow( QWidget *parent )
   // Initialize status bar
   statusBar()->showMessage( "Ready" );
 
-  // Initialize hardware limits first before loading profiles
-  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  qDebug() << "Constructor: Hardware limits initialized:";
-  for ( size_t i = 0; i < hardwareLimits.size(); ++i )
-  {
-    qDebug() << "  Limit" << (int)i << "=" << hardwareLimits[i];
-  }
-
   // Load initial data — refresh() emits signals that populate the UI.
   // Block the profile combo to avoid cascading loadProfileDetails calls.
   m_profileCombo->blockSignals( true );
@@ -135,12 +125,9 @@ MainWindow::MainWindow( QWidget *parent )
   // Now populate the combo and load the active profile exactly once.
   onAllProfilesChanged();
 
-  // Initialize current fan profile to first available fan profile (if any)
+  // Initialize current fan profile ID to first available fan profile (if any)
   m_currentFanProfile = ( m_fanControlTab && m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
-    ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
-  
-  // Update fan tab visibility now that profiles are loaded
-  updateFanTabVisibility();
+    ? m_fanControlTab->fanProfileCombo()->currentData().toString() : QString();
 
   // Startup complete — allow hardware interaction from now on
   m_initializing = false;
@@ -170,7 +157,6 @@ void MainWindow::setupUI()
 
   // Place the Fan Control tab directly after Profiles and rename it
   setupFanControlTab();
-  updateFanTabVisibility(); // Set initial visibility based on current profile
   setupKeyboardBacklightPage();
   setupHardwarePage();
 }
@@ -186,9 +172,10 @@ void MainWindow::setupFanControlTab()
   m_fanControlTab = new FanControlTab( m_UccdClient.get(), m_profileManager.get(), m_waterCoolerSupported, this );
   connectFanControlTab();
 
-  // Load initial fan profile selection if available
+  m_tabs->addTab( m_fanControlTab, "Profile Fan Control" );
+
   if ( m_fanControlTab->fanProfileCombo()->count() > 0 )
-    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentText() );
+    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentData().toString() );
 }
 
 void MainWindow::connectFanControlTab()
@@ -207,8 +194,6 @@ void MainWindow::connectFanControlTab()
            this, &MainWindow::onApplyFanProfilesClicked );
   connect( m_fanControlTab, &FanControlTab::saveRequested,
            this, &MainWindow::onSaveFanProfilesClicked );
-  connect( m_fanControlTab, &FanControlTab::addRequested,
-           this, &MainWindow::onAddFanProfileClicked );
   connect( m_fanControlTab, &FanControlTab::copyRequested,
            this, &MainWindow::onCopyFanProfileClicked );
 
@@ -236,20 +221,7 @@ void MainWindow::connectFanControlTab()
   } );
 }
 
-void MainWindow::updateFanTabVisibility()
-{
-  qDebug() << "=== updateFanTabVisibility called (modified: always show fan tab) ===";
-  bool currentlyVisible = (m_tabs->indexOf(m_fanControlTab) != -1);
 
-  qDebug() << "updateFanTabVisibility: currentlyVisible=" << currentlyVisible;
-
-  // Always ensure the fan tab is available; do not hide it for built-in profiles
-  if ( !currentlyVisible )
-  {
-    qDebug() << "Adding fan tab (always visible now)";
-    m_tabs->addTab(m_fanControlTab, "Profile Fan Control");
-  }
-}
 
 void MainWindow::setupProfilesPage()
 {
@@ -261,7 +233,7 @@ void MainWindow::setupProfilesPage()
   // Create scroll area for the profile content
   QScrollArea *scrollArea = new QScrollArea();
   scrollArea->setWidgetResizable( true );
-  
+
   QWidget *scrollWidget = new QWidget();
   QVBoxLayout *scrollLayout = new QVBoxLayout( scrollWidget );
   scrollLayout->setContentsMargins( 20, 20, 20, 20 );
@@ -280,17 +252,17 @@ void MainWindow::setupProfilesPage()
   m_selectedProfileIndex = m_profileManager->activeProfileIndex();
   m_applyButton = new QPushButton( "Apply" );
   m_applyButton->setMaximumWidth( 80 );
-  
+
   m_saveButton = new QPushButton( "Save" );
   m_saveButton->setMaximumWidth( 80 );
   m_saveButton->setEnabled( false );
-  
+
   m_copyProfileButton = new QPushButton( "Copy" );
   m_copyProfileButton->setMaximumWidth( 60 );
-  
+
   m_removeProfileButton = new QPushButton( "Remove" );
   m_removeProfileButton->setMaximumWidth( 70 );
-  
+
   selectLayout->addWidget( selectLabel );
   selectLayout->addWidget( m_profileCombo, 1 );
   selectLayout->addWidget( m_applyButton );
@@ -477,8 +449,11 @@ void MainWindow::setupProfilesPage()
   QLabel *keyboardProfileLabel = new QLabel( "Keyboard profile" );
   m_profileKeyboardProfileCombo = new QComboBox();
 
-  for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-    m_profileKeyboardProfileCombo->addItem( name );
+  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  {
+    QJsonObject o = v.toObject();
+    m_profileKeyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+  }
 
   detailsLayout->addWidget( keyboardProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileKeyboardProfileCombo, row, 1 );
@@ -517,16 +492,25 @@ void MainWindow::setupProfilesPage()
 
   QLabel *fanProfileLabel = new QLabel( "Fan profile" );
   m_profileFanProfileCombo = new QComboBox();
-  if ( auto names = m_UccdClient->getFanProfileNames() )
+  // Add built-in fan profiles from daemon (id + name)
+  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
   {
-    for ( const auto &name : *names )
-      m_profileFanProfileCombo->addItem( QString::fromStdString( name ) );
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      m_profileFanProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
   }
   // Append persisted custom fan profiles loaded from settings
-  for ( const auto &name : m_profileManager->customFanProfiles() )
+  for ( const auto &v : m_profileManager->customFanProfilesData() )
   {
-    if ( m_profileFanProfileCombo->findText( name ) == -1 )
-      m_profileFanProfileCombo->addItem( name );
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      QString name = o["name"].toString();
+      if ( m_profileFanProfileCombo->findText( name ) == -1 )
+        m_profileFanProfileCombo->addItem( name, o["id"].toString() );
+    }
   }
   detailsLayout->addWidget( fanProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileFanProfileCombo, row, 1 );
@@ -663,13 +647,32 @@ void MainWindow::setupProfilesPage()
   QLabel *minFreqLabel = new QLabel( "Minimum frequency" );
   QHBoxLayout *minFreqLayout = new QHBoxLayout();
   m_minFrequencySlider = new QSlider( Qt::Horizontal );
-  // Slider will be configured with hardware limits when profile loads
-  m_minFrequencySlider->setMinimum( 400 );   // 400 MHz placeholder (will be replaced)
-  m_minFrequencySlider->setMaximum( 6000 );  // 6000 MHz placeholder (will be replaced)
   m_minFrequencySlider->setSingleStep( 100 ); // 100 MHz steps
-  m_minFrequencySlider->setValue( 1200 );
-  m_minFrequencyValue = new QLabel( "1.2 GHz" );
+
+  // Get hardware frequency limits and initialize slider with actual values
+  int minFreqMHz = 400;  // fallback
+  int maxFreqMHz = 6000; // fallback
+  if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
+    if ( doc.isObject() )
+    {
+      QJsonObject limitsObj = doc.object();
+      int minFreqKHz = limitsObj["min"].toInt( 400000 );
+      int maxFreqKHz = limitsObj["max"].toInt( 6000000 );
+      minFreqMHz = minFreqKHz / 1000;
+      maxFreqMHz = maxFreqKHz / 1000;
+    }
+  }
+  m_minFrequencySlider->setMinimum( minFreqMHz );
+  m_minFrequencySlider->setMaximum( maxFreqMHz );
+  m_minFrequencySlider->setValue( minFreqMHz );
+
+  m_minFrequencyValue = new QLabel();
   m_minFrequencyValue->setMinimumWidth( 60 );
+  double freqGHz = minFreqMHz / 1000.0;
+  m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+
   minFreqLayout->addWidget( m_minFrequencySlider, 1 );
   minFreqLayout->addWidget( m_minFrequencyValue );
   detailsLayout->addWidget( minFreqLabel, row, 0 );
@@ -679,13 +682,15 @@ void MainWindow::setupProfilesPage()
   QLabel *maxFreqLabel = new QLabel( "Maximum frequency" );
   QHBoxLayout *maxFreqLayout = new QHBoxLayout();
   m_maxFrequencySlider = new QSlider( Qt::Horizontal );
-  // Slider will be configured with hardware limits when profile loads
-  m_maxFrequencySlider->setMinimum( 400 );   // 400 MHz placeholder (will be replaced)
-  m_maxFrequencySlider->setMaximum( 6000 );  // 6000 MHz placeholder (will be replaced)
   m_maxFrequencySlider->setSingleStep( 100 ); // 100 MHz steps
-  m_maxFrequencySlider->setValue( 3500 );
-  m_maxFrequencyValue = new QLabel( "3.5 GHz" );
+  m_maxFrequencySlider->setMinimum( minFreqMHz );
+  m_maxFrequencySlider->setMaximum( maxFreqMHz );
+  m_maxFrequencySlider->setValue( maxFreqMHz );
+
+  m_maxFrequencyValue = new QLabel();
   m_maxFrequencyValue->setMinimumWidth( 60 );
+  freqGHz = maxFreqMHz / 1000.0;
+  m_maxFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
   maxFreqLayout->addWidget( m_maxFrequencySlider, 1 );
   maxFreqLayout->addWidget( m_maxFrequencyValue );
   detailsLayout->addWidget( maxFreqLabel, row, 0 );
@@ -749,8 +754,7 @@ void MainWindow::connectSignals()
            this, [this]() {
     if ( m_initializing ) return;  // defer to onAllProfilesChanged after init
     qDebug() << "activeProfileChanged signal received, updating UI";
-    loadProfileDetails( m_profileManager->activeProfile() );
-    updateFanTabVisibility();
+    loadProfileDetails( m_profileManager->activeProfileId() );
   } );
 
   connect( m_profileManager.get(), &ProfileManager::customKeyboardProfilesChanged,
@@ -792,6 +796,21 @@ void MainWindow::connectSignals()
            this, [this]( int value ) {
     double freqGHz = value / 1000.0;  // Convert MHz to GHz for display
     m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+  } );
+
+  // Snap to nearest available frequency when user releases slider
+  connect( m_minFrequencySlider, &QSlider::sliderReleased,
+           this, [this]() {
+    int currentValue = m_minFrequencySlider->value();
+    if ( int snapped = snapToAvailableFrequency( currentValue ); snapped != currentValue )
+      m_minFrequencySlider->setValue( snapped );
+  } );
+
+  connect( m_maxFrequencySlider, &QSlider::sliderReleased,
+           this, [this]() {
+    int currentValue = m_maxFrequencySlider->value();
+    if ( int snapped = snapToAvailableFrequency( currentValue ); snapped != currentValue )
+      m_maxFrequencySlider->setValue( snapped );
   } );
 
   // Enforce min <= max for frequency sliders
@@ -870,7 +889,7 @@ void MainWindow::connectSignals()
              m_fanControlTab->fanProfileCombo()->setCurrentIndex(index);
              m_fanControlTab->fanProfileCombo()->blockSignals(false);
              // Load the fan curves for the new profile
-             onFanProfileChanged(m_profileFanProfileCombo->currentText());
+             onFanProfileChanged(m_profileFanProfileCombo->currentData().toString());
            } );
 
   connect( m_offsetFanSpeedSlider, &QSlider::valueChanged,
@@ -947,6 +966,10 @@ void MainWindow::connectSignals()
 
   connectKeyboardBacklightPageWidgets();
 
+  // Sync profile page keyboard combo (auto-created "Current" may have been
+  // added before the customKeyboardProfilesChanged signal was connected)
+  onCustomKeyboardProfilesChanged();
+
   // Initial load of fan profiles (may be empty if service not yet available)
   reloadFanProfiles();
 
@@ -982,25 +1005,41 @@ void MainWindow::onTabChanged( int index )
     {
       if ( auto states = m_UccdClient->getKeyboardBacklightStates() )
       {
+        // Block visualizer signals to prevent hardware write during state refresh
+        m_keyboardVisualizer->blockSignals( true );
         m_keyboardVisualizer->loadCurrentStates( *states );
-        qDebug() << "Loaded current keyboard backlight states";
-      }
-      
-      // Apply current brightness to visualizer
-      if ( m_keyboardBrightnessSlider )
-      {
+
+        // Read brightness from hardware states and sync slider
+        QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
+        if ( statesDoc.isArray() && !statesDoc.array().isEmpty() )
+        {
+          int hwBrightness = statesDoc.array()[0].toObject()["brightness"].toInt( -1 );
+          qDebug() << "[KBD TAB] hw brightness:" << hwBrightness
+                   << "slider current:" << m_keyboardBrightnessSlider->value()
+                   << "slider max:" << m_keyboardBrightnessSlider->maximum();
+          if ( hwBrightness >= 0 && m_keyboardBrightnessSlider )
+          {
+            m_keyboardBrightnessSlider->blockSignals( true );
+            m_keyboardBrightnessSlider->setValue( hwBrightness );
+            m_keyboardBrightnessSlider->blockSignals( false );
+            m_keyboardBrightnessValueLabel->setText( QString::number( hwBrightness ) );
+          }
+        }
+
+        // ALWAYS override per-zone brightness with slider value to guarantee sync
         m_keyboardVisualizer->setGlobalBrightness( m_keyboardBrightnessSlider->value() );
+        m_keyboardVisualizer->blockSignals( false );
       }
     }
-    
+
     // Reload keyboard profiles
     reloadKeyboardProfiles();
 
     // Auto-load the keyboard profile from the active profile's settings
-    QString activeProfile = m_profileManager->activeProfile();
-    if ( !activeProfile.isEmpty() )
+    QString activeProfileId = m_profileManager->activeProfileId();
+    if ( !activeProfileId.isEmpty() )
     {
-      QString profileJson = m_profileManager->getProfileDetails( m_profileManager->getProfileIdByName( activeProfile ) );
+      QString profileJson = m_profileManager->getProfileDetails( activeProfileId );
       if ( !profileJson.isEmpty() )
       {
         QJsonDocument doc = QJsonDocument::fromJson( profileJson.toUtf8() );
@@ -1010,10 +1049,20 @@ void MainWindow::onTabChanged( int index )
           // Check for embedded keyboard profile name
           if ( obj.contains( "selectedKeyboardProfile" ) )
           {
-            QString keyboardProfile = obj["selectedKeyboardProfile"].toString();
-            if ( !keyboardProfile.isEmpty() && m_keyboardProfileCombo->findText( keyboardProfile ) != -1 )
+            QString keyboardProfileId = obj["selectedKeyboardProfile"].toString();
+            // Find by ID in combo userData
+            int kbIdx = -1;
+            for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
             {
-              m_keyboardProfileCombo->setCurrentText( keyboardProfile );
+              if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+              { kbIdx = i; break; }
+            }
+            // Fallback: try matching by name (legacy data)
+            if ( kbIdx < 0 )
+              kbIdx = m_keyboardProfileCombo->findText( keyboardProfileId );
+            if ( kbIdx >= 0 )
+            {
+              m_keyboardProfileCombo->setCurrentIndex( kbIdx );
               // This triggers onKeyboardProfileChanged to load the profile data
             }
           }
@@ -1022,9 +1071,17 @@ void MainWindow::onTabChanged( int index )
           {
             QJsonObject keyboardObj = obj["keyboard"].toObject();
             QString keyboardProfile = keyboardObj["profile"].toString();
-            if ( !keyboardProfile.isEmpty() && m_keyboardProfileCombo->findText( keyboardProfile ) != -1 )
+            int kbIdx = -1;
+            for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
             {
-              m_keyboardProfileCombo->setCurrentText( keyboardProfile );
+              if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfile )
+              { kbIdx = i; break; }
+            }
+            if ( kbIdx < 0 )
+              kbIdx = m_keyboardProfileCombo->findText( keyboardProfile );
+            if ( kbIdx >= 0 )
+            {
+              m_keyboardProfileCombo->setCurrentIndex( kbIdx );
               // This triggers onKeyboardProfileChanged to load the profile data
             }
           }
@@ -1037,10 +1094,16 @@ void MainWindow::onTabChanged( int index )
 // Profile page slots
 void MainWindow::onCustomKeyboardProfilesChanged()
 {
-  // Repopulate keyboard profile combos
+  // Repopulate keyboard profile combos with ID userData
   m_profileKeyboardProfileCombo->clear();
-  for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-    m_profileKeyboardProfileCombo->addItem( name );
+  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  {
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      m_profileKeyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
+  }
 
   reloadKeyboardProfiles();
 }
@@ -1050,10 +1113,11 @@ void MainWindow::onProfileIndexChanged( int index )
   if ( index >= 0 )
   {
     QString profileName = m_profileCombo->currentText();
+    QString profileId = m_profileCombo->currentData().toString();
     qDebug() << "Profile selected:" << profileName << "at index" << index;
     m_selectedProfileIndex = index;
-    loadProfileDetails( profileName );
-    m_removeProfileButton->setEnabled( m_profileManager->customProfiles().contains( profileName ) );
+    loadProfileDetails( profileId );
+    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( profileId ) );
     m_copyProfileButton->setEnabled( true );
     m_saveButton->setEnabled( true );
     statusBar()->showMessage( "Profile selected: " + profileName + " (click Apply to activate)" );
@@ -1062,24 +1126,33 @@ void MainWindow::onProfileIndexChanged( int index )
 
 void MainWindow::onAllProfilesChanged()
 {
-  
-  // First, ensure hardware limits are loaded
-  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  
   // Block combo signals to prevent cascading loadProfileDetails calls
   // while we repopulate the list.
   m_profileCombo->blockSignals( true );
   m_profileCombo->clear();
-  m_profileCombo->addItems( m_profileManager->allProfiles() );
+  // Populate combo with name + ID userData
+  const QStringList &names = m_profileManager->allProfiles();
+  const QJsonArray &defaultData = m_profileManager->defaultProfilesData();
+  const QJsonArray &customData = m_profileManager->customProfilesData();
+  for ( const auto &p : defaultData )
+  {
+    if ( p.isObject() )
+      m_profileCombo->addItem( p.toObject()["name"].toString(), p.toObject()["id"].toString() );
+  }
+  for ( const auto &p : customData )
+  {
+    if ( p.isObject() )
+      m_profileCombo->addItem( p.toObject()["name"].toString(), p.toObject()["id"].toString() );
+  }
   m_profileCombo->setCurrentIndex( m_profileManager->activeProfileIndex() );
   m_profileCombo->blockSignals( false );
   m_selectedProfileIndex = m_profileManager->activeProfileIndex();
 
   // Load the active profile details
-  QString activeProfile = m_profileManager->activeProfile();
-  if ( !activeProfile.isEmpty() )
+  QString activeProfileId = m_profileManager->activeProfileId();
+  if ( !activeProfileId.isEmpty() )
   {
-    loadProfileDetails( activeProfile );
+    loadProfileDetails( activeProfileId );
   }
   // Custom profiles may have changed; reload fan profiles (adds custom entries to the fan combo)
   reloadFanProfiles();
@@ -1132,6 +1205,27 @@ void MainWindow::onMaxFrequencyChanged( int value )
   m_maxFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
 }
 
+int MainWindow::snapToAvailableFrequency( int valueMHz ) const
+{
+  if ( m_availableFrequenciesMHz.isEmpty() )
+    return valueMHz;
+
+  int closestMHz = m_availableFrequenciesMHz.first();
+  int minDiff = std::abs( valueMHz - closestMHz );
+
+  for ( int availMHz : m_availableFrequenciesMHz )
+  {
+    int diff = std::abs( valueMHz - availMHz );
+    if ( diff < minDiff )
+    {
+      minDiff = diff;
+      closestMHz = availMHz;
+    }
+  }
+
+  return closestMHz;
+}
+
 void MainWindow::onODMPowerLimit1Changed( int value )
 {
   m_odmPowerLimit1Value->setText( QString::number( value ) + " W" );
@@ -1152,17 +1246,13 @@ void MainWindow::onGpuPowerChanged( int value )
   m_gpuPowerValue->setText( QString::number( value ) + " W" );
 }
 
-void MainWindow::loadProfileDetails( const QString &profileName )
+void MainWindow::loadProfileDetails( const QString &profileId )
 {
   // Reset change flag when loading a new profile
   m_profileChanged = false;
-  m_currentLoadedProfile = profileName;
+  m_currentLoadedProfile = profileId;
   updateButtonStates();
-  
-  
-  // Get the profile ID from the profile name
-  QString profileId = m_profileManager->getProfileIdByName( profileName );
-  
+
 
   if ( profileId.isEmpty() )
   {
@@ -1171,7 +1261,7 @@ void MainWindow::loadProfileDetails( const QString &profileName )
 
   // Get the profile JSON from ProfileManager using the profile ID
   QString profileJson = m_profileManager->getProfileDetails( profileId );
-  
+
 
   if ( profileJson.isEmpty() )
   {
@@ -1214,14 +1304,14 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   if ( obj.contains( "display" ) && obj["display"].isObject() )
   {
     QJsonObject displayObj = obj["display"].toObject();
-    
+
 
     if ( displayObj.contains( "brightness" ) )
     {
       int brightness = displayObj["brightness"].toInt( 100 );
       m_brightnessSlider->setValue( brightness );
     }
-    
+
 
     if ( displayObj.contains( "useBrightness" ) )
     {
@@ -1236,18 +1326,29 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   if ( obj.contains( "fan" ) && obj["fan"].isObject() )
   {
     QJsonObject fanObj = obj["fan"].toObject();
-    
+
 
     if ( fanObj.contains( "fanProfile" ) )
     {
-      QString fanProfile = fanObj["fanProfile"].toString( "Balanced" );
-      int idx = m_profileFanProfileCombo->findText( fanProfile );
+      QString fanProfileRef = fanObj["fanProfile"].toString( "fan-balanced" );
+      // Try finding by ID userData first (new format), then by text (legacy/name)
+      int idx = -1;
+      for ( int i = 0; i < m_profileFanProfileCombo->count(); ++i )
+      {
+        if ( m_profileFanProfileCombo->itemData( i ).toString() == fanProfileRef )
+        {
+          idx = i;
+          break;
+        }
+      }
+      if ( idx < 0 )
+        idx = m_profileFanProfileCombo->findText( fanProfileRef );
 
       if ( idx >= 0 )
       {
         m_profileFanProfileCombo->setCurrentIndex( idx );
         m_fanControlTab->fanProfileCombo()->setCurrentIndex( idx );
-        loadedFanProfile = fanProfile;
+        loadedFanProfile = m_profileFanProfileCombo->itemData( idx ).toString();
       }
     }
 
@@ -1280,7 +1381,7 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   if ( obj.contains( "cpu" ) && obj["cpu"].isObject() )
   {
     QJsonObject cpuObj = obj["cpu"].toObject();
-    
+
 
     if ( cpuObj.contains( "onlineCores" ) )
       m_cpuCoresSlider->setValue( cpuObj["onlineCores"].toInt( 32 ) );
@@ -1304,24 +1405,47 @@ void MainWindow::loadProfileDetails( const QString &profileName )
         QJsonObject limitsObj = doc.object();
         int minFreqKHz = limitsObj["min"].toInt( 400000 );   // hardware min frequency in kHz
         int maxFreqKHz = limitsObj["max"].toInt( 6000000 );  // hardware max frequency in kHz
-        
+
         // Convert kHz to MHz for slider range
         int minFreqMHz = minFreqKHz / 1000;
         int maxFreqMHz = maxFreqKHz / 1000;
-        
+
         m_minFrequencySlider->setMinimum( minFreqMHz );
         m_minFrequencySlider->setMaximum( maxFreqMHz );
         m_maxFrequencySlider->setMinimum( minFreqMHz );
         m_maxFrequencySlider->setMaximum( maxFreqMHz );
+
+        // Parse and store available frequencies (kHz -> MHz)
+        m_availableFrequenciesMHz.clear();
+        if ( limitsObj.contains( "available" ) && limitsObj["available"].isArray() )
+        {
+          QJsonArray availableArray = limitsObj["available"].toArray();
+          for ( const auto &freqValue : availableArray )
+          {
+            int freqKHz = freqValue.toInt();
+            int freqMHz = freqKHz / 1000;
+            if ( freqMHz >= minFreqMHz && freqMHz <= maxFreqMHz )
+            {
+              m_availableFrequenciesMHz.append( freqMHz );
+            }
+          }
+        }
       }
     }
-    
+
     // Load frequency values in MHz (convert from kHz stored in profile)
+    // Snap to closest available frequency if we have the list
     if ( cpuObj.contains( "scalingMinFrequency" ) )
-      m_minFrequencySlider->setValue( cpuObj["scalingMinFrequency"].toInt( 1000000 ) / 1000 );  // convert kHz to MHz
+    {
+      int requestedMHz = cpuObj["scalingMinFrequency"].toInt( 1000000 ) / 1000;
+      m_minFrequencySlider->setValue( snapToAvailableFrequency( requestedMHz ) );
+    }
 
     if ( cpuObj.contains( "scalingMaxFrequency" ) )
-      m_maxFrequencySlider->setValue( cpuObj["scalingMaxFrequency"].toInt( 5000000 ) / 1000 );  // convert kHz to MHz
+    {
+      int requestedMHz = cpuObj["scalingMaxFrequency"].toInt( 5000000 ) / 1000;
+      m_maxFrequencySlider->setValue( snapToAvailableFrequency( requestedMHz ) );
+    }
   }
   else
   {
@@ -1361,24 +1485,24 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   {
     m_odmPowerLimit3Slider->setMaximum( hardwareLimits[2] );
   }
-  
+
   // Set GPU power max from hardware
   if ( auto gpuMax = m_profileManager->getClient()->getNVIDIAPowerCTRLMaxPowerLimit() )
   {
     m_gpuPowerSlider->setMaximum( *gpuMax );
   }
-  
+
   // Then, set slider values from profile
 
   if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
   {
     QJsonObject odmLimitsObj = obj["odmPowerLimits"].toObject();
-    
+
 
     if ( odmLimitsObj.contains( "tdpValues" ) && odmLimitsObj["tdpValues"].isArray() )
     {
       QJsonArray tdpArray = odmLimitsObj["tdpValues"].toArray();
-      
+
       // Load actual values from profile - these are the current settings
 
       if ( tdpArray.size() > 0 )
@@ -1386,14 +1510,14 @@ void MainWindow::loadProfileDetails( const QString &profileName )
         int val0 = tdpArray[0].toInt();
         m_odmPowerLimit1Slider->setValue( val0 );
       }
-      
+
 
       if ( tdpArray.size() > 1 )
       {
         int val1 = tdpArray[1].toInt();
         m_odmPowerLimit2Slider->setValue( val1 );
       }
-      
+
 
       if ( tdpArray.size() > 2 )
       {
@@ -1407,7 +1531,7 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj["nvidiaPowerCTRLProfile"].isObject() )
   {
     QJsonObject gpuObj = obj["nvidiaPowerCTRLProfile"].toObject();
-    
+
 
     if ( gpuObj.contains( "cTGPOffset" ) )
       m_gpuPowerSlider->setValue( gpuObj["cTGPOffset"].toInt( 175 ) + 100 ); // Offset value, adjust as needed
@@ -1462,12 +1586,21 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   QString loadedKeyboardProfile;
   if ( obj.contains( "selectedKeyboardProfile" ) )
   {
-    QString keyboardProfile = obj["selectedKeyboardProfile"].toString();
-    int idx = m_profileKeyboardProfileCombo->findText( keyboardProfile );
+    QString keyboardProfileId = obj["selectedKeyboardProfile"].toString();
+    // Find by ID in combo userData
+    int idx = -1;
+    for ( int i = 0; i < m_profileKeyboardProfileCombo->count(); ++i )
+    {
+      if ( m_profileKeyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+      { idx = i; break; }
+    }
+    // Fallback: try matching by name (legacy data)
+    if ( idx < 0 )
+      idx = m_profileKeyboardProfileCombo->findText( keyboardProfileId );
     if ( idx >= 0 )
     {
       m_profileKeyboardProfileCombo->setCurrentIndex( idx );
-      loadedKeyboardProfile = keyboardProfile;
+      loadedKeyboardProfile = m_profileKeyboardProfileCombo->itemData( idx ).toString();
     }
   }
   // Fallback: check for old format keyboard.profile field
@@ -1476,34 +1609,27 @@ void MainWindow::loadProfileDetails( const QString &profileName )
     QJsonObject keyboardObj = obj["keyboard"].toObject();
     if ( keyboardObj.contains( "profile" ) )
     {
-      QString keyboardProfile = keyboardObj["profile"].toString();
-      int idx = m_profileKeyboardProfileCombo->findText( keyboardProfile );
+      QString keyboardProfileId = keyboardObj["profile"].toString();
+      int idx = -1;
+      for ( int i = 0; i < m_profileKeyboardProfileCombo->count(); ++i )
+      {
+        if ( m_profileKeyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+        { idx = i; break; }
+      }
+      if ( idx < 0 )
+        idx = m_profileKeyboardProfileCombo->findText( keyboardProfileId );
       if ( idx >= 0 )
       {
         m_profileKeyboardProfileCombo->setCurrentIndex( idx );
-        loadedKeyboardProfile = keyboardProfile;
+        loadedKeyboardProfile = m_profileKeyboardProfileCombo->itemData( idx ).toString();
       }
     }
   }
-  
-  // Load keyboard profile colors and brightness
-  if ( obj.contains( "keyboard" ) && obj["keyboard"].isObject() )
-  {
-    QJsonObject keyboardObj = obj["keyboard"].toObject();
-    
-    // Load brightness if present
-    if ( keyboardObj.contains( "brightness" ) && m_keyboardBrightnessSlider )
-    {
-      int brightness = keyboardObj["brightness"].toInt( m_keyboardBrightnessSlider->maximum() / 2 );
-      m_keyboardBrightnessSlider->setValue( brightness );
-    }
-    
-    // Load key colors if present
-    if ( keyboardObj.contains( "states" ) && keyboardObj["states"].isArray() && m_keyboardVisualizer )
-    {
-      m_keyboardVisualizer->updateFromJSON( keyboardObj["states"].toArray() );
-    }
-  }
+
+  // Keyboard brightness and colors are managed by the keyboard profile system
+  // (via selectedKeyboardProfile), not directly from system profile data.
+  // Legacy "keyboard" object in profiles is ignored to avoid overriding
+  // the hardware brightness with stale saved values.
 
   // Load power state activation settings
   QString settingsJson = m_profileManager->getSettingsJSON();
@@ -1519,11 +1645,11 @@ void MainWindow::loadProfileDetails( const QString &profileName )
         QString mainsProfile = stateMap["power_ac"].toString();
         QString batteryProfile = stateMap["power_bat"].toString();
         QString wcProfile = stateMap["power_wc"].toString();
-        
+
         m_mainsButton->setChecked( mainsProfile == profileId );
         m_batteryButton->setChecked( batteryProfile == profileId );
         m_waterCoolerButton->setChecked( wcProfile == profileId );
-        
+
         // Store the loaded power state assignments
         m_loadedMainsAssignment = (mainsProfile == profileId);
         m_loadedBatteryAssignment = (batteryProfile == profileId);
@@ -1564,13 +1690,13 @@ void MainWindow::loadProfileDetails( const QString &profileName )
   onODMPowerLimit2Changed( m_odmPowerLimit2Slider->value() );
   onODMPowerLimit3Changed( m_odmPowerLimit3Slider->value() );
   onGpuPowerChanged( m_gpuPowerSlider->value() );
-  
+
   // Trigger fan profile change if one was loaded (loads fan curve data for display only)
   if ( !loadedFanProfile.isEmpty() )
   {
     onFanProfileChanged( loadedFanProfile );
   }
-  
+
   // Load keyboard profile for display only — block signals to prevent hardware writes
   // (brightness slider → setGlobalBrightness → colorsChanged → setKeyboardBacklight)
   if ( !loadedKeyboardProfile.isEmpty() )
@@ -1583,10 +1709,10 @@ void MainWindow::loadProfileDetails( const QString &profileName )
     if ( m_keyboardBrightnessSlider ) m_keyboardBrightnessSlider->blockSignals( false );
     if ( m_keyboardVisualizer ) m_keyboardVisualizer->blockSignals( false );
   }
-  
-  
+
+
   // Enable/disable editing widgets based on whether profile is custom
-  const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileName ) : false;
+  const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileId ) : false;
   updateProfileEditingWidgets( isCustom );
 
 }
@@ -1594,7 +1720,7 @@ void MainWindow::loadProfileDetails( const QString &profileName )
 void MainWindow::updateProfileEditingWidgets( bool isCustom )
 {
   // Enable/disable editing widgets based on whether profile is custom
-  
+
   // Description edit
   if ( m_descriptionEdit ) {
     m_descriptionEdit->setEnabled( isCustom );
@@ -1605,35 +1731,35 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
   if ( m_profileCombo && m_profileCombo->lineEdit() ) {
     m_profileCombo->lineEdit()->setReadOnly( !isCustom );
   }
-  
+
   // Auto-activate buttons (always enabled for power state assignment)
   if ( m_mainsButton ) m_mainsButton->setEnabled( true );
   if ( m_batteryButton ) m_batteryButton->setEnabled( true );
-  
+
   // Display controls
   if ( m_setBrightnessCheckBox ) m_setBrightnessCheckBox->setEnabled( isCustom );
   if ( m_brightnessSlider ) m_brightnessSlider->setEnabled( isCustom );
-  
+
   // Fan controls
   if ( m_profileFanProfileCombo ) m_profileFanProfileCombo->setEnabled( isCustom );
   if ( m_offsetFanSpeedSlider ) m_offsetFanSpeedSlider->setEnabled( isCustom );
   if ( m_sameFanSpeedCheckBox ) m_sameFanSpeedCheckBox->setEnabled( isCustom );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->setEnabled( isCustom );
-  
+
   // CPU controls
   if ( m_cpuCoresSlider ) m_cpuCoresSlider->setEnabled( isCustom );
   if ( m_governorCombo ) m_governorCombo->setEnabled( isCustom );
   if ( m_minFrequencySlider ) m_minFrequencySlider->setEnabled( isCustom );
   if ( m_maxFrequencySlider ) m_maxFrequencySlider->setEnabled( isCustom );
-  
+
   // ODM Power controls
   if ( m_odmPowerLimit1Slider ) m_odmPowerLimit1Slider->setEnabled( isCustom );
   if ( m_odmPowerLimit2Slider ) m_odmPowerLimit2Slider->setEnabled( isCustom );
   if ( m_odmPowerLimit3Slider ) m_odmPowerLimit3Slider->setEnabled( isCustom );
-  
+
   // GPU controls
   if ( m_gpuPowerSlider ) m_gpuPowerSlider->setEnabled( isCustom );
-  
+
   // Charging profile
   if ( m_profileChargingProfileCombo ) m_profileChargingProfileCombo->setEnabled( isCustom );
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->setEnabled( isCustom );
@@ -1651,7 +1777,7 @@ void MainWindow::updateButtonStates( void)
   // Update profile page buttons if available
   if ( profileTopWidgetsAvailable() )
   {
-    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( m_profileCombo->currentText() ) );
+    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( m_profileCombo->currentData().toString() ) );
   }
 
   // Delegate fan profile button states to FanControlTab
@@ -1676,9 +1802,9 @@ void MainWindow::onApplyClicked()
 void MainWindow::onSaveClicked()
 {
   QString profileName = m_profileCombo->currentText();
-  QString profileId = m_profileManager->getProfileIdByName( profileName );
-  const bool isCustom = m_profileManager->isCustomProfile( profileName );
-  
+  QString profileId = m_profileCombo->currentData().toString();
+  const bool isCustom = m_profileManager->isCustomProfile( profileId );
+
   if ( isCustom )
   {
     // Save full profile changes for custom profiles
@@ -1687,7 +1813,7 @@ void MainWindow::onSaveClicked()
     profileObj["id"] = profileId;
     profileObj["name"] = profileName;
     profileObj["description"] = m_descriptionEdit->toPlainText();
-    
+
     // Brightness settings
     QJsonObject displayObj;
     if ( m_setBrightnessCheckBox->isChecked() )
@@ -1695,28 +1821,29 @@ void MainWindow::onSaveClicked()
       displayObj["brightness"] = m_brightnessSlider->value();
     }
     profileObj["display"] = displayObj;
-    
+
     // Fan settings - embed complete fan profile data
     QJsonObject fanObj;
-    
+
     // Get the full fan profile JSON and embed tableCPU/tableGPU
+    QString fanProfileId = m_profileFanProfileCombo->currentData().toString();
     QString fanProfileName = m_profileFanProfileCombo->currentText();
-    QString fanProfileJSON = m_profileManager->getFanProfile(fanProfileName);
-    
+    QString fanProfileJSON = m_profileManager->getFanProfile(fanProfileId);
+
     if (!fanProfileJSON.isEmpty() && fanProfileJSON != "{}")
     {
       QJsonDocument fanDoc = QJsonDocument::fromJson(fanProfileJSON.toUtf8());
       if (fanDoc.isObject())
       {
         QJsonObject fanProfileObj = fanDoc.object();
-        
+
         // Embed fan curve tables directly in the profile
         if (fanProfileObj.contains("tableCPU"))
           fanObj["tableCPU"] = fanProfileObj["tableCPU"];
-        
+
         if (fanProfileObj.contains("tableGPU"))
           fanObj["tableGPU"] = fanProfileObj["tableGPU"];
-        
+
         if (fanProfileObj.contains("tablePump"))
           fanObj["tablePump"] = fanProfileObj["tablePump"];
 
@@ -1724,9 +1851,9 @@ void MainWindow::onSaveClicked()
           fanObj["tableWaterCoolerFan"] = fanProfileObj["tableWaterCoolerFan"];
       }
     }
-    
-    // Store fan profile name using the key the daemon expects
-    fanObj["fanProfile"] = fanProfileName;
+
+    // Store fan profile ID using the key the daemon expects
+    fanObj["fanProfile"] = fanProfileId;
     fanObj["offsetFanspeed"] = m_offsetFanSpeedSlider->value();
     // Persist same-speed setting
     fanObj["sameSpeed"] = m_sameFanSpeedCheckBox ? m_sameFanSpeedCheckBox->isChecked() : true;
@@ -1742,7 +1869,7 @@ void MainWindow::onSaveClicked()
     cpuObj["scalingMinFrequency"] = m_minFrequencySlider->value() * 1000;  // convert MHz to kHz
     cpuObj["scalingMaxFrequency"] = m_maxFrequencySlider->value() * 1000;  // convert MHz to kHz
     profileObj["cpu"] = cpuObj;
-  
+
   // ODM Power Limit (TDP) settings
   QJsonObject odmObj;
   QJsonArray tdpArray;
@@ -1751,7 +1878,7 @@ void MainWindow::onSaveClicked()
   tdpArray.append( m_odmPowerLimit3Slider->value() );
   odmObj["tdpValues"] = tdpArray;
   profileObj["odmPowerLimits"] = odmObj;
-  
+
   // GPU settings
   QJsonObject gpuObj;
   gpuObj["cTGPOffset"] = m_gpuPowerSlider->value() - 100; // Reverse the offset
@@ -1761,11 +1888,12 @@ void MainWindow::onSaveClicked()
 
   // Keyboard settings - embed complete keyboard profile data
   QJsonObject keyboardObj;
-  
+
+  QString keyboardProfileId = m_profileKeyboardProfileCombo->currentData().toString();
   QString keyboardProfileName = m_profileKeyboardProfileCombo->currentText();
-  
+
   // Get the selected keyboard profile data
-  QString keyboardProfileJSON = m_profileManager->getKeyboardProfile(keyboardProfileName);
+  QString keyboardProfileJSON = m_profileManager->getKeyboardProfile(keyboardProfileId);
   if (!keyboardProfileJSON.isEmpty() && keyboardProfileJSON != "{}") {
     QJsonDocument kbDoc = QJsonDocument::fromJson(keyboardProfileJSON.toUtf8());
     if (kbDoc.isObject()) {
@@ -1779,26 +1907,26 @@ void MainWindow::onSaveClicked()
       keyboardObj["states"] = QJsonDocument::fromJson(QString::fromStdString(*keyboardStates).toUtf8()).array();
     }
   }
-  
+
   // Store the name for reference/display
   keyboardObj["keyboardProfileName"] = keyboardProfileName;
-  
+
   // Include keyboard brightness in the profile
   if ( m_keyboardBrightnessSlider )
   {
     keyboardObj["brightness"] = m_keyboardBrightnessSlider->value();
   }
-  
+
   // Include key colors from visualizer if available
   if ( m_keyboardVisualizer )
   {
     keyboardObj["states"] = m_keyboardVisualizer->getJSONState();
   }
-        
+
   profileObj["keyboard"] = keyboardObj;
-        
-  // Embed the selected keyboard profile name at profile level
-  profileObj["selectedKeyboardProfile"] = keyboardProfileName;
+
+  // Embed the selected keyboard profile ID at profile level
+  profileObj["selectedKeyboardProfile"] = keyboardProfileId;
 
   // Charging profile setting
   if ( m_profileChargingProfileCombo )
@@ -1844,196 +1972,20 @@ void MainWindow::onSaveClicked()
 
   m_profileManager->saveProfile( profileJSON );
   }
-  else if ( !isCustom && m_profileChanged )
-  {
-    // User edited a built-in profile; create a custom copy and save the changes
-    QString baseName = profileName;
-    QString newName;
-    int number = 1;
-    do {
-      newName = QString( "%1 %2" ).arg( baseName ).arg( number );
-      number++;
-    } while ( m_profileManager->allProfiles().contains( newName ) );
-
-    QString newJson = m_profileManager->createProfileFromDefault( newName );
-    if ( newJson.isEmpty() ) {
-      QMessageBox::warning( this, "Error", "Failed to create editable copy of profile." );
-    } else {
-      QJsonDocument doc = QJsonDocument::fromJson( newJson.toUtf8() );
-      if ( doc.isObject() ) {
-        QJsonObject obj = doc.object();
-        // Apply the same fields as for custom save
-        QJsonObject displayObj;
-        if ( m_setBrightnessCheckBox->isChecked() ) displayObj["brightness"] = m_brightnessSlider->value();
-        obj["display"] = displayObj;
-
-        QJsonObject fanObj;
-        
-        // Get the full fan profile JSON and embed tableCPU/tableGPU
-        QString fanProfileName = m_profileFanProfileCombo->currentText();
-        QString fanProfileJSON = m_profileManager->getFanProfile(fanProfileName);
-        
-        if (!fanProfileJSON.isEmpty() && fanProfileJSON != "{}")
-        {
-          QJsonDocument fanDoc = QJsonDocument::fromJson(fanProfileJSON.toUtf8());
-          if (fanDoc.isObject())
-          {
-            QJsonObject fanProfileObj = fanDoc.object();
-            
-            // Embed fan curve tables directly in the profile
-            if (fanProfileObj.contains("tableCPU"))
-              fanObj["tableCPU"] = fanProfileObj["tableCPU"];
-            
-            if (fanProfileObj.contains("tableGPU"))
-              fanObj["tableGPU"] = fanProfileObj["tableGPU"];
-            
-            if (fanProfileObj.contains("tablePump"))
-              fanObj["tablePump"] = fanProfileObj["tablePump"];
-
-            if (fanProfileObj.contains("tableWaterCoolerFan"))
-              fanObj["tableWaterCoolerFan"] = fanProfileObj["tableWaterCoolerFan"];
-            
-            // Store the name for reference
-            fanObj["fanProfile"] = fanProfileName;
-          }
-        }
-        
-        fanObj["offsetFanspeed"] = m_offsetFanSpeedSlider->value();
-        fanObj["sameSpeed"] = m_sameFanSpeedCheckBox ? m_sameFanSpeedCheckBox->isChecked() : true;
-        fanObj["autoControlWC"] = m_autoWaterControlCheckBox ? m_autoWaterControlCheckBox->isChecked() : true;
-        fanObj["enableWaterCooler"] = m_fanControlTab ? m_fanControlTab->isWaterCoolerEnabled() : true;
-        obj["fan"] = fanObj;
-
-        QJsonObject cpuObj;
-        cpuObj["onlineCores"] = m_cpuCoresSlider->value();
-        cpuObj["governor"] = m_governorCombo->currentData().toString();
-        cpuObj["scalingMinFrequency"] = m_minFrequencySlider->value() * 1000;  // convert MHz to kHz
-        cpuObj["scalingMaxFrequency"] = m_maxFrequencySlider->value() * 1000;  // convert MHz to kHz
-        obj["cpu"] = cpuObj;
-
-        // ODM Power Limit (TDP) settings
-        QJsonObject odmObj;
-        QJsonArray tdpArray;
-        tdpArray.append( m_odmPowerLimit1Slider->value() );
-        tdpArray.append( m_odmPowerLimit2Slider->value() );
-        tdpArray.append( m_odmPowerLimit3Slider->value() );
-        odmObj["tdpValues"] = tdpArray;
-        obj["odmPowerLimits"] = odmObj;
-
-        // GPU settings
-        {
-          QJsonObject gpuObj;
-          gpuObj["cTGPOffset"] = m_gpuPowerSlider->value() - 100;
-          QJsonObject nvidiaPowerObj;
-          nvidiaPowerObj["cTGPOffset"] = gpuObj["cTGPOffset"];
-          obj["nvidiaPowerCTRLProfile"] = nvidiaPowerObj;
-        }
-
-        QJsonObject keyboardObj;
-        
-        QString keyboardProfileName = m_profileKeyboardProfileCombo->currentText();
-        
-        // Get the selected keyboard profile data
-        QString keyboardProfileJSON = m_profileManager->getKeyboardProfile(keyboardProfileName);
-        if (!keyboardProfileJSON.isEmpty() && keyboardProfileJSON != "{}") {
-          QJsonDocument kbDoc = QJsonDocument::fromJson(keyboardProfileJSON.toUtf8());
-          if (kbDoc.isObject()) {
-            keyboardObj = kbDoc.object();
-          } else if (kbDoc.isArray()) {
-            keyboardObj["states"] = kbDoc.array();
-          }
-        } else {
-          // Fallback: get current keyboard backlight states from daemon
-          if (auto keyboardStates = m_UccdClient->getKeyboardBacklightStates()) {
-            keyboardObj["states"] = QJsonDocument::fromJson(QString::fromStdString(*keyboardStates).toUtf8()).array();
-          }
-        }
-        
-        // Store the name for reference/display
-        keyboardObj["keyboardProfileName"] = keyboardProfileName;
-        
-        // Include keyboard brightness in the profile
-        if ( m_keyboardBrightnessSlider )
-        {
-          keyboardObj["brightness"] = m_keyboardBrightnessSlider->value();
-        }
-        
-        // Include key colors from visualizer if available
-        if ( m_keyboardVisualizer )
-        {
-          keyboardObj["states"] = m_keyboardVisualizer->getJSONState();
-        }
-        
-        obj["keyboard"] = keyboardObj;
-        
-        // Embed the selected keyboard profile name at profile level
-        obj["selectedKeyboardProfile"] = keyboardProfileName;
-
-        // Charging profile setting
-        if ( m_profileChargingProfileCombo )
-        {
-          QString chargingProfile = m_profileChargingProfileCombo->currentData().toString();
-          if ( !chargingProfile.isEmpty() )
-            obj["chargingProfile"] = chargingProfile;
-        }
-
-        // Charging priority setting
-        if ( m_profileChargingPriorityCombo )
-        {
-          QString chargingPriority = m_profileChargingPriorityCombo->currentData().toString();
-          if ( !chargingPriority.isEmpty() )
-            obj["chargingPriority"] = chargingPriority;
-        }
-
-        // Charge limit setting (stored as chargeType + thresholds)
-        if ( m_profileChargeLimitCombo )
-        {
-          QString limitPreset = m_profileChargeLimitCombo->currentData().toString();
-          if ( limitPreset == "full" )
-          {
-            obj["chargeType"] = "Standard";
-          }
-          else if ( limitPreset == "reduced" )
-          {
-            obj["chargeType"] = "Custom";
-            obj["chargeStartThreshold"] = 60;
-            obj["chargeEndThreshold"] = 90;
-          }
-          else if ( limitPreset == "stationary" )
-          {
-            obj["chargeType"] = "Custom";
-            obj["chargeStartThreshold"] = 40;
-            obj["chargeEndThreshold"] = 80;
-          }
-        }
-
-        QJsonDocument out( obj );
-        m_profileManager->saveProfile( QString::fromUtf8( out.toJson( QJsonDocument::Compact ) ) );
-
-        // Switch to new profile and update profileId for stateMap
-        int idx = m_profileCombo->findText( newName );
-        if ( idx != -1 ) {
-          m_profileCombo->setCurrentIndex( idx );
-          profileId = m_profileManager->getProfileIdByName( newName );
-        }
-      }
-    }
-  }
 
   // For both custom and built-in profiles, update stateMap based on mains/battery button states
+  // Batch all stateMap changes into a single D-Bus call (single backup + write)
+  std::map< QString, QString > stateMapUpdates;
   if ( m_mainsButton->isChecked() )
-  {
-    m_profileManager->setStateMap( "power_ac", profileId );
-  }
+    stateMapUpdates["power_ac"] = profileId;
   if ( m_batteryButton->isChecked() )
-  {
-    m_profileManager->setStateMap( "power_bat", profileId );
-  }
+    stateMapUpdates["power_bat"] = profileId;
   if ( m_waterCoolerButton->isChecked() )
-  {
-    m_profileManager->setStateMap( "power_wc", profileId );
-  }
-  
+    stateMapUpdates["power_wc"] = profileId;
+
+  if ( !stateMapUpdates.empty() )
+    m_profileManager->setBatchStateMap( stateMapUpdates );
+
   // Indicate saving; actual success will be reflected when ProfileManager signals
   m_saveInProgress = true;
   statusBar()->showMessage( "Saving profile..." );
@@ -2053,17 +2005,17 @@ void MainWindow::onAddProfileClicked()
   QString baseName = "New Profile";
   QString profileName;
   int counter = 1;
-  
+
   do {
     profileName = QString("%1 %2").arg(baseName).arg(counter);
     counter++;
   } while (m_profileManager->allProfiles().contains(profileName));
-  
+
   // Create profile from default
   QString profileJson = m_profileManager->createProfileFromDefault(profileName);
   if (!profileJson.isEmpty()) {
     statusBar()->showMessage( QString("Profile '%1' created successfully").arg(profileName) );
-    
+
     // Switch to the newly created profile
     int newIndex = m_profileCombo->findText(profileName);
     if (newIndex != -1) {
@@ -2076,82 +2028,76 @@ void MainWindow::onAddProfileClicked()
 void MainWindow::onCopyProfileClicked()
 {
   QString current = m_profileCombo->currentText();
-  
+
+  // Strip " [Built-in]" suffix if present (built-in profiles shouldn't keep this marker when copied)
+  if ( current.endsWith( " [Built-in]" ) )
+    current = current.left( current.size() - 11 ); // 11 is length of " [Built-in]"
+
   // Allow copying any profile (built-in or custom)
-  QString profileId = m_profileManager->getProfileIdByName(current);
+  QString profileId = m_profileCombo->currentData().toString();
   QString json = m_profileManager->getProfileDetails(profileId);
   if (json.isEmpty()) {
     QMessageBox::warning(this, "Error", "Failed to get profile data.");
     return;
   }
-  
+
   QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
   if (!doc.isObject()) {
     QMessageBox::warning(this, "Error", "Invalid profile data.");
     return;
   }
-  
+
   QJsonObject obj = doc.object();
-  
+
   // Generate a new unique ID for the copied profile
   obj["id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  
-  // Generate new name by incrementing number
-  QString baseName = current;
-  int number = 0;
-  int lastSpace = current.lastIndexOf(' ');
-  if (lastSpace > 0) {
-    QString after = current.mid(lastSpace + 1);
-    bool ok;
-    int num = after.toInt(&ok);
-    if (ok) {
-      baseName = current.left(lastSpace);
-      number = num;
-    }
+
+  // Generate new name: "New {name}" with optional incrementing number
+  QString baseName = QString("New %1").arg(current);
+  QString newName = baseName;
+  int counter = 1;
+  while (m_profileManager->allProfiles().contains(newName)) {
+    newName = QString("%1 %2").arg(baseName).arg(counter);
+    counter++;
   }
-  QString newName;
-  do {
-    number++;
-    newName = QString("%1 %2").arg(baseName).arg(number);
-  } while (m_profileManager->allProfiles().contains(newName));
-  
+
   // Set new name
   obj["name"] = newName;
-  
+
   // Save
   QString newJson = QJsonDocument(obj).toJson(QJsonDocument::Compact);
   m_profileManager->saveProfile(newJson);
-  
+
   // Switch
   int newIndex = m_profileCombo->findText(newName);
   if (newIndex != -1) {
     m_profileCombo->setCurrentIndex(newIndex);
   }
-  
+
   statusBar()->showMessage( QString("Profile '%1' copied to '%2'").arg(current).arg(newName) );
 }
 
 void MainWindow::onRemoveProfileClicked()
 {
   QString currentProfile = m_profileCombo->currentText();
-  
+  QString currentProfileId = m_profileCombo->currentData().toString();
+
   // Check if it's a built-in profile
-  if (!m_profileManager->isCustomProfile(currentProfile)) {
-    QMessageBox::information(this, "Cannot Remove", 
+  if (!m_profileManager->isCustomProfile(currentProfileId)) {
+    QMessageBox::information(this, "Cannot Remove",
                             "Built-in profiles cannot be removed.");
     return;
   }
-  
+
   // Confirm deletion
   QMessageBox::StandardButton reply = QMessageBox::question(
     this, "Remove Profile",
     QString("Are you sure you want to remove the profile '%1'?").arg(currentProfile),
     QMessageBox::Yes | QMessageBox::No
   );
-  
+
   if (reply == QMessageBox::Yes) {
-    QString profileId = m_profileManager->getProfileIdByName(currentProfile);
-    m_profileManager->deleteProfile(profileId);
+    m_profileManager->deleteProfile(currentProfileId);
     statusBar()->showMessage( QString("Profile '%1' removed").arg(currentProfile) );
   }
 }
@@ -2172,14 +2118,14 @@ void MainWindow::onProfileComboRenamed()
     return;
   }
 
-  if ( !m_profileManager->isCustomProfile( oldName ) ) {
+  if ( !m_profileManager->isCustomProfile( m_profileCombo->itemData( idx ).toString() ) ) {
     // Cannot rename built-in profiles
     m_profileCombo->setEditText( oldName );
     return;
   }
 
   // Get profile data and update the name
-  QString profileId = m_profileManager->getProfileIdByName( oldName );
+  QString profileId = m_profileCombo->itemData( idx ).toString();
   QString json = m_profileManager->getProfileDetails( profileId );
   if ( json.isEmpty() ) {
     m_profileCombo->setEditText( oldName );
@@ -2223,12 +2169,13 @@ void MainWindow::onKeyboardProfileComboRenamed()
   }
 
   // "Default" is built-in
-  if ( !m_profileManager->customKeyboardProfiles().contains( oldName ) ) {
+  QString keyboardProfileId = m_keyboardProfileCombo->itemData( idx ).toString();
+  if ( keyboardProfileId.isEmpty() || !m_profileManager->customKeyboardProfiles().contains( oldName ) ) {
     m_keyboardProfileCombo->setEditText( oldName );
     return;
   }
 
-  if ( m_profileManager->renameKeyboardProfile( oldName, newName ) ) {
+  if ( m_profileManager->renameKeyboardProfile( keyboardProfileId, newName ) ) {
     m_keyboardProfileCombo->setItemText( idx, newName );
     statusBar()->showMessage( QString("Keyboard profile renamed from '%1' to '%2'").arg( oldName, newName ) );
     updateKeyboardProfileButtonStates();
@@ -2238,45 +2185,28 @@ void MainWindow::onKeyboardProfileComboRenamed()
   }
 }
 
-void MainWindow::onAddFanProfileClicked()
-{
-  // Generate a unique fan profile name
-  QString baseName = "Custom Fan Profile";
-  QString profileName;
-  int counter = 1;
-  
-  do {
-    profileName = QString("%1 %2").arg(baseName).arg(counter);
-    counter++;
-  } while (m_fanControlTab->fanProfileCombo()->findText(profileName) != -1);
-  
-  // Add to combo
-  m_fanControlTab->fanProfileCombo()->addItem(profileName);
-  m_fanControlTab->fanProfileCombo()->setCurrentText(profileName);
-  statusBar()->showMessage( QString("Fan profile '%1' created").arg(profileName) );
-}
-
 void MainWindow::onRemoveFanProfileClicked()
 {
   QString currentProfile = m_fanControlTab->fanProfileCombo()->currentText();
-  
+
   // Check if it's a built-in profile
   if ( m_fanControlTab->builtinFanProfiles().contains( currentProfile ) ) {
-    QMessageBox::information(this, "Cannot Remove", 
+    QMessageBox::information(this, "Cannot Remove",
                             "Built-in fan profiles cannot be removed.");
     return;
   }
-  
+
   // Confirm deletion
   QMessageBox::StandardButton reply = QMessageBox::question(
     this, "Remove Fan Profile",
     QString("Are you sure you want to remove the fan profile '%1'?").arg(currentProfile),
     QMessageBox::Yes | QMessageBox::No
   );
-  
+
   if (reply == QMessageBox::Yes) {
     // Remove from persistent storage and UI
-    if ( m_profileManager->deleteFanProfile( currentProfile ) ) {
+    QString fanProfileId = m_fanControlTab->fanProfileCombo()->currentData().toString();
+    if ( m_profileManager->deleteFanProfile( fanProfileId ) ) {
       // Remove from both fan profile lists
       int idx = m_fanControlTab->fanProfileCombo()->currentIndex();
       if ( idx >= 0 ) m_fanControlTab->fanProfileCombo()->removeItem( idx );
@@ -2291,15 +2221,13 @@ void MainWindow::onRemoveFanProfileClicked()
   }
 }
 
-void MainWindow::onFanProfileChanged(const QString& profileName)
+void MainWindow::onFanProfileChanged(const QString& fanProfileId)
 {
-  Q_UNUSED(profileName);
-
-  QString json = m_profileManager->getFanProfile(profileName);
+  QString json = m_profileManager->getFanProfile(fanProfileId);
   QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
   if (doc.isObject()) {
     QJsonObject obj = doc.object();
-    
+
     // Load CPU points
     if (obj.contains("tableCPU")) {
       QJsonArray arr = obj["tableCPU"].toArray();
@@ -2314,7 +2242,7 @@ void MainWindow::onFanProfileChanged(const QString& profileName)
         m_fanControlTab->cpuEditor()->setPoints(cpuPoints);
       }
     }
-    
+
     // Load GPU points
     if (obj.contains("tableGPU")) {
       QJsonArray arr = obj["tableGPU"].toArray();
@@ -2360,22 +2288,30 @@ void MainWindow::onFanProfileChanged(const QString& profileName)
       }
     }
   }
-  
-  // Update the current profile selection
-  m_currentFanProfile = profileName;
-  
-  // Synchronize profile tab fan profile combo with fan tab selection
+
+  // Update the current fan profile ID
+  m_currentFanProfile = fanProfileId;
+
+  // Synchronize profile tab fan profile combo with fan tab selection (match by ID userData)
   m_profileFanProfileCombo->blockSignals(true);
-  int idx = m_profileFanProfileCombo->findText(profileName);
+  int idx = -1;
+  for ( int i = 0; i < m_profileFanProfileCombo->count(); ++i )
+  {
+    if ( m_profileFanProfileCombo->itemData( i ).toString() == fanProfileId )
+    {
+      idx = i;
+      break;
+    }
+  }
   if (idx >= 0) {
     m_profileFanProfileCombo->setCurrentIndex(idx);
   }
   m_profileFanProfileCombo->blockSignals(false);
-  
+
   // Set editors editable only for custom profiles (those not in built-ins)
-  bool isEditable = !m_fanControlTab->builtinFanProfiles().contains( profileName );
+  bool isEditable = !m_fanControlTab->builtinFanProfiles().contains( fanProfileId );
   m_fanControlTab->setEditorsEditable( isEditable );
-  
+
   // Update button states
   updateButtonStates();
 }
@@ -2390,8 +2326,6 @@ void MainWindow::onCpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point
 
 void MainWindow::reloadFanProfiles()
 {
-  qDebug() << "Reloading fan profiles from daemon and custom profiles";
-
   // Delegate to FanControlTab which owns the combo and builtin list
   m_fanControlTab->reloadFanProfiles();
 
@@ -2401,13 +2335,14 @@ void MainWindow::reloadFanProfiles()
     m_profileFanProfileCombo->blockSignals(true);
     m_profileFanProfileCombo->clear();
     for ( int i = 0; i < m_fanControlTab->fanProfileCombo()->count(); ++i )
-      m_profileFanProfileCombo->addItem( m_fanControlTab->fanProfileCombo()->itemText(i) );
+      m_profileFanProfileCombo->addItem( m_fanControlTab->fanProfileCombo()->itemText(i),
+                                         m_fanControlTab->fanProfileCombo()->itemData(i) );
     m_profileFanProfileCombo->blockSignals(false);
   }
 
   // Trigger change handler to update editors/buttons
   if ( m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
-    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentText() );
+    onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentData().toString() );
   else
     updateButtonStates();
 }
@@ -2449,32 +2384,44 @@ void MainWindow::onPumpPointsChanged(const QVector<PumpCurveEditorWidget::Point>
 
 void MainWindow::onCopyFanProfileClicked()
 {
-  QString currentProfile = m_fanControlTab->fanProfileCombo()->currentText();
-  if ( currentProfile.isEmpty() ) return;
+  QString currentProfileId = m_fanControlTab->fanProfileCombo()->currentData().toString();
+
+  if ( currentProfileId.isEmpty() )
+    return;
+
+  // Get the current profile name and strip " [Built-in]" suffix if present
+  QString currentName = m_fanControlTab->fanProfileCombo()->currentText(); 
+
+  if ( currentName.endsWith(" [Built-in]") )
+    currentName = currentName.left( currentName.size() - 11 ); // 11 is length of " [Built-in]" 
 
   // Get the current profile data
-  QString json = m_profileManager->getFanProfile( currentProfile );
+  QString json = m_profileManager->getFanProfile( currentProfileId );
   if ( json.isEmpty() ) {
     QMessageBox::warning(this, "Error", "Failed to get fan profile data.");
     return;
   }
 
-  // Generate a unique custom fan profile name
-  QString baseName = "Custom Fan Profile";
-  QString profileName;
+  // Generate new name: "New {name}" with optional incrementing number
+  QString baseName = QString("New %1").arg(currentName);
+  QString profileName = baseName;
   int counter = 1;
-  do {
+  while ( m_fanControlTab->fanProfileCombo()->findText( profileName ) != -1 ) {
     profileName = QString("%1 %2").arg(baseName).arg(counter);
     counter++;
-  } while ( m_fanControlTab->fanProfileCombo()->findText( profileName ) != -1 );
+  }
 
-  // Save it under the new name
-  if ( m_profileManager->setFanProfile( profileName, json ) ) {
-    m_fanControlTab->fanProfileCombo()->addItem( profileName );
+  // Save it under the new name with a new ID
+  QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+  if ( m_profileManager->setFanProfile( newId, profileName, json ) ) {
+    m_fanControlTab->fanProfileCombo()->addItem( profileName, newId );
     if ( m_profileFanProfileCombo && m_profileFanProfileCombo->findText( profileName ) == -1 )
-      m_profileFanProfileCombo->addItem( profileName );
-    m_fanControlTab->fanProfileCombo()->setCurrentText( profileName );
-    statusBar()->showMessage( QString("Copied '%1' profile to '%2'").arg(currentProfile).arg(profileName) );
+      m_profileFanProfileCombo->addItem( profileName, newId );
+    // Select by index so currentIndexChanged fires and editability is updated
+    int newIdx = m_fanControlTab->fanProfileCombo()->findData( newId );
+    if ( newIdx >= 0 )
+      m_fanControlTab->fanProfileCombo()->setCurrentIndex( newIdx );
+    statusBar()->showMessage( QString("Copied fan profile to '%1'").arg(profileName) );
   }
   else {
     QMessageBox::warning(this, "Error", "Failed to copy profile to new custom profile.");
@@ -2656,7 +2603,7 @@ void MainWindow::loadFanPoints()
 void MainWindow::saveFanPoints()
 {
   QJsonObject obj;
-  
+
   // Get CPU points from the editor
   QJsonArray cpuArr;
   if (m_fanControlTab->cpuEditor()) {
@@ -2669,7 +2616,7 @@ void MainWindow::saveFanPoints()
     }
   }
   obj["tableCPU"] = cpuArr;
-  
+
   // Get GPU points from the editor
   QJsonArray gpuArr;
   if (m_fanControlTab->gpuEditor()) {
@@ -2682,7 +2629,7 @@ void MainWindow::saveFanPoints()
     }
   }
   obj["tableGPU"] = gpuArr;
-  
+
   // Get water cooler fan points from the editor
   QJsonArray wcFanArr;
   if (m_fanControlTab->wcFanEditor()) {
@@ -2695,7 +2642,7 @@ void MainWindow::saveFanPoints()
     }
   }
   obj["tableWaterCoolerFan"] = wcFanArr;
-  
+
   // Get pump points from the editor
   QJsonArray pumpArr;
   if (m_fanControlTab->pumpEditor()) {
@@ -2708,23 +2655,24 @@ void MainWindow::saveFanPoints()
     }
   }
   obj["tablePump"] = pumpArr;
-  
+
   QJsonDocument doc(obj);
   QString json = doc.toJson(QJsonDocument::Compact);
 
-  const QString current = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
-  if ( current.isEmpty() ) {
+  const QString currentId = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentData().toString() : QString();
+  const QString currentName = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
+  if ( currentId.isEmpty() ) {
     QMessageBox::warning(this, "Save Failed", "No fan profile selected to save to.");
     return;
   }
 
-  if ( m_fanControlTab->builtinFanProfiles().contains( current ) ) {
+  if ( m_fanControlTab->builtinFanProfiles().contains( currentId ) ) {
     QMessageBox::warning(this, "Save Failed", "Cannot overwrite built-in fan profile. Copy it to a custom profile first.");
     return;
   }
 
-  // Save into selected custom profile
-  m_profileManager->setFanProfile( current, json );
+  // Save into selected custom profile (by ID)
+  m_profileManager->setFanProfile( currentId, currentName, json );
 }
 
 

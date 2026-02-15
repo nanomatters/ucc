@@ -391,7 +391,7 @@ protected:
         // Fan 0 is CPU, others are GPU
         FanLogicType type = ( i == 0 ) ? FanLogicType::CPU : FanLogicType::GPU;
         // Resolve the named fan profile preset
-        FanProfile fp = getDefaultFanProfileByName( profile.fan.fanProfile );
+        FanProfile fp = getDefaultFanProfile( profile.fan.fanProfile );
         m_fanLogics.emplace_back( fp, type );
       }
 
@@ -556,11 +556,11 @@ private:
 
     for ( size_t i = 0; i < m_fanLogics.size(); ++i )
     {
-      // Resolve fan profile by name (built-in) instead of using embedded tables in profiles
+      // Resolve fan profile by ID or name (built-in)
       FanProfile fanProfile;
       for ( const auto &p : defaultFanProfiles )
       {
-        if ( p.name == profile.fan.fanProfile ) { fanProfile = p; break; }
+        if ( p.id == profile.fan.fanProfile || p.name == profile.fan.fanProfile ) { fanProfile = p; break; }
       }
       // Fallbacks
       if ( !fanProfile.isValid() )

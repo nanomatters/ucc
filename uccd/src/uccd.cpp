@@ -42,7 +42,7 @@
 #include "SettingsManager.hpp"
 
 // C++20 features used
-constexpr std::string_view VERSION = "1.0.0-ng";
+constexpr std::string_view VERSION = "0.1.0";
 constexpr std::string_view DAEMON_NAME = "uccd";
 constexpr std::string_view PID_FILE = "/run/uccd.pid";
 
@@ -66,13 +66,13 @@ static void signal_fd_handler( int sig )
 void init_syslog()
 {
   openlog( DAEMON_NAME.data(), LOG_PID, LOG_DAEMON );
-  syslog( LOG_INFO, "TuxedoControlCenterDaemon-NG (uccd) starting - version %s", VERSION.data() );
+  syslog( LOG_INFO, "uccd starting - version %s", VERSION.data() );
 }
 
 // Cleanup syslog
 void cleanup_syslog()
 {
-  syslog( LOG_INFO, "TuxedoControlCenterDaemon-NG (uccd) shutting down" );
+  syslog( LOG_INFO, "uccd shutting down" );
   closelog();
 }
 

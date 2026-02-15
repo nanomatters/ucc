@@ -69,7 +69,6 @@ public:
   QPushButton *copyButton()   const { return m_copyFanProfileButton; }
   QPushButton *removeButton() const { return m_removeFanProfileButton; }
   QPushButton *revertButton() const { return m_revertFanProfilesButton; }
-  QPushButton *addButton()    const { return m_addFanProfileButton; }
 
   /** Update the water-cooler enable checkbox without re-triggering signals. */
   void setWaterCoolerEnabled( bool enabled );
@@ -92,10 +91,9 @@ signals:
   void applyRequested();
   void saveRequested();
   void revertRequested();
-  void addRequested();
   void copyRequested();
   void removeRequested();
-  void fanProfileChanged( const QString &profileName );
+  void fanProfileChanged( const QString &fanProfileId );
   void fanProfileRenamed( const QString &oldName, const QString &newName );
   void cpuPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );
   void gpuPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );
@@ -126,7 +124,6 @@ private:
   QPushButton *m_applyFanProfilesButton = nullptr;
   QPushButton *m_saveFanProfilesButton = nullptr;
   QPushButton *m_revertFanProfilesButton = nullptr;
-  QPushButton *m_addFanProfileButton = nullptr;
   QPushButton *m_copyFanProfileButton = nullptr;
   QPushButton *m_removeFanProfileButton = nullptr;
   QStringList m_builtinFanProfiles;

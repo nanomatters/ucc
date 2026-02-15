@@ -292,6 +292,7 @@ public slots:
   // settings methods
   QString GetSettingsJSON();
   bool SetStateMap( const QString &state, const QString &profileId );
+  bool SetBatchStateMap( const QString &stateMapJSON );
 
   // odm methods
   QStringList ODMProfilesAvailable();

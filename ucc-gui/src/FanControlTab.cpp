@@ -80,21 +80,22 @@ void FanControlTab::setupUI()
   m_fanProfileCombo->setEditable( true );
   m_fanProfileCombo->setInsertPolicy( QComboBox::NoInsert );
 
-  if ( auto names = m_uccdClient->getFanProfileNames() )
+  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
   {
-    m_builtinFanProfiles.clear();
-    for ( const auto &name : *names )
-    {
-      QString qn = QString::fromStdString( name );
-      m_fanProfileCombo->addItem( qn );
-      m_builtinFanProfiles.append( qn );
-    }
+    QJsonObject o = v.toObject();
+    QString id = o["id"].toString();
+    QString name = o["name"].toString();
+    m_fanProfileCombo->addItem( name, id );
+    m_builtinFanProfiles.append( id );
   }
 
-  for ( const auto &name : m_profileManager->customFanProfiles() )
+  for ( const auto &v : m_profileManager->customFanProfilesData() )
   {
-    if ( m_fanProfileCombo->findText( name ) == -1 )
-      m_fanProfileCombo->addItem( name );
+    QJsonObject o = v.toObject();
+    QString id = o["id"].toString();
+    QString name = o["name"].toString();
+    if ( !m_builtinFanProfiles.contains( id ) )
+      m_fanProfileCombo->addItem( name, id );
   }
 
   m_applyFanProfilesButton = new QPushButton( "Apply" );
@@ -104,9 +105,6 @@ void FanControlTab::setupUI()
   m_saveFanProfilesButton = new QPushButton( "Save" );
   m_saveFanProfilesButton->setMaximumWidth( 80 );
   m_saveFanProfilesButton->setEnabled( false );
-
-  m_addFanProfileButton = new QPushButton( "Add" );
-  m_addFanProfileButton->setMaximumWidth( 60 );
 
   m_copyFanProfileButton = new QPushButton( "Copy" );
   m_copyFanProfileButton->setMaximumWidth( 60 );
@@ -119,7 +117,6 @@ void FanControlTab::setupUI()
   selectLayout->addWidget( m_fanProfileCombo, 1 );
   selectLayout->addWidget( m_applyFanProfilesButton );
   selectLayout->addWidget( m_saveFanProfilesButton );
-  selectLayout->addWidget( m_addFanProfileButton );
   selectLayout->addWidget( m_copyFanProfileButton );
   selectLayout->addWidget( m_removeFanProfileButton );
   mainLayout->addLayout( selectLayout );
@@ -272,7 +269,7 @@ void FanControlTab::connectSignals()
   connect( m_fanProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this]( int index ) {
     if ( index >= 0 )
-      emit fanProfileChanged( m_fanProfileCombo->itemText( index ) );
+      emit fanProfileChanged( m_fanProfileCombo->itemData( index ).toString() );
   } );
 
   // Fan profile combo rename handling
@@ -298,8 +295,6 @@ void FanControlTab::connectSignals()
            this, &FanControlTab::applyRequested );
   connect( m_saveFanProfilesButton, &QPushButton::clicked,
            this, &FanControlTab::saveRequested );
-  connect( m_addFanProfileButton, &QPushButton::clicked,
-           this, &FanControlTab::addRequested );
   connect( m_copyFanProfileButton, &QPushButton::clicked,
            this, &FanControlTab::copyRequested );
   connect( m_removeFanProfileButton, &QPushButton::clicked,
@@ -325,43 +320,49 @@ void FanControlTab::connectSignals()
 
 void FanControlTab::reloadFanProfiles()
 {
-  QString prev = m_fanProfileCombo ? m_fanProfileCombo->currentText() : QString();
+  QString prevId = m_fanProfileCombo ? m_fanProfileCombo->currentData().toString() : QString();
   if ( m_fanProfileCombo ) m_fanProfileCombo->clear();
   m_builtinFanProfiles.clear();
 
-  if ( m_uccdClient )
+  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
   {
-    if ( auto names = m_uccdClient->getFanProfileNames() )
+    QJsonObject o = v.toObject();
+    QString id = o["id"].toString();
+    QString name = o["name"].toString();
+    m_fanProfileCombo->addItem( name, id );
+    m_builtinFanProfiles.append( id );
+  }
+
+  for ( const auto &v : m_profileManager->customFanProfilesData() )
+  {
+    QJsonObject o = v.toObject();
+    QString id = o["id"].toString();
+    QString name = o["name"].toString();
+    if ( !m_builtinFanProfiles.contains( id ) )
+      m_fanProfileCombo->addItem( name, id );
+  }
+
+  // Restore selection by ID
+  if ( !prevId.isEmpty() )
+  {
+    for ( int i = 0; i < m_fanProfileCombo->count(); ++i )
     {
-      for ( const auto &n : *names )
-      {
-        QString qn = QString::fromStdString( n );
-        m_fanProfileCombo->addItem( qn );
-        m_builtinFanProfiles.append( qn );
-      }
+      if ( m_fanProfileCombo->itemData( i ).toString() == prevId )
+      { m_fanProfileCombo->setCurrentIndex( i ); return; }
     }
   }
-
-  for ( const auto &name : m_profileManager->customFanProfiles() )
-  {
-    if ( m_fanProfileCombo->findText( name ) == -1 )
-      m_fanProfileCombo->addItem( name );
-  }
-
-  if ( !prev.isEmpty() && m_fanProfileCombo->findText( prev ) != -1 )
-    m_fanProfileCombo->setCurrentText( prev );
-  else if ( m_fanProfileCombo->count() > 0 )
+  if ( m_fanProfileCombo->count() > 0 )
     m_fanProfileCombo->setCurrentIndex( 0 );
 }
 
 void FanControlTab::updateButtonStates( bool uccdConnected )
 {
-  const QString name = m_fanProfileCombo ? m_fanProfileCombo->currentText() : QString();
-  const bool isCustom = ( !name.isEmpty() && !m_builtinFanProfiles.contains( name ) );
+  const QString id = m_fanProfileCombo ? m_fanProfileCombo->currentData().toString() : QString();
+  const bool isCustom = ( !id.isEmpty() && !m_builtinFanProfiles.contains( id ) );
 
   if ( m_applyFanProfilesButton )   m_applyFanProfilesButton->setEnabled( uccdConnected );
   if ( m_saveFanProfilesButton )    m_saveFanProfilesButton->setEnabled( isCustom );
-  if ( m_copyFanProfileButton )     m_copyFanProfileButton->setEnabled( !name.isEmpty() );
+  if ( m_copyFanProfileButton )     m_copyFanProfileButton->setEnabled( !id.isEmpty() );
   if ( m_revertFanProfilesButton )  m_revertFanProfilesButton->setEnabled( isCustom && uccdConnected );
 
   // Only allow renaming custom fan profiles
@@ -384,6 +385,7 @@ void FanControlTab::onFanProfileComboRenamed()
   int idx = m_fanProfileCombo->currentIndex();
   if ( idx < 0 ) return;
 
+  QString fanProfileId = m_fanProfileCombo->itemData( idx ).toString();
   QString oldName = m_fanProfileCombo->itemText( idx );
   QString newName = m_fanProfileCombo->currentText().trimmed();
 
@@ -393,12 +395,12 @@ void FanControlTab::onFanProfileComboRenamed()
   }
 
   // Cannot rename built-in profiles
-  if ( m_builtinFanProfiles.contains( oldName ) ) {
+  if ( m_builtinFanProfiles.contains( fanProfileId ) ) {
     m_fanProfileCombo->setEditText( oldName );
     return;
   }
 
-  if ( m_profileManager->renameFanProfile( oldName, newName ) ) {
+  if ( m_profileManager->renameFanProfile( fanProfileId, newName ) ) {
     m_fanProfileCombo->setItemText( idx, newName );
     emit fanProfileRenamed( oldName, newName );
 

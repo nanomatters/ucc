@@ -29,6 +29,7 @@
 #include <QJsonArray>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QUuid>
 
 namespace ucc
 {
@@ -47,14 +48,11 @@ void MainWindow::connectKeyboardBacklightPageWidgets()
   connect( m_keyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this]( int index ) {
     if ( index >= 0 )
-      onKeyboardProfileChanged( m_keyboardProfileCombo->itemText( index ) );
+      onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( index ).toString() );
   } );
 
   connect( m_keyboardProfileCombo->lineEdit(), &QLineEdit::editingFinished,
            this, &MainWindow::onKeyboardProfileComboRenamed );
-
-  connect( m_addKeyboardProfileButton, &QPushButton::clicked,
-           this, &MainWindow::onAddKeyboardProfileClicked );
 
   connect( m_copyKeyboardProfileButton, &QPushButton::clicked,
            this, &MainWindow::onCopyKeyboardProfileClicked );
@@ -79,22 +77,51 @@ void MainWindow::setupKeyboardBacklightPage()
   m_keyboardProfileCombo = new QComboBox();
   m_keyboardProfileCombo->setEditable( true );
   m_keyboardProfileCombo->setInsertPolicy( QComboBox::NoInsert );
-  
+
   // Add custom keyboard profiles from settings
-  for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-    m_keyboardProfileCombo->addItem( name );
+  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  {
+    QJsonObject o = v.toObject();
+    m_keyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+  }
+
+  // If no custom profiles exist, create a "Current" profile from hardware state
+  if ( m_keyboardProfileCombo->count() == 0 )
+  {
+    QString currentId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+    QString json;
+
+    // Read live state from hardware
+    if ( auto states = m_UccdClient->getKeyboardBacklightStates() )
+    {
+      QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
+      if ( statesDoc.isArray() )
+      {
+        QJsonObject wrapper;
+        wrapper["states"] = statesDoc.array();
+        // Extract brightness from first zone
+        if ( !statesDoc.array().isEmpty() )
+          wrapper["brightness"] = statesDoc.array()[0].toObject()["brightness"].toInt( 50 );
+        json = QJsonDocument( wrapper ).toJson( QJsonDocument::Compact );
+      }
+    }
+
+    if ( json.isEmpty() )
+      json = QStringLiteral( "{\"brightness\":50,\"states\":[]}" );
+
+    if ( m_profileManager->setKeyboardProfile( currentId, "Current", json ) )
+    {
+      m_keyboardProfileCombo->addItem( "Current", currentId );
+      qDebug() << "[KBD INIT] Auto-saved 'Current' keyboard profile:" << currentId;
+    }
+  }
   
-  m_addKeyboardProfileButton = new QPushButton("Add");  
   m_copyKeyboardProfileButton = new QPushButton("Copy");  
   m_saveKeyboardProfileButton = new QPushButton("Save");
   m_removeKeyboardProfileButton = new QPushButton("Remove");
 
-  m_saveKeyboardProfileButton->setEnabled( true ); // Always enabled - can always save current state  
-  m_copyKeyboardProfileButton->setEnabled( false );
-
   profileLayout->addWidget( profileLabel );
   profileLayout->addWidget( m_keyboardProfileCombo, 1 );
-  profileLayout->addWidget( m_addKeyboardProfileButton );
   profileLayout->addWidget( m_copyKeyboardProfileButton );
   profileLayout->addWidget( m_saveKeyboardProfileButton );
   profileLayout->addWidget( m_removeKeyboardProfileButton );
@@ -130,8 +157,8 @@ void MainWindow::setupKeyboardBacklightPage()
         m_keyboardBrightnessSlider = new QSlider( Qt::Horizontal );
         m_keyboardBrightnessSlider->setMinimum( 0 );
         m_keyboardBrightnessSlider->setMaximum( maxBrightness );
-        m_keyboardBrightnessSlider->setValue( maxBrightness / 2 );
-        m_keyboardBrightnessValueLabel = new QLabel( QString::number( maxBrightness / 2 ) );
+        m_keyboardBrightnessSlider->setValue( maxBrightness );
+        m_keyboardBrightnessValueLabel = new QLabel( QString::number( maxBrightness ) );
         m_keyboardBrightnessValueLabel->setMinimumWidth( 40 );
 
         brightnessLayout->addWidget( brightnessLabel );
@@ -152,12 +179,8 @@ void MainWindow::setupKeyboardBacklightPage()
         // Keyboard visualizer
         if ( zones > 1 )
         {
-          m_keyboardVisualizer = new KeyboardVisualizerWidget( zones, keyboardWidget );
+          m_keyboardVisualizer = new KeyboardVisualizerWidget( zones, maxBrightness, keyboardWidget );
           mainLayout->addWidget( m_keyboardVisualizer );
-
-          // Connect visualizer signals
-          connect( m_keyboardVisualizer, &KeyboardVisualizerWidget::colorsChanged,
-                   this, &MainWindow::onKeyboardVisualizerColorsChanged );
         }
       }
       else
@@ -181,15 +204,19 @@ void MainWindow::reloadKeyboardProfiles()
 {
   if ( m_keyboardProfileCombo )
   {
+    // Block signals during combo rebuild to prevent spurious profile loads
+    m_keyboardProfileCombo->blockSignals( true );
+
     m_keyboardProfileCombo->clear();
-    // Add "Default" profile
-    m_keyboardProfileCombo->addItem( "Default" );
-    // Add custom keyboard profiles from settings
-    for ( const auto &name : m_profileManager->customKeyboardProfiles() )
-      m_keyboardProfileCombo->addItem( name );
+    for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+    {
+      QJsonObject o = v.toObject();
+      m_keyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
+
+    m_keyboardProfileCombo->blockSignals( false );
   }
 
-  // Update button states
   updateKeyboardProfileButtonStates();
 }
 
@@ -198,15 +225,12 @@ void MainWindow::updateKeyboardProfileButtonStates()
   if ( not m_keyboardProfileCombo or not m_copyKeyboardProfileButton or not m_removeKeyboardProfileButton )
     return;
 
-  QString current = m_keyboardProfileCombo->currentText();
-  bool isCustom = m_profileManager->customKeyboardProfiles().contains( current );
+  bool hasProfile = ( m_keyboardProfileCombo->count() > 0 );
+  bool canRemove = ( m_keyboardProfileCombo->count() > 1 ); // Keep at least one profile
 
-  m_copyKeyboardProfileButton->setEnabled( isCustom );
-  m_removeKeyboardProfileButton->setEnabled( isCustom );
-
-  // Only allow renaming custom profiles
-  if ( m_keyboardProfileCombo->lineEdit() )
-    m_keyboardProfileCombo->lineEdit()->setReadOnly( !isCustom );
+  m_copyKeyboardProfileButton->setEnabled( hasProfile );
+  m_saveKeyboardProfileButton->setEnabled( hasProfile );
+  m_removeKeyboardProfileButton->setEnabled( canRemove );
 }
 
 void MainWindow::onKeyboardBrightnessChanged( int value )
@@ -216,27 +240,19 @@ void MainWindow::onKeyboardBrightnessChanged( int value )
   if ( m_initializing )
     return;
 
-  // Update visualizer if it exists
+  // Update visualizer preview — block colorsChanged signal to avoid double hardware write
   if ( m_keyboardVisualizer )
-    m_keyboardVisualizer->setGlobalBrightness( value );
-  else
   {
-    // Fallback for single zone keyboards
-    QJsonArray statesArray;
-    QJsonObject state;
-    state["mode"] = 0; // Static
-    state["brightness"] = value;
-    state["red"] = 255;
-    state["green"] = 255;
-    state["blue"] = 255;
-    statesArray.append( state );
+    m_keyboardVisualizer->blockSignals( true );
+    m_keyboardVisualizer->setGlobalBrightness( value );
+    m_keyboardVisualizer->blockSignals( false );
 
-    QJsonDocument doc( statesArray );
-    QString json = doc.toJson( QJsonDocument::Compact );
-
-    if ( not m_UccdClient->setKeyboardBacklight( json.toStdString() ) )
+    // Apply to hardware immediately (same as color changes)
+    QJsonArray statesArray = m_keyboardVisualizer->getJSONState();
+    if ( !statesArray.empty() )
     {
-      statusBar()->showMessage( "Failed to set keyboard backlight", 3000 );
+      QJsonDocument doc( statesArray );
+      m_UccdClient->setKeyboardBacklight( doc.toJson( QJsonDocument::Compact ).toStdString() );
     }
   }
 }
@@ -297,16 +313,17 @@ void MainWindow::onKeyboardVisualizerColorsChanged()
   }
 }
 
-void MainWindow::onKeyboardProfileChanged(const QString& profileName)
+void MainWindow::onKeyboardProfileChanged(const QString& profileId)
 {
-  if ( profileName.isEmpty() )
+  if ( profileId.isEmpty() )
     return;
 
-  // Get the keyboard profile data
-  QString json = m_profileManager->getKeyboardProfile( profileName );
+  // Get the keyboard profile data by ID
+  QString json = m_profileManager->getKeyboardProfile( profileId );
+  qDebug() << "[KBD PROFILE] loading profile:" << profileId << "json length:" << json.size();
   if ( json.isEmpty() or json == "{}" )
   {
-    qDebug() << "No keyboard profile data for" << profileName;
+    qDebug() << "No keyboard profile data for" << profileId;
     return;
   }
 
@@ -351,7 +368,7 @@ void MainWindow::onKeyboardProfileChanged(const QString& profileName)
     }
   }
 
-  // Update brightness slider
+  // Update brightness slider and visualizer
   if ( brightness < 0 && !statesArray.isEmpty() && statesArray[0].isObject() )
   {
     // Fallback: extract brightness from first state (old format)
@@ -359,81 +376,119 @@ void MainWindow::onKeyboardProfileChanged(const QString& profileName)
     brightness = firstState["brightness"].toInt( 128 );
   }
   
-  if ( brightness >= 0 && m_keyboardBrightnessSlider )
+  if ( brightness >= 0 )
   {
-    m_keyboardBrightnessSlider->setValue( brightness );
+    qDebug() << "[KBD PROFILE] applying brightness:" << brightness
+             << "slider max:" << ( m_keyboardBrightnessSlider ? m_keyboardBrightnessSlider->maximum() : -1 );
+    if ( m_keyboardBrightnessSlider )
+    {
+      m_keyboardBrightnessSlider->blockSignals( true );
+      m_keyboardBrightnessSlider->setValue( brightness );
+      m_keyboardBrightnessSlider->blockSignals( false );
+      m_keyboardBrightnessValueLabel->setText( QString::number( brightness ) );
+    }
+    if ( m_keyboardVisualizer )
+    {
+      m_keyboardVisualizer->blockSignals( true );
+      m_keyboardVisualizer->setGlobalBrightness( brightness );
+      m_keyboardVisualizer->blockSignals( false );
+    }
   }
 
   // Update button states
   updateKeyboardProfileButtonStates();
 }
 
-void MainWindow::onAddKeyboardProfileClicked()
-{
-  bool ok;
-  QString name = QInputDialog::getText( this, "Add Keyboard Profile",
-                                        "Enter profile name:", QLineEdit::Normal, "", &ok );
-  if ( ok and not name.isEmpty() )
-  {
-    if ( m_profileManager->setKeyboardProfile( name, "{}" ) )  // Add empty profile
-    {
-      m_keyboardProfileCombo->addItem( name );
-      m_keyboardProfileCombo->setCurrentText( name );
-      statusBar()->showMessage( QString("Keyboard profile '%1' added").arg(name) );
-      updateKeyboardProfileButtonStates();
-    }
-    else
-    {
-      QMessageBox::warning( this, "Add Failed", "Failed to add keyboard profile." );
-    }
-  }
-}
-
 void MainWindow::onCopyKeyboardProfileClicked()
 {
-  QString current = m_keyboardProfileCombo->currentText();
-  if ( current.isEmpty() )
-    return;
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  QString currentName = m_keyboardProfileCombo->currentText();
 
-  bool ok;
-  QString name = QInputDialog::getText( this, "Copy Keyboard Profile",
-                                        "Enter new profile name:", QLineEdit::Normal, current + " Copy", &ok );
-  if ( ok and not name.isEmpty() )
+  // Strip " [Built-in]" suffix if present
+  if ( currentName.endsWith(" [Built-in]") )
+    currentName = currentName.left( currentName.size() - 11 ); // 11 is length of " [Built-in]"
+
+  // Generate new name: "New {name}" with optional incrementing number
+  QString baseName = QString("New %1").arg(currentName);
+  QString name = baseName;
+  int counter = 1;
+  while ( m_keyboardProfileCombo->findText( name ) != -1 ) {
+    name = QString("%1 %2").arg(baseName).arg(counter);
+    counter++;
+  }
+
+  // Get the profile data: for "Current" (empty ID), read the live keyboard state
+  QString json;
+  if ( currentId.isEmpty() )
   {
-    // Get the current profile data and save it with the new name
-    QString json = m_profileManager->getKeyboardProfile( current );
-    if ( not json.isEmpty() and m_profileManager->setKeyboardProfile( name, json ) )
+    if ( m_keyboardVisualizer )
     {
-      m_keyboardProfileCombo->addItem( name );
-      m_keyboardProfileCombo->setCurrentText( name );
-      statusBar()->showMessage( QString("Keyboard profile '%1' copied to '%2'").arg(current, name) );
-      updateKeyboardProfileButtonStates();
+      QJsonObject wrapper;
+      if ( m_keyboardBrightnessSlider )
+        wrapper["brightness"] = m_keyboardBrightnessSlider->value();
+      wrapper["states"] = m_keyboardVisualizer->getJSONState();
+      json = QJsonDocument( wrapper ).toJson( QJsonDocument::Compact );
     }
-    else
+    else if ( auto states = m_UccdClient->getKeyboardBacklightStates() )
     {
-      QMessageBox::warning( this, "Copy Failed", "Failed to copy keyboard profile." );
+      // Wrap with brightness if available
+      QJsonObject wrapper;
+      if ( m_keyboardBrightnessSlider )
+        wrapper["brightness"] = m_keyboardBrightnessSlider->value();
+      QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
+      if ( statesDoc.isArray() )
+        wrapper["states"] = statesDoc.array();
+      json = QJsonDocument( wrapper ).toJson( QJsonDocument::Compact );
     }
+  }
+  else
+    json = m_profileManager->getKeyboardProfile( currentId );
+
+  QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
+  if ( not json.isEmpty() and m_profileManager->setKeyboardProfile( newId, name, json ) )
+  {
+    // setKeyboardProfile emits customKeyboardProfilesChanged which triggers
+    // reloadKeyboardProfiles(), so the combo is already rebuilt. Just select the new item.
+    int newIdx = m_keyboardProfileCombo->findData( newId );
+    if ( newIdx >= 0 )
+      m_keyboardProfileCombo->setCurrentIndex( newIdx );
+    statusBar()->showMessage( QString("Keyboard profile '%1' copied to '%2'").arg(currentName, name) );
+    updateKeyboardProfileButtonStates();
+  }
+  else
+  {
+    QMessageBox::warning( this, "Copy Failed", "Failed to copy keyboard profile." );
   }
 }
 
 void MainWindow::onSaveKeyboardProfileClicked()
 {
-  QString current = m_keyboardProfileCombo->currentText();
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  QString currentName = m_keyboardProfileCombo->currentText();
   QString json;
 
-  if ( current.isEmpty() )
+  if ( currentId.isEmpty() )
     return;
 
-  // Get current keyboard state
+  // Get current keyboard state (wrapped with brightness)
   if ( m_keyboardVisualizer )
   {
-    // Get from visualizer
-    QJsonArray statesArray = m_keyboardVisualizer->getJSONState();
-    QJsonDocument doc( statesArray );
-    json = doc.toJson( QJsonDocument::Compact );
+    QJsonObject wrapper;
+    if ( m_keyboardBrightnessSlider )
+      wrapper["brightness"] = m_keyboardBrightnessSlider->value();
+    wrapper["states"] = m_keyboardVisualizer->getJSONState();
+    json = QJsonDocument( wrapper ).toJson( QJsonDocument::Compact );
   }
   else if ( auto states = m_UccdClient->getKeyboardBacklightStates() )
-    json = QString::fromStdString( *states );
+  {
+    QJsonObject wrapper;
+    if ( m_keyboardBrightnessSlider )
+      wrapper["brightness"] = m_keyboardBrightnessSlider->value();
+    QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
+    if ( statesDoc.isArray() )
+      wrapper["states"] = statesDoc.array();
+    json = QJsonDocument( wrapper ).toJson( QJsonDocument::Compact );
+  }
 
   if ( json.isEmpty() )
   {
@@ -441,34 +496,35 @@ void MainWindow::onSaveKeyboardProfileClicked()
     return;
   }
 
-  if ( m_profileManager->setKeyboardProfile( current, json ) )
-    statusBar()->showMessage( QString("Keyboard profile '%1' saved").arg(current) );
+  if ( m_profileManager->setKeyboardProfile( currentId, currentName, json ) )
+    statusBar()->showMessage( QString("Keyboard profile '%1' saved").arg(currentName) );
   else
     QMessageBox::warning( this, "Save Failed", "Failed to save keyboard profile." );
 }
 
 void MainWindow::onRemoveKeyboardProfileClicked()
 {
-  QString currentProfile = m_keyboardProfileCombo->currentText();
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  QString currentName = m_keyboardProfileCombo->currentText();
   
   // Confirm deletion
   QMessageBox::StandardButton reply = QMessageBox::question(
     this, "Remove Keyboard Profile",
-    QString("Are you sure you want to remove the keyboard profile '%1'?").arg(currentProfile),
+    QString("Are you sure you want to remove the keyboard profile '%1'?").arg(currentName),
     QMessageBox::Yes | QMessageBox::No
   );
   
   if ( reply == QMessageBox::Yes )
   {
     // Remove from persistent storage and UI
-    if ( not m_profileManager->deleteKeyboardProfile( currentProfile ) )
+    if ( not m_profileManager->deleteKeyboardProfile( currentId ) )
       QMessageBox::warning(this, "Remove Failed", "Failed to remove custom keyboard profile.");
     else
     {
       if ( int idx = m_keyboardProfileCombo->currentIndex(); idx >= 0 )
         m_keyboardProfileCombo->removeItem( idx );
 
-      statusBar()->showMessage( QString("Keyboard profile '%1' removed").arg(currentProfile) );
+      statusBar()->showMessage( QString("Keyboard profile '%1' removed").arg(currentName) );
       updateKeyboardProfileButtonStates();
     }
   }

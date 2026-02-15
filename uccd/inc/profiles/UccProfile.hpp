@@ -101,7 +101,7 @@ struct UccProfileFanControl
 
   UccProfileFanControl()
     : useControl( true ),
-      fanProfile( "Balanced" ),
+      fanProfile( "fan-balanced" ),
       offsetFanspeed( 0 ),
       sameSpeed( true ),
       autoControlWC( true )

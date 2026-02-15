@@ -285,6 +285,15 @@ bool UccdClient::setStateMap( const std::string &state, const std::string &profi
   return callVoidMethod( "SetStateMap", qState, qProfileId );
 }
 
+bool UccdClient::setBatchStateMap( const std::map< std::string, std::string > &entries )
+{
+  QJsonObject obj;
+  for ( const auto &[state, profileId] : entries )
+    obj[QString::fromStdString( state )] = QString::fromStdString( profileId );
+  QString json = QJsonDocument( obj ).toJson( QJsonDocument::Compact );
+  return callVoidMethod( "SetBatchStateMap", json );
+}
+
 bool UccdClient::setActiveProfile( const std::string &profileId )
 {
   const QString id = QString::fromStdString( profileId );
@@ -315,39 +324,26 @@ bool UccdClient::deleteCustomProfile( [[maybe_unused]] const std::string &profil
   return callVoidMethod( "DeleteCustomProfile", QString::fromStdString( profileId ) );
 }
 
-std::optional< std::string > UccdClient::getFanProfile( const std::string &name )
+std::optional< std::string > UccdClient::getFanProfile( const std::string &fanProfileId )
 {
-  if ( auto result = callMethod< QString >( "GetFanProfile", QString::fromStdString( name ) ) )
+  if ( auto result = callMethod< QString >( "GetFanProfile", QString::fromStdString( fanProfileId ) ) )
   {
     return result->toStdString();
   }
   return std::nullopt;
 }
 
-std::optional< std::vector< std::string > > UccdClient::getFanProfileNames()
+std::optional< std::string > UccdClient::getFanProfilesJSON()
 {
   if ( auto result = callMethod< QString >( "GetFanProfileNames" ) )
   {
-    // Parse JSON array
-    QJsonDocument doc = QJsonDocument::fromJson( result->toUtf8() );
-    if ( doc.isArray() )
-    {
-      std::vector< std::string > names;
-      for ( const auto &value : doc.array() )
-      {
-        if ( value.isString() )
-        {
-          names.push_back( value.toString().toStdString() );
-        }
-      }
-      return names;
-    }
+    return result->toStdString();
   }
   return std::nullopt;
 }
 
-std::optional< bool > UccdClient::setFanProfile( const std::string &name, const std::string &json )
-{ return callMethod< bool >( "SetFanProfile", QString::fromStdString( name ), QString::fromStdString( json ) ); }
+std::optional< bool > UccdClient::setFanProfile( const std::string &fanProfileId, const std::string &json )
+{ return callMethod< bool >( "SetFanProfile", QString::fromStdString( fanProfileId ), QString::fromStdString( json ) ); }
 
 bool UccdClient::setDisplayBrightness( int brightness )
 { return callVoidMethod( "SetDisplayBrightness", brightness ); }
@@ -835,7 +831,8 @@ std::optional< int > readFanDataValue( QDBusInterface *iface, const QString &met
     qint64 ts = innerMap.value( "timestamp" ).toLongLong();
     if ( ts == 0 )
     {
-      qDebug() << "[UccdClient] readFanDataValue: key" << key << "has timestamp 0 - treating as missing";
+      // Silently treat as missing data - this is normal during startup
+      // before fan monitoring worker has collected initial readings
       return std::nullopt;
     }
   }

@@ -85,3 +85,8 @@ install(FILES uccd.service uccd-sleep.service
 install(FILES com.uniwill.uccd.service
   DESTINATION share/dbus-1/system-services
 )
+
+# Install DBus policy file to allow user access
+install(FILES com.uniwill.uccd.conf
+  DESTINATION share/dbus-1/system.d
+)

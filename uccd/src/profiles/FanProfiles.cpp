@@ -58,7 +58,8 @@ int32_t computeSpeedAtTemp(const std::vector<std::pair<int32_t,int32_t>>& keyPoi
 const std::vector< FanProfile > defaultFanProfiles = {
   // Silent profile
   FanProfile(
-    "Silent",
+    DefaultFanProfileIDs::Silent,
+    "Silent [Built-in]",
     {
       { 20, 0 }, { 25, 0 }, { 30, 0 }, { 35, 0 }, { 40, 0 }, { 45, 0 },
       { 50, 0 }, { 55, 0 }, { 60, 0 }, { 65, 20 }, { 70, 28 }, { 75, 40 },
@@ -82,7 +83,8 @@ const std::vector< FanProfile > defaultFanProfiles = {
 
   // Quiet profile
   FanProfile(
-    "Quiet",
+    DefaultFanProfileIDs::Quiet,
+    "Quiet [Built-in]",
     {
       { 20, 0 }, { 25, 0 }, { 30, 0 }, { 35, 0 }, { 40, 0 }, { 45, 0 },
       { 50, 0 }, { 55, 10 }, { 60, 20 }, { 65, 24 }, { 70, 33 }, { 75, 46 },
@@ -106,7 +108,8 @@ const std::vector< FanProfile > defaultFanProfiles = {
 
   // Balanced profile
   FanProfile(
-    "Balanced",
+    DefaultFanProfileIDs::Balanced,
+    "Balanced [Built-in]",
     {
       { 20, 0 }, { 25, 0 }, { 30, 0 }, { 35, 0 }, { 40, 0 }, { 45, 0 },
       { 50, 17 }, { 55, 25 }, { 60, 31 }, { 65, 38 }, { 70, 50 }, { 75, 55 },
@@ -130,7 +133,8 @@ const std::vector< FanProfile > defaultFanProfiles = {
 
   // Cool profile
   FanProfile(
-    "Cool",
+    DefaultFanProfileIDs::Cool,
+    "Cool [Built-in]",
     {
       { 20, 0 }, { 25, 0 }, { 30, 0 }, { 35, 0 }, { 40, 3 }, { 45, 20 },
       { 50, 25 }, { 55, 29 }, { 60, 35 }, { 65, 43 }, { 70, 50 }, { 75, 58 },
@@ -154,7 +158,8 @@ const std::vector< FanProfile > defaultFanProfiles = {
 
   // Freezy profile
   FanProfile(
-    "Freezy",
+    DefaultFanProfileIDs::Freezy,
+    "Freezy [Built-in]",
     {
       { 20, 20 }, { 25, 20 }, { 30, 21 }, { 35, 23 }, { 40, 26 }, { 45, 30 },
       { 50, 40 }, { 55, 40 }, { 60, 45 }, { 65, 50 }, { 70, 55 }, { 75, 60 },
@@ -178,21 +183,34 @@ const std::vector< FanProfile > defaultFanProfiles = {
 };
 
 
-std::string getFanProfileJson(const std::string &name)
+std::string getFanProfileJson( const std::string &idOrName )
 {
   const FanProfile *fp = nullptr;
-  for (const auto &p : defaultFanProfiles) {
-    if (p.name == name) {
+  // Try ID first
+  for ( const auto &p : defaultFanProfiles ) {
+    if ( p.id == idOrName ) {
       fp = &p;
       break;
     }
   }
+  // Fallback to name
+  if ( !fp ) {
+    for ( const auto &p : defaultFanProfiles ) {
+      if ( p.name == idOrName ) {
+        fp = &p;
+        break;
+      }
+    }
+  }
 
-  if (!fp) return "{}";
+  if ( !fp ) return "{}";
 
   std::string json = "{";
-  
-  // tableCPU - return the sampled entries (already at 5°C steps from 20 to 100)
+
+  // id and name
+  json += "\"id\":\"" + fp->id + "\",";
+  json += "\"name\":\"" + fp->name + "\",";
+;
   json += "\"tableCPU\":[";
   for ( size_t i = 0; i < fp->tableCPU.size(); ++i )
   {
@@ -236,26 +254,28 @@ std::string getFanProfileJson(const std::string &name)
   return json;
 }
 
-FanProfile getDefaultFanProfileByName( const std::string &name )
+FanProfile getDefaultFanProfile( const std::string &idOrName )
 {
-  for (const auto &p : defaultFanProfiles) {
-    if (p.name == name) return p;
+  // Try ID first
+  for ( const auto &p : defaultFanProfiles ) {
+    if ( p.id == idOrName ) return p;
   }
-  // Fallback to Balanced if not found
-  for (const auto &p : defaultFanProfiles) {
-    if (p.name == "Balanced") return p;
+  // Fallback to name
+  for ( const auto &p : defaultFanProfiles ) {
+    if ( p.name == idOrName ) return p;
   }
-  // If Balanced missing, return first element
-  if (!defaultFanProfiles.empty()) return defaultFanProfiles[0];
+  // Fallback to Balanced
+  for ( const auto &p : defaultFanProfiles ) {
+    if ( p.id == DefaultFanProfileIDs::Balanced ) return p;
+  }
+  if ( !defaultFanProfiles.empty() ) return defaultFanProfiles[0];
 
-  return FanProfile("Balanced");
+  return FanProfile( DefaultFanProfileIDs::Balanced, "Balanced" );
 }
 
-// Setting built-in fan profiles is not supported. This function exists to satisfy the DBus
-// SetFanProfile call but will refuse to overwrite built-ins. If callers need to store
-// custom fan profiles they should use the UCC settings (ProfileManager) instead.
-bool setFanProfileJson(const std::string &name, [[maybe_unused]] const std::string &json)
+// Setting built-in fan profiles is not supported.
+bool setFanProfileJson( const std::string &idOrName, [[maybe_unused]] const std::string &json )
 {
-  std::cerr << "[FanProfiles] setFanProfileJson called for '" << name << "' - operation not supported\n";
+  std::cerr << "[FanProfiles] setFanProfileJson called for '" << idOrName << "' - operation not supported\n";
   return false;
 }
