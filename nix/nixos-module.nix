@@ -50,20 +50,14 @@ in
       requires = [ "dbus.service" ];
       wantedBy = [ "multi-user.target" ];
 
-      path = [
-        pkgs.coreutils
-        pkgs.gawk
-        pkgs.gnugrep
-        pkgs.procps
-        pkgs.util-linux
-        pkgs.which
-      ];
-
       serviceConfig = {
         Type = "simple";
         ExecStart =
           "${cfg.package}/bin/uccd --start"
           + lib.optionalString (cfg.extraArgs != [ ]) " ${extraArgsString}";
+        Environment = [
+          "PATH=/run/wrappers/bin:/run/current-system/sw/bin:${lib.makeBinPath [ pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.procps pkgs.util-linux pkgs.which ]}"
+        ];
         Restart = "on-failure";
         RestartSec = "5s";
         TimeoutStopSec = "10s";
