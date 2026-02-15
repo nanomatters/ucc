@@ -55,6 +55,8 @@ in
         pkgs.gawk
         pkgs.gnugrep
         pkgs.procps
+        pkgs.util-linux
+        pkgs.which
       ];
 
       serviceConfig = {
