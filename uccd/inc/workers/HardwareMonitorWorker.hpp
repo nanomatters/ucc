@@ -17,6 +17,7 @@
 
 #include "DaemonWorker.hpp"
 #include "Utils.hpp"
+#include "../NvmlWrapper.hpp"
 #include <string>
 #include <optional>
 #include <memory>
@@ -332,7 +333,7 @@ private:
   // --- GPU state ---
   GpuDeviceDetector m_gpuDetector;
   GpuDeviceCounts m_deviceCounts;
-  bool m_isNvidiaSmiInstalled;
+  NvmlWrapper m_nvml; ///< NVML API wrapper (no-op if libnvidia-ml not present)
   GpuDataCallback m_gpuDataCallback;
   std::optional< std::string > m_amdIGpuHwmonPath;
   std::optional< std::string > m_amdDGpuHwmonPath;
@@ -376,15 +377,12 @@ private:
   [[nodiscard]] std::string getAmdIGpuHwmonPathImpl() const noexcept;
   [[nodiscard]] std::string getAmdDGpuHwmonPathImpl() const noexcept;
   [[nodiscard]] std::string getIntelIGpuDrmPathImpl() const noexcept;
-  [[nodiscard]] bool checkNvidiaSmiInstalledImpl() const noexcept;
   [[nodiscard]] IGpuInfo getIGpuValues() noexcept;
   [[nodiscard]] IGpuInfo getIntelIGpuValues( const IGpuInfo &base ) const noexcept;
   [[nodiscard]] IGpuInfo getAmdIGpuValues( const IGpuInfo &base ) const noexcept;
   [[nodiscard]] DGpuInfo getDGpuValues() noexcept;
   [[nodiscard]] DGpuInfo getNvidiaDGpuValues() const noexcept;
   [[nodiscard]] DGpuInfo getAmdDGpuValues( const DGpuInfo &base ) const noexcept;
-  [[nodiscard]] DGpuInfo parseNvidiaOutput( const std::string &output ) const noexcept;
-  [[nodiscard]] double parseNumberWithMetric( const std::string &value ) const noexcept;
   [[nodiscard]] double parseMaxAmdFreq( const std::string &frequencyString ) const noexcept;
 
   // CPU power methods

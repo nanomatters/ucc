@@ -1,0 +1,35 @@
+=== NVML Safe Version Scanner v2 ===
+
+=== CoolerInfo ===
+  sz=16 v=1 => 3 (Not Supported)
+  No working version found
+
+=== PerformanceModes ===
+  OK: sz=2052 ver=1 (0x01000804) last_nonzero=1225
+    04080001 70657266 3d302c20 6e76636c 6f636b3d 3138302c 206e7663 6c6f636b 6d696e3d 3138302c 206e7663 6c6f636b 6d61783d 3838352c 206e7663 6c6f636b 
+
+=== MarginTemperature ===
+  OK: sz=8 ver=1 (0x01000008) last_nonzero=4
+    08000001 37000000 
+
+=== WP_GetProfilesInfo ===
+  sz=11256 v=1 => 3 (Not Supported)
+  No working version found
+
+=== WP_GetCurrentProfiles ===
+  sz=100 v=1 => 3 (Not Supported)
+  No working version found
+
+=== PS_Activate ===
+  sz=24 v=1 => 3 (Not Supported)
+  No working version found
+
+=== PS_Update ===
+  sz=24 v=1 => 3 (Not Supported)
+  No working version found
+
+=== PS_SetState ===
+  sz=8 v=1 => 3 (Not Supported)
+  No working version found
+
+=== SCAN COMPLETE ===

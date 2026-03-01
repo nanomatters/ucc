@@ -39,6 +39,7 @@
 #include "KeyboardBacklightController.hpp"
 #include "workers/ProfileSettingsWorker.hpp"
 #include "workers/LCTWaterCoolerWorker.hpp"
+#include "workers/NvidiaOCWorker.hpp"
 #include "FnLockController.hpp"
 #include "profiles/UccProfile.hpp"
 #include "profiles/DefaultProfiles.hpp"
@@ -365,6 +366,20 @@ public slots:
   QString GetAvailableEPPs();
   int GetCpuCoreCount();
 
+  // NVIDIA GPU OC methods
+  bool GetNvidiaOCAvailable();
+  QString GetNvidiaOCState( int deviceIndex );
+  bool SetNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz );
+  bool SetNvidiaGpuLockedClocks( int deviceIndex, int minMHz, int maxMHz );
+  bool SetNvidiaVramLockedClocks( int deviceIndex, int minMHz, int maxMHz );
+  bool ResetNvidiaGpuLockedClocks( int deviceIndex );
+  bool ResetNvidiaVramLockedClocks( int deviceIndex );
+  bool ResetNvidiaAllClockOffsets( int deviceIndex );
+  bool SetNvidiaGpuPowerLimit( int deviceIndex, double watts );
+  bool ResetNvidiaGpuPowerLimit( int deviceIndex );
+  bool ApplyNvidiaGpuOCProfile( const QString &profileJSON, int deviceIndex );
+  bool ResetNvidiaGpuOCAll( int deviceIndex );
+
   // water cooler methods
   bool GetWaterCoolerAvailable();
   bool GetWaterCoolerConnected();
@@ -594,6 +609,7 @@ private:
   std::unique_ptr< FanControlWorker > m_fanControlWorker;
   KeyboardBacklightController m_keyboardBacklightController;
   std::unique_ptr< LCTWaterCoolerWorker > m_waterCoolerWorker;
+  std::unique_ptr< NvidiaOCWorker > m_nvidiaOCWorker;
 
   // identified device
   std::optional< UniwillDeviceID > m_deviceId;

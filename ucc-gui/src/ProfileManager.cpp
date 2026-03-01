@@ -44,6 +44,9 @@ ProfileManager::ProfileManager( QObject *parent )
   // Load local custom keyboard profiles
   loadCustomKeyboardProfilesFromSettings();
 
+  // Load local custom GPU OC profiles
+  loadCustomGpuProfilesFromSettings();
+
   // Always wire daemon signals — they won't fire while disconnected but will
   // start arriving as soon as uccd appears (see connectionStatusChanged below).
   connect( m_client.get(), &UccdClient::profileChanged,
@@ -1021,6 +1024,168 @@ bool ProfileManager::renameKeyboardProfile( const QString &keyboardProfileId, co
 
         saveCustomKeyboardProfilesToSettings();
         emit customKeyboardProfilesChanged();
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Custom GPU OC profiles (local storage, by ID)
+// ---------------------------------------------------------------------------
+
+void ProfileManager::migrateGpuProfileIds( QJsonArray &arr )
+{
+  for ( int i = 0; i < arr.size(); ++i )
+  {
+    if ( arr[i].isObject() )
+    {
+      QJsonObject o = arr[i].toObject();
+      if ( o.value( "id" ).toString().isEmpty() )
+      {
+        o["id"] = QUuid::createUuid().toString( QUuid::WithoutBraces );
+        arr[i] = o;
+      }
+    }
+  }
+}
+
+void ProfileManager::loadCustomGpuProfilesFromSettings()
+{
+  m_customGpuProfilesData = QJsonArray();
+  m_customGpuProfiles.clear();
+
+  QString gpuJson = m_settings->value( "customGpuProfiles", "[]" ).toString();
+  QJsonDocument doc = QJsonDocument::fromJson( gpuJson.toUtf8() );
+
+  if ( doc.isArray() )
+  {
+    m_customGpuProfilesData = doc.array();
+    migrateGpuProfileIds( m_customGpuProfilesData );
+    for ( const auto &val : m_customGpuProfilesData )
+    {
+      if ( val.isObject() )
+      {
+        QString name = val.toObject().value( "name" ).toString();
+        if ( !name.isEmpty() )
+          m_customGpuProfiles.append( name );
+      }
+    }
+    saveCustomGpuProfilesToSettings();
+  }
+}
+
+void ProfileManager::saveCustomGpuProfilesToSettings()
+{
+  QJsonDocument doc( m_customGpuProfilesData );
+  m_settings->setValue( "customGpuProfiles", doc.toJson( QJsonDocument::Compact ) );
+  m_settings->sync();
+}
+
+QString ProfileManager::getGpuProfile( const QString &gpuProfileId )
+{
+  for ( const auto &v : m_customGpuProfilesData )
+  {
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      if ( o.value( "id" ).toString() == gpuProfileId )
+      {
+        QString jsonStr = o.value( "json" ).toString();
+        if ( !jsonStr.trimmed().isEmpty() )
+          return jsonStr;
+
+        qWarning() << "[ProfileManager] GPU profile" << gpuProfileId << "has empty JSON";
+      }
+    }
+  }
+  return "{}";
+}
+
+bool ProfileManager::setGpuProfile( const QString &gpuProfileId, const QString &name, const QString &json )
+{
+  bool found = false;
+  for ( int i = 0; i < m_customGpuProfilesData.size(); ++i )
+  {
+    if ( m_customGpuProfilesData[i].isObject() )
+    {
+      QJsonObject o = m_customGpuProfilesData[i].toObject();
+      if ( o.value( "id" ).toString() == gpuProfileId )
+      {
+        o["name"] = name;
+        o["json"] = json;
+        m_customGpuProfilesData[i] = o;
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if ( !found )
+  {
+    QJsonObject o;
+    o["id"] = gpuProfileId;
+    o["name"] = name;
+    o["json"] = json;
+    m_customGpuProfilesData.append( o );
+    m_customGpuProfiles.append( name );
+  }
+
+  saveCustomGpuProfilesToSettings();
+  emit customGpuProfilesChanged();
+  return true;
+}
+
+bool ProfileManager::deleteGpuProfile( const QString &gpuProfileId )
+{
+  bool removed = false;
+  QJsonArray newArr;
+  for ( const auto &v : m_customGpuProfilesData )
+  {
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      if ( o.value( "id" ).toString() == gpuProfileId )
+      {
+        m_customGpuProfiles.removeAll( o.value( "name" ).toString() );
+        removed = true;
+        continue;
+      }
+    }
+    newArr.append( v );
+  }
+
+  if ( removed )
+  {
+    m_customGpuProfilesData = newArr;
+    saveCustomGpuProfilesToSettings();
+    emit customGpuProfilesChanged();
+  }
+  return removed;
+}
+
+bool ProfileManager::renameGpuProfile( const QString &gpuProfileId, const QString &newName )
+{
+  if ( newName.isEmpty() ) return false;
+
+  for ( int i = 0; i < m_customGpuProfilesData.size(); ++i )
+  {
+    if ( m_customGpuProfilesData[i].isObject() )
+    {
+      QJsonObject o = m_customGpuProfilesData[i].toObject();
+      if ( o.value( "id" ).toString() == gpuProfileId )
+      {
+        QString oldName = o.value( "name" ).toString();
+        o["name"] = newName;
+        m_customGpuProfilesData[i] = o;
+
+        int nameIdx = m_customGpuProfiles.indexOf( oldName );
+        if ( nameIdx != -1 )
+          m_customGpuProfiles.replace( nameIdx, newName );
+
+        saveCustomGpuProfilesToSettings();
+        emit customGpuProfilesChanged();
         return true;
       }
     }

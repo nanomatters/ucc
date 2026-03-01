@@ -15,6 +15,7 @@
 
 #include "UccDBusService.hpp"
 #include "CommonTypes.hpp"
+#include "NvmlWrapper.hpp"
 #include "profiles/DefaultProfiles.hpp"
 #include "profiles/FanProfile.hpp"
 #include "StateUtils.hpp"
@@ -1805,6 +1806,104 @@ int UccDBusInterfaceAdaptor::GetCpuFrequencyMHz()
   return m_data.cpuFrequencyMHz.load();
 }
 
+// ---------------------------------------------------------------------------
+// NVIDIA GPU OC methods
+// ---------------------------------------------------------------------------
+
+bool UccDBusInterfaceAdaptor::GetNvidiaOCAvailable()
+{
+  return m_service && m_service->m_nvidiaOCWorker && m_service->m_nvidiaOCWorker->isAvailable();
+}
+
+QString UccDBusInterfaceAdaptor::GetNvidiaOCState( int deviceIndex )
+{
+  if ( !m_service || !m_service->m_nvidiaOCWorker )
+    return QStringLiteral( "{}" );
+  return QString::fromStdString(
+      m_service->m_nvidiaOCWorker->getOCStateJSON( static_cast< unsigned int >( deviceIndex ) ) );
+}
+
+bool UccDBusInterfaceAdaptor::SetNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->setClockOffset(
+      static_cast< unsigned int >( deviceIndex ),
+      static_cast< unsigned int >( clockType ),
+      static_cast< unsigned int >( pstate ),
+      offsetMHz );
+}
+
+bool UccDBusInterfaceAdaptor::SetNvidiaGpuLockedClocks( int deviceIndex, int minMHz, int maxMHz )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->setGpuLockedClocks(
+      static_cast< unsigned int >( deviceIndex ),
+      static_cast< unsigned int >( minMHz ),
+      static_cast< unsigned int >( maxMHz ) );
+}
+
+bool UccDBusInterfaceAdaptor::SetNvidiaVramLockedClocks( int deviceIndex, int minMHz, int maxMHz )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->setVramLockedClocks(
+      static_cast< unsigned int >( deviceIndex ),
+      static_cast< unsigned int >( minMHz ),
+      static_cast< unsigned int >( maxMHz ) );
+}
+
+bool UccDBusInterfaceAdaptor::ResetNvidiaGpuLockedClocks( int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->resetGpuLockedClocks( static_cast< unsigned int >( deviceIndex ) );
+}
+
+bool UccDBusInterfaceAdaptor::ResetNvidiaVramLockedClocks( int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->resetVramLockedClocks( static_cast< unsigned int >( deviceIndex ) );
+}
+
+bool UccDBusInterfaceAdaptor::ResetNvidiaAllClockOffsets( int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->resetAllClockOffsets( static_cast< unsigned int >( deviceIndex ) );
+}
+
+bool UccDBusInterfaceAdaptor::SetNvidiaGpuPowerLimit( int deviceIndex, double watts )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->setPowerLimit( static_cast< unsigned int >( deviceIndex ), watts );
+}
+
+bool UccDBusInterfaceAdaptor::ResetNvidiaGpuPowerLimit( int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->resetPowerLimit( static_cast< unsigned int >( deviceIndex ) );
+}
+
+bool UccDBusInterfaceAdaptor::ApplyNvidiaGpuOCProfile( const QString &profileJSON, int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->applyGpuOCProfile(
+      profileJSON.toStdString(), static_cast< unsigned int >( deviceIndex ) );
+}
+
+bool UccDBusInterfaceAdaptor::ResetNvidiaGpuOCAll( int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
+  return m_service->m_nvidiaOCWorker->resetAll( static_cast< unsigned int >( deviceIndex ) );
+}
+
 // signal emitters
 // These may be called from the DaemonWorker thread, but the adaptor lives in
 // the main thread.  Use QMetaObject::invokeMethod with a queued connection so
@@ -2208,6 +2307,11 @@ UccDBusService::UccDBusService()
   m_displayWorker->start();
   m_cpuWorker->start();
   m_fanControlWorker->start();
+
+  // Initialize NVIDIA OC worker (non-threaded, on-demand calls via D-Bus)
+  m_nvidiaOCWorker = std::make_unique< NvidiaOCWorker >(
+    []( const std::string &msg ) { syslog( LOG_INFO, "%s", msg.c_str() ); }
+  );
 }
 
 void UccDBusService::readHardwareCapabilities()
@@ -2267,24 +2371,15 @@ void UccDBusService::readHardwareCapabilities()
 
     if ( nvAvailable )
     {
-      // Query power limits via nvidia-smi
-      auto runNvidiaSmi = []( const std::string &queryFlag ) -> int32_t {
-        try
-        {
-          std::string result = ucc::executeProcess( "nvidia-smi",
-            { "--format=csv,noheader,nounits", "--query-gpu=" + queryFlag } );
-          result.erase( 0, result.find_first_not_of( " \t\n\r" ) );
-          result.erase( result.find_last_not_of( " \t\n\r" ) + 1 );
-          return std::stoi( result );
-        }
-        catch ( ... )
-        {
-          return 0;
-        }
-      };
-
-      m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = runNvidiaSmi( "power.default_limit" );
-      m_dbusData.nvidiaPowerCTRLMaxPowerLimit = runNvidiaSmi( "power.max_limit" );
+      // Query power limits via NVML (direct API — replaces nvidia-smi subprocess)
+      NvmlWrapper nvml;
+      if ( nvml.isAvailable() && nvml.deviceCount() > 0 )
+      {
+        if ( auto v = nvml.getPowerDefaultLimitW( 0 ) )
+          m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+        if ( auto v = nvml.getPowerMaxLimitW( 0 ) )
+          m_dbusData.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+      }
 
       syslog( LOG_INFO, "[uccd] NVIDIA power limits — Default: %dW, Max: %dW",
               m_dbusData.nvidiaPowerCTRLDefaultPowerLimit.load(),

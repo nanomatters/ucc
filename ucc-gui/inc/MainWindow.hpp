@@ -44,6 +44,7 @@
 #include "DashboardTab.hpp"
 #include "HardwareTab.hpp"
 #include "FanControlTab.hpp"
+#include "GpuProfileTab.hpp"
 #include "MonitorTab.hpp"
 
 namespace ucc
@@ -105,6 +106,13 @@ namespace ucc
     void onProfileComboRenamed();
     void onKeyboardProfileComboRenamed();
 
+    // GPU OC profile tab slots
+    void onApplyGpuProfileClicked();
+    void onSaveGpuProfileClicked();
+    void onCopyGpuProfileClicked();
+    void onRemoveGpuProfileClicked();
+    void onGpuProfileChanged( const QString &gpuProfileId );
+
   private:
     struct FanPoint {
         int temp;
@@ -136,6 +144,8 @@ namespace ucc
     void updateButtonStates();
     void setupFanControlTab();
     void connectFanControlTab();
+    void setupGpuProfileTab();
+    void connectGpuProfileTab();
     void updateProfileEditingWidgets( bool isCustom );
     void updateFanCrosshairs();
 
@@ -194,6 +204,10 @@ namespace ucc
 
     // Fan control tab (owns editors, combo, buttons, water cooler hw controls)
     FanControlTab *m_fanControlTab = nullptr;
+
+    // GPU OC profile tab
+    GpuProfileTab *m_gpuProfileTab = nullptr;
+    QComboBox *m_profileGpuProfileCombo = nullptr;
 
     // CPU frequency control widgets
     QSlider *m_cpuCoresSlider = nullptr;

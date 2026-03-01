@@ -131,6 +131,20 @@ public:
   std::optional< std::string > getPrimeProfile();
   std::optional< std::string > getGpuInfo();
 
+  // NVIDIA GPU OC Control
+  std::optional< bool > getNvidiaOCAvailable();
+  std::optional< std::string > getNvidiaOCState( int deviceIndex = 0 );
+  bool setNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz );
+  bool setNvidiaGpuLockedClocks( int deviceIndex, int minMHz, int maxMHz );
+  bool setNvidiaVramLockedClocks( int deviceIndex, int minMHz, int maxMHz );
+  bool resetNvidiaGpuLockedClocks( int deviceIndex );
+  bool resetNvidiaVramLockedClocks( int deviceIndex );
+  bool resetNvidiaAllClockOffsets( int deviceIndex );
+  bool setNvidiaGpuPowerLimit( int deviceIndex, double watts );
+  bool resetNvidiaGpuPowerLimit( int deviceIndex );
+  bool applyNvidiaGpuOCProfile( const std::string &profileJSON, int deviceIndex = 0 );
+  bool resetNvidiaGpuOCAll( int deviceIndex = 0 );
+
   // Device Capability Queries
   std::optional< bool > getWaterCoolerSupported();
   std::optional< bool > getCTGPAdjustmentSupported();

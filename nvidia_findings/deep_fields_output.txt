@@ -1,0 +1,228 @@
+NVML initialized OK
+
+NvAPI initialized OK, 1 GPU(s)
+
+╔═══════════════════════════════════════════════╗
+║  NVML: PerformanceModes                       ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+
+  Parsed P-States:
+    perf=0, nvclock=180, nvclockmin=180, nvclockmax=885, nvclockeditable=1, memclock=405, memclockmin=405, memclockmax=405, memclockeditable=1, memTransferRate=810, memTransferRatemin=810, memTransferRatemax=810, memTransferRateeditable=1 
+    perf=1, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=810, memclockmin=810, memclockmax=810, memclockeditable=1, memTransferRate=1620, memTransferRatemin=1620, memTransferRatemax=1620, memTransferRateeditable=1 
+    perf=2, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=9001, memclockmin=9001, memclockmax=9001, memclockeditable=1, memTransferRate=18002, memTransferRatemin=18002, memTransferRatemax=18002, memTransferRateeditable=1 
+    perf=3, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=11001, memclockmin=11001, memclockmax=11001, memclockeditable=1, memTransferRate=22002, memTransferRatemin=22002, memTransferRatemax=22002, memTransferRateeditable=1 
+    perf=4, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=14001, memclockmin=14001, memclockmax=14001, memclockeditable=1, memTransferRate=28002, memTransferRatemin=28002, memTransferRatemax=28002, memTransferRateeditable=1
+
+╔═══════════════════════════════════════════════╗
+║  NVML: MarginTemperature                      ║
+╚═══════════════════════════════════════════════╝
+  ret=0, value=54 °C
+  Struct layout: { uint32 version; uint32 margin_temp_C; }
+
+╔═══════════════════════════════════════════════╗
+║  NVML: DynamicPstatesInfo                     ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  Non-zero uint32 fields:
+    [0x004] = 0x00000001 (1 / 1)
+    [0x008] = 0x0000000c (12 / 12)
+    [0x014] = 0x00000001 (1 / 1)
+    [0x018] = 0x0000000a (10 / 10)
+    [0x024] = 0x00000001 (1 / 1)
+    [0x034] = 0x00000001 (1 / 1)
+    [0x038] = 0x00000053 (83 / 83)
+  Struct: { uint32 flags; struct { uint32 bPresent; uint32 percentage; } slots[8]; }
+  GPU util: 12%
+  FB util:  0%
+  VID util: 10%
+
+╔═══════════════════════════════════════════════╗
+║  NVML: PowerMizerMode_v1                      ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  All 12 bytes:
+    0000: 00 00 00 00 00 00 00 00 07 00 00 00              |............|
+  field[0]: 0
+  field[1]: 0
+  field[2] (mode): 7
+  SetPowerMizerMode_v1: available
+
+╔═══════════════════════════════════════════════╗
+║  NVML: VfOffset APIs (Get/Set)                ║
+╚═══════════════════════════════════════════════╝
+  GpcClkVfOffset:       0 MHz
+  GpcClk range:         [-1000, 1000] MHz
+  MemClkVfOffset:       0 MHz
+  MemClk range:         [-2000, 6000] MHz
+
+╔═══════════════════════════════════════════════╗
+║  NVML: ThermalSettings                        ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  Non-zero u32 fields:
+    [0x000] = 0x00000001 (1 / 1)
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: AllClockFrequencies (0xDCB616C3)       ║
+╚═══════════════════════════════════════════════╝
+  v1: ret=0
+  Non-zero u32 fields:
+    [0x000] = 0x00010108 (65800 / 65800)
+    [0x004] = 0xff000000 (4278190080 / -16777216)
+    [0x008] = 0x00000001 (1 / 1)
+    [0x00c] = 0x0010eff0 (1110000 / 1110000)
+    [0x028] = 0x00000001 (1 / 1)
+    [0x02c] = 0x00062e08 (405000 / 405000)
+  Clock domains:
+    domain[0]: freq=1110000 kHz (1110.0 MHz)
+    domain[1]: freq=405000 kHz (405.0 MHz)
+  v2: ret=0
+  Non-zero u32 fields:
+    [0x000] = 0x00020108 (131336 / 131336)
+    [0x004] = 0xff000000 (4278190080 / -16777216)
+    [0x008] = 0x00000001 (1 / 1)
+    [0x00c] = 0x0010eff0 (1110000 / 1110000)
+    [0x028] = 0x00000001 (1 / 1)
+    [0x02c] = 0x00062e08 (405000 / 405000)
+  Clock domains:
+    domain[0]: freq=1110000 kHz (1110.0 MHz)
+    domain[1]: freq=405000 kHz (405.0 MHz)
+  v3: ret=0
+  Non-zero u32 fields:
+    [0x000] = 0x00030108 (196872 / 196872)
+    [0x004] = 0xff000000 (4278190080 / -16777216)
+    [0x008] = 0x00000001 (1 / 1)
+    [0x00c] = 0x0010eff0 (1110000 / 1110000)
+    [0x028] = 0x00000001 (1 / 1)
+    [0x02c] = 0x00062e08 (405000 / 405000)
+    [0x048] = 0x00000001 (1 / 1)
+    [0x04c] = 0x0012a570 (1222000 / 1222000)
+  Clock domains:
+    domain[0]: freq=1110000 kHz (1110.0 MHz)
+    domain[1]: freq=405000 kHz (405.0 MHz)
+    domain[2]: freq=1222000 kHz (1222.0 MHz)
+
+  Clock types in v3:
+    CURRENT:
+      domain[0]: freq=1110000 kHz (1110.0 MHz)
+      domain[1]: freq=405000 kHz (405.0 MHz)
+      domain[2]: freq=1222000 kHz (1222.0 MHz)
+    BASE:
+      domain[0]: freq=1095000 kHz (1095.0 MHz)
+      domain[1]: freq=14001000 kHz (14001.0 MHz)
+    BOOST:
+      domain[0]: freq=1597000 kHz (1597.0 MHz)
+      domain[1]: freq=14001000 kHz (14001.0 MHz)
+    TDP:
+      domain[0]: freq=1597000 kHz (1597.0 MHz)
+      domain[1]: freq=14001000 kHz (14001.0 MHz)
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: Voltage (0x465F9BCF)                   ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  Non-zero u32 fields:
+    [0x000] = 0x0001004c (65612 / 65612)
+    [0x028] = 0x000b4aa0 (740000 / 740000)
+  Voltage: 0.740 V
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: PerfPoliciesGetStatus (0x3D358A0C)     ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  Non-zero u32 fields (first 256 bytes):
+    [0x000] = 0x00010550 (66896 / 66896)
+    [0x008] = 0xba405cc0 (3124780224 / -1170187072)
+    [0x00c] = 0x1898d05f (412667999 / 412667999)
+    [0x010] = 0x00000004 (4 / 4)
+    [0x018] = 0x0000000f (15 / 15)
+    [0x020] = 0x65e3e260 (1709433440 / 1709433440)
+    [0x024] = 0x00000b71 (2929 / 2929)
+    [0x028] = 0xf70f5f60 (4144979808 / -149987488)
+    [0x02c] = 0x00000b70 (2928 / 2928)
+    [0x030] = 0xf70f5f60 (4144979808 / -149987488)
+    [0x034] = 0x00000b70 (2928 / 2928)
+    [0x038] = 0xf70f5f60 (4144979808 / -149987488)
+    [0x03c] = 0x00000b70 (2928 / 2928)
+  Full hex (first 128 bytes):
+    0000: 50 05 01 00 00 00 00 00 c0 5c 40 ba 5f d0 98 18  |P........\@._...|
+    0010: 04 00 00 00 00 00 00 00 0f 00 00 00 00 00 00 00  |................|
+    0020: 60 e2 e3 65 71 0b 00 00 60 5f 0f f7 70 0b 00 00  |`..eq...`_..p...|
+    0030: 60 5f 0f f7 70 0b 00 00 60 5f 0f f7 70 0b 00 00  |`_..p...`_..p...|
+    0040: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: ClientPowerTopologyGetInfo (0x60DED2ED)║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  All non-zero u32 fields:
+    [0x000] = 0x00010048 (65608 / 65608)
+    [0x008] = 0x00000001 (1 / 1)
+    [0x00c] = 0x0000000c (12 / 12)
+    [0x010] = 0x00000001 (1 / 1)
+    [0x014] = 0x0000000a (10 / 10)
+    [0x018] = 0x00000001 (1 / 1)
+    [0x020] = 0x00000001 (1 / 1)
+    [0x024] = 0x00000053 (83 / 83)
+  Full hex:
+    0000: 48 00 01 00 00 00 00 00 01 00 00 00 0c 00 00 00  |H...............|
+    0010: 01 00 00 00 0a 00 00 00 01 00 00 00 00 00 00 00  |................|
+    0020: 01 00 00 00 53 00 00 00 00 00 00 00 00 00 00 00  |....S...........|
+    0030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0040: 00 00 00 00 00 00 00 00                          |........|
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: PowerPoliciesGetInfo (0x34206D86)      ║
+╚═══════════════════════════════════════════════╝
+  ret=0
+  All non-zero u32 fields:
+    [0x000] = 0x000100b8 (65720 / 65720)
+  Full hex:
+    0000: b8 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0010: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0040: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0070: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    0090: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    00a0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+    00b0: 00 00 00 00 00 00 00 00                          |........|
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: PowerPoliciesGetStatus (0x70916171)    ║
+╚═══════════════════════════════════════════════╝
+  v1 (sz=72): ret=0
+    Non-zero u32 fields:
+    [0x000] = 0x00010048 (65608 / 65608)
+  v2 (sz=1368): ret=0
+    Non-zero u32 fields:
+    [0x000] = 0x00020558 (132440 / 132440)
+
+╔═══════════════════════════════════════════════╗
+║  NvAPI: Misc GPU Clock/Perf queries            ║
+╚═══════════════════════════════════════════════╝
+  GetClockBoostLock (0xE440B867): AVAILABLE
+    No working version found
+  GetClockBoostTable (0x507B4B59): AVAILABLE
+    No working version found
+  GetVFPCurve (0x7F5F90A7): not available
+  unknown_47AAD0D7 (0x47AAD0D7): not available
+  unknown_0D258BB5 (0x0D258BB5): AVAILABLE
+    sz=88 v=1: OK!
+    [0x000] = 0x00010058 (65624 / 65624)
+    [0x004] = 0x00000101 (257 / 257)
+    [0x00c] = 0x00000001 (1 / 1)
+    [0x010] = 0x00004b00 (19200 / 19200)
+    [0x014] = 0x00005700 (22272 / 22272)
+    [0x018] = 0x00005700 (22272 / 22272)
+  GpuGetPerfClocks_2DDFB66E (0x2DDFB66E): AVAILABLE
+    No working version found
+
+════ COMPLETE ════

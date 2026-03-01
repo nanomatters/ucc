@@ -19,6 +19,7 @@
 #include "../PowerSupplyController.hpp"
 #include "SysfsNode.hpp"
 #include "../TccSettings.hpp"
+#include "../NvmlWrapper.hpp"
 
 #include <algorithm>
 #include <array>
@@ -298,5 +299,5 @@ private:
   }
 
 
-  static int32_t executeNvidiaSmi( const std::string &command );
+  // executeNvidiaSmi removed — replaced by NvmlWrapper direct API calls
 };

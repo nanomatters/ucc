@@ -1,0 +1,112 @@
+=== PerformanceModes (sz=2052 ver=1) ===
+ret=0 (Success)
+Last nonzero byte at offset 1225
+
+Hex dump (first 128 + around data):
+  0000: 04 08 00 01 70 65 72 66 3d 30 2c 20 6e 76 63 6c  |....perf=0, nvcl|
+  0010: 6f 63 6b 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b  |ock=180, nvclock|
+  0020: 6d 69 6e 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b  |min=180, nvclock|
+  0030: 6d 61 78 3d 38 38 35 2c 20 6e 76 63 6c 6f 63 6b  |max=885, nvclock|
+  0040: 65 64 69 74 61 62 6c 65 3d 31 2c 20 6d 65 6d 63  |editable=1, memc|
+  0050: 6c 6f 63 6b 3d 34 30 35 2c 20 6d 65 6d 63 6c 6f  |lock=405, memclo|
+  0060: 63 6b 6d 69 6e 3d 34 30 35 2c 20 6d 65 6d 63 6c  |ckmin=405, memcl|
+  0070: 6f 63 6b 6d 61 78 3d 34 30 35 2c 20 6d 65 6d 63  |ockmax=405, memc|
+  0080: 6c 6f 63 6b 65 64 69 74 61 62 6c 65 3d 31 2c 20  |lockeditable=1, |
+  0090: 6d 65 6d 54 72 61 6e 73 66 65 72 52 61 74 65 3d  |memTransferRate=|
+  00a0: 38 31 30 2c 20 6d 65 6d 54 72 61 6e 73 66 65 72  |810, memTransfer|
+  00b0: 52 61 74 65 6d 69 6e 3d 38 31 30 2c 20 6d 65 6d  |Ratemin=810, mem|
+  00c0: 54 72 61 6e 73 66 65 72 52 61 74 65 6d 61 78 3d  |TransferRatemax=|
+  00d0: 38 31 30 2c 20 6d 65 6d 54 72 61 6e 73 66 65 72  |810, memTransfer|
+  00e0: 52 61 74 65 65 64 69 74 61 62 6c 65 3d 31 20 3b  |Rateeditable=1 ;|
+  00f0: 20 70 65 72 66 3d 31 2c 20 6e 76 63 6c 6f 63 6b  | perf=1, nvclock|
+  0100: 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b 6d 69 6e  |=180, nvclockmin|
+  0110: 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b 6d 61 78  |=180, nvclockmax|
+  0120: 3d 33 30 39 30 2c 20 6e 76 63 6c 6f 63 6b 65 64  |=3090, nvclocked|
+  0130: 69 74 61 62 6c 65 3d 31 2c 20 6d 65 6d 63 6c 6f  |itable=1, memclo|
+  0140: 63 6b 3d 38 31 30 2c 20 6d 65 6d 63 6c 6f 63 6b  |ck=810, memclock|
+  0150: 6d 69 6e 3d 38 31 30 2c 20 6d 65 6d 63 6c 6f 63  |min=810, memcloc|
+  0160: 6b 6d 61 78 3d 38 31 30 2c 20 6d 65 6d 63 6c 6f  |kmax=810, memclo|
+  0170: 63 6b 65 64 69 74 61 62 6c 65 3d 31 2c 20 6d 65  |ckeditable=1, me|
+  0180: 6d 54 72 61 6e 73 66 65 72 52 61 74 65 3d 31 36  |mTransferRate=16|
+  0190: 32 30 2c 20 6d 65 6d 54 72 61 6e 73 66 65 72 52  |20, memTransferR|
+  01a0: 61 74 65 6d 69 6e 3d 31 36 32 30 2c 20 6d 65 6d  |atemin=1620, mem|
+  01b0: 54 72 61 6e 73 66 65 72 52 61 74 65 6d 61 78 3d  |TransferRatemax=|
+  01c0: 31 36 32 30 2c 20 6d 65 6d 54 72 61 6e 73 66 65  |1620, memTransfe|
+  01d0: 72 52 61 74 65 65 64 69 74 61 62 6c 65 3d 31 20  |rRateeditable=1 |
+  01e0: 3b 20 70 65 72 66 3d 32 2c 20 6e 76 63 6c 6f 63  |; perf=2, nvcloc|
+  01f0: 6b 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b 6d 69  |k=180, nvclockmi|
+  0200: 6e 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b 6d 61  |n=180, nvclockma|
+  0210: 78 3d 33 30 39 30 2c 20 6e 76 63 6c 6f 63 6b 65  |x=3090, nvclocke|
+  0220: 64 69 74 61 62 6c 65 3d 31 2c 20 6d 65 6d 63 6c  |ditable=1, memcl|
+  0230: 6f 63 6b 3d 39 30 30 31 2c 20 6d 65 6d 63 6c 6f  |ock=9001, memclo|
+  0240: 63 6b 6d 69 6e 3d 39 30 30 31 2c 20 6d 65 6d 63  |ckmin=9001, memc|
+  0250: 6c 6f 63 6b 6d 61 78 3d 39 30 30 31 2c 20 6d 65  |lockmax=9001, me|
+  0260: 6d 63 6c 6f 63 6b 65 64 69 74 61 62 6c 65 3d 31  |mclockeditable=1|
+  0270: 2c 20 6d 65 6d 54 72 61 6e 73 66 65 72 52 61 74  |, memTransferRat|
+  0280: 65 3d 31 38 30 30 32 2c 20 6d 65 6d 54 72 61 6e  |e=18002, memTran|
+  0290: 73 66 65 72 52 61 74 65 6d 69 6e 3d 31 38 30 30  |sferRatemin=1800|
+  02a0: 32 2c 20 6d 65 6d 54 72 61 6e 73 66 65 72 52 61  |2, memTransferRa|
+  02b0: 74 65 6d 61 78 3d 31 38 30 30 32 2c 20 6d 65 6d  |temax=18002, mem|
+  02c0: 54 72 61 6e 73 66 65 72 52 61 74 65 65 64 69 74  |TransferRateedit|
+  02d0: 61 62 6c 65 3d 31 20 3b 20 70 65 72 66 3d 33 2c  |able=1 ; perf=3,|
+  02e0: 20 6e 76 63 6c 6f 63 6b 3d 31 38 30 2c 20 6e 76  | nvclock=180, nv|
+  02f0: 63 6c 6f 63 6b 6d 69 6e 3d 31 38 30 2c 20 6e 76  |clockmin=180, nv|
+  0300: 63 6c 6f 63 6b 6d 61 78 3d 33 30 39 30 2c 20 6e  |clockmax=3090, n|
+  0310: 76 63 6c 6f 63 6b 65 64 69 74 61 62 6c 65 3d 31  |vclockeditable=1|
+  0320: 2c 20 6d 65 6d 63 6c 6f 63 6b 3d 31 31 30 30 31  |, memclock=11001|
+  0330: 2c 20 6d 65 6d 63 6c 6f 63 6b 6d 69 6e 3d 31 31  |, memclockmin=11|
+  0340: 30 30 31 2c 20 6d 65 6d 63 6c 6f 63 6b 6d 61 78  |001, memclockmax|
+  0350: 3d 31 31 30 30 31 2c 20 6d 65 6d 63 6c 6f 63 6b  |=11001, memclock|
+  0360: 65 64 69 74 61 62 6c 65 3d 31 2c 20 6d 65 6d 54  |editable=1, memT|
+  0370: 72 61 6e 73 66 65 72 52 61 74 65 3d 32 32 30 30  |ransferRate=2200|
+  0380: 32 2c 20 6d 65 6d 54 72 61 6e 73 66 65 72 52 61  |2, memTransferRa|
+  0390: 74 65 6d 69 6e 3d 32 32 30 30 32 2c 20 6d 65 6d  |temin=22002, mem|
+  03a0: 54 72 61 6e 73 66 65 72 52 61 74 65 6d 61 78 3d  |TransferRatemax=|
+  03b0: 32 32 30 30 32 2c 20 6d 65 6d 54 72 61 6e 73 66  |22002, memTransf|
+  03c0: 65 72 52 61 74 65 65 64 69 74 61 62 6c 65 3d 31  |erRateeditable=1|
+  03d0: 20 3b 20 70 65 72 66 3d 34 2c 20 6e 76 63 6c 6f  | ; perf=4, nvclo|
+  03e0: 63 6b 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b 6d  |ck=180, nvclockm|
+  03f0: 69 6e 3d 31 38 30 2c 20 6e 76 63 6c 6f 63 6b 6d  |in=180, nvclockm|
+  0400: 61 78 3d 33 30 39 30 2c 20 6e 76 63 6c 6f 63 6b  |ax=3090, nvclock|
+  0410: 65 64 69 74 61 62 6c 65 3d 31 2c 20 6d 65 6d 63  |editable=1, memc|
+  0420: 6c 6f 63 6b 3d 31 34 30 30 31 2c 20 6d 65 6d 63  |lock=14001, memc|
+  0430: 6c 6f 63 6b 6d 69 6e 3d 31 34 30 30 31 2c 20 6d  |lockmin=14001, m|
+  0440: 65 6d 63 6c 6f 63 6b 6d 61 78 3d 31 34 30 30 31  |emclockmax=14001|
+  0450: 2c 20 6d 65 6d 63 6c 6f 63 6b 65 64 69 74 61 62  |, memclockeditab|
+  0460: 6c 65 3d 31 2c 20 6d 65 6d 54 72 61 6e 73 66 65  |le=1, memTransfe|
+  0470: 72 52 61 74 65 3d 32 38 30 30 32 2c 20 6d 65 6d  |rRate=28002, mem|
+  0480: 54 72 61 6e 73 66 65 72 52 61 74 65 6d 69 6e 3d  |TransferRatemin=|
+  0490: 32 38 30 30 32 2c 20 6d 65 6d 54 72 61 6e 73 66  |28002, memTransf|
+  04a0: 65 72 52 61 74 65 6d 61 78 3d 32 38 30 30 32 2c  |erRatemax=28002,|
+  04b0: 20 6d 65 6d 54 72 61 6e 73 66 65 72 52 61 74 65  | memTransferRate|
+  04c0: 65 64 69 74 61 62 6c 65 3d 31 00 00 00 00 00 00  |editable=1......|
+  04d0: 00 00 00 00 00 00 00 00 00                       |.........|
+
+As text (offset 4):
+perf=0, nvclock=180, nvclockmin=180, nvclockmax=885, nvclockeditable=1, memclock=405, memclockmin=405, memclockmax=405, memclockeditable=1, memTransferRate=810, memTransferRatemin=810, memTransferRatemax=810, memTransferRateeditable=1 ; perf=1, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=810, memclockmin=810, memclockmax=810, memclockeditable=1, memTransferRate=1620, memTransferRatemin=1620, memTransferRatemax=1620, memTransferRateeditable=1 ; perf=2, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=9001, memclockmin=9001, memclockmax=9001, memclockeditable=1, memTransferRate=18002, memTransferRatemin=18002, memTransferRatemax=18002, memTransferRateeditable=1 ; perf=3, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=11001, memclockmin=11001, memclockmax=11001, memclockeditable=1, memTransferRate=22002, memTransferRatemin=22002, memTransferRatemax=22002, memTransferRateeditable=1 ; perf=4, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=14001, memclockmin=14001, memclockmax=14001, memclockeditable=1, memTransferRate=28002, memTransferRatemin=28002, memTransferRatemax=28002, memTransferRateeditable=1
+
+=== MarginTemperature (sz=8 ver=1) ===
+ret=0 (Success)
+Raw 16 bytes:
+  0000: 08 00 00 01 36 00 00 00 00 00 00 00 00 00 00 00  |....6...........|
+version word: 0x01000008
+value (offset 4, uint32): 54
+value (offset 4, int32):  54
+
+Trying larger sizes:
+
+=== CoolerInfo deeper probe ===
+  3-arg: idx=0 sz=8 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=12 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=16 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=20 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=24 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=28 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=32 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=36 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=40 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=44 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=48 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=52 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=56 => 2 (Invalid Argument)
+  3-arg: idx=0 sz=60 => 2 (Inval

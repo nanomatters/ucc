@@ -1,0 +1,327 @@
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include <cstdint>
+#include <dlfcn.h>
+#include <iostream>
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
+/**
+ * @brief Minimal NVML type definitions for dlopen-based access.
+ *
+ * These are ABI-compatible with the actual NVML types from nvml.h.
+ * We define them here to avoid requiring the CUDA toolkit headers at build time.
+ */
+namespace nvml
+{
+
+using nvmlReturn_t = unsigned int;
+using nvmlDevice_t = void*;
+
+static constexpr nvmlReturn_t NVML_SUCCESS = 0;
+static constexpr nvmlReturn_t NVML_ERROR_NOT_SUPPORTED = 3;
+
+enum nvmlClockType_t : unsigned int
+{
+  NVML_CLOCK_GRAPHICS = 0,
+  NVML_CLOCK_SM = 1,
+  NVML_CLOCK_MEM = 2,
+  NVML_CLOCK_VIDEO = 3,
+};
+
+enum nvmlPstates_t : unsigned int
+{
+  NVML_PSTATE_0 = 0,
+  NVML_PSTATE_1 = 1,
+  NVML_PSTATE_2 = 2,
+  NVML_PSTATE_3 = 3,
+  NVML_PSTATE_4 = 4,
+  NVML_PSTATE_5 = 5,
+  NVML_PSTATE_6 = 6,
+  NVML_PSTATE_7 = 7,
+  NVML_PSTATE_8 = 8,
+  NVML_PSTATE_9 = 9,
+  NVML_PSTATE_10 = 10,
+  NVML_PSTATE_11 = 11,
+  NVML_PSTATE_12 = 12,
+  NVML_PSTATE_13 = 13,
+  NVML_PSTATE_14 = 14,
+  NVML_PSTATE_15 = 15,
+  NVML_PSTATE_UNKNOWN = 32,
+};
+
+// NVML clock offset info structure (v1)
+struct nvmlClockOffset_t
+{
+  unsigned int version;
+  nvmlClockType_t type;
+  nvmlPstates_t pstate;
+  int clockOffsetMHz;
+  int minClockOffsetMHz;
+  int maxClockOffsetMHz;
+};
+
+#define NVML_CLOCK_OFFSET_VER1 \
+  ( static_cast< unsigned int >( sizeof( nvml::nvmlClockOffset_t ) ) | ( 1U << 24 ) )
+
+static constexpr unsigned int NVML_MAX_GPU_PERF_PSTATES = 16;
+
+} // namespace nvml
+
+/**
+ * @brief P-State info for a single clock type at a single P-state.
+ */
+struct NvmlPStateClockInfo
+{
+  unsigned int pstate;     ///< P-state index (0–15)
+  unsigned int minMHz;     ///< Minimum clock in MHz
+  unsigned int maxMHz;     ///< Maximum clock in MHz
+  int currentOffset;       ///< Currently applied clock offset in MHz
+  int minOffset;           ///< Minimum allowed clock offset in MHz
+  int maxOffset;           ///< Maximum allowed clock offset in MHz
+};
+
+/**
+ * @brief Complete GPU OC state read from NVML.
+ */
+struct NvmlOCState
+{
+  std::string gpuName;
+  std::string pciBusId;
+
+  std::vector< NvmlPStateClockInfo > gpuPStates;   ///< Core clock P-states
+  std::vector< NvmlPStateClockInfo > vramPStates;   ///< VRAM clock P-states
+
+  // Locked clocks (set by user, tracked locally)
+  std::optional< std::pair< unsigned int, unsigned int > > gpuLockedClocks;
+  std::optional< std::pair< unsigned int, unsigned int > > vramLockedClocks;
+
+  // Overall clock ranges (min across all pstates .. max across all pstates)
+  std::optional< std::pair< unsigned int, unsigned int > > gpuClockRange;
+  std::optional< std::pair< unsigned int, unsigned int > > vramClockRange;
+
+  // Power info
+  double powerDrawW     = 0.0;
+  double powerLimitW    = 0.0;
+  double powerMaxW      = 0.0;
+  double powerDefaultW  = 0.0;
+  double powerMinW      = 0.0;
+
+  // Temperature
+  unsigned int tempC = 0;
+  unsigned int tempShutdownC = 0;
+
+  bool offsetsSupported = false;
+  bool lockedClocksSupported = false;
+};
+
+/**
+ * @brief Runtime NVML wrapper using dlopen/dlsym.
+ *
+ * Provides GPU overclocking functionality without requiring NVML headers
+ * at compile time. The library (libnvidia-ml.so.1) is loaded dynamically.
+ */
+class NvmlWrapper
+{
+public:
+  NvmlWrapper();
+  ~NvmlWrapper();
+
+  // Non-copyable, non-movable
+  NvmlWrapper( const NvmlWrapper& ) = delete;
+  NvmlWrapper& operator=( const NvmlWrapper& ) = delete;
+
+  /**
+   * @brief Check if NVML was loaded and initialized successfully.
+   */
+  [[nodiscard]] bool isAvailable() const noexcept { return m_initialized; }
+
+  /**
+   * @brief Get the number of NVIDIA GPUs found.
+   */
+  [[nodiscard]] unsigned int deviceCount() const noexcept { return m_deviceCount; }
+
+  /**
+   * @brief Read complete OC state for a GPU by index.
+   */
+  [[nodiscard]] std::optional< NvmlOCState > getOCState( unsigned int deviceIndex ) const;
+
+  /**
+   * @brief Set a clock offset for a specific clock type and P-state.
+   * @return true on success
+   */
+  bool setClockOffset( unsigned int deviceIndex,
+                       nvml::nvmlClockType_t clockType,
+                       nvml::nvmlPstates_t pstate,
+                       int offsetMHz );
+
+  /**
+   * @brief Set GPU locked clocks (min/max core clock range).
+   * @return true on success
+   */
+  bool setGpuLockedClocks( unsigned int deviceIndex,
+                           unsigned int minMHz,
+                           unsigned int maxMHz );
+
+  /**
+   * @brief Set VRAM locked clocks (min/max memory clock range).
+   * @return true on success
+   */
+  bool setVramLockedClocks( unsigned int deviceIndex,
+                            unsigned int minMHz,
+                            unsigned int maxMHz );
+
+  /**
+   * @brief Reset GPU locked clocks to default.
+   * @return true on success
+   */
+  bool resetGpuLockedClocks( unsigned int deviceIndex );
+
+  /**
+   * @brief Reset VRAM locked clocks to default.
+   * @return true on success
+   */
+  bool resetVramLockedClocks( unsigned int deviceIndex );
+
+  /**
+   * @brief Reset all clock offsets to 0.
+   * @return true on success
+   */
+  bool resetAllClockOffsets( unsigned int deviceIndex );
+
+  /**
+   * @brief Set power management limit in milliwatts.
+   * @return true on success
+   */
+  bool setPowerLimit( unsigned int deviceIndex, unsigned int milliwatts );
+
+  /**
+   * @brief Reset power limit to default.
+   * @return true on success
+   */
+  bool resetPowerLimit( unsigned int deviceIndex );
+
+  // ---- Live monitoring getters (replace nvidia-smi subprocess calls) ----
+
+  /** @brief GPU temperature in °C. */
+  [[nodiscard]] std::optional< unsigned int > getTemperatureDegC( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Power draw in watts. */
+  [[nodiscard]] std::optional< double > getPowerDrawW( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Enforced (actual) power limit in watts. */
+  [[nodiscard]] std::optional< double > getEnforcedPowerLimitW( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Maximum allowed power limit in watts. */
+  [[nodiscard]] std::optional< double > getPowerMaxLimitW( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Default (factory) power limit in watts. */
+  [[nodiscard]] std::optional< double > getPowerDefaultLimitW( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current graphics clock in MHz. */
+  [[nodiscard]] std::optional< unsigned int > getGpuClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Maximum (boost) graphics clock in MHz. */
+  [[nodiscard]] std::optional< unsigned int > getMaxGpuClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Returns true if the NVML library was loaded and initialized. */
+  bool isInitialized() const { return m_initialized; }
+
+private:
+  void* m_lib = nullptr;
+  bool m_initialized = false;
+  unsigned int m_deviceCount = 0;
+
+  // Tracked state for locked clocks (NVML doesn't report these back)
+  mutable std::map< unsigned int, std::pair< unsigned int, unsigned int > > m_appliedGpuLockedClocks;
+  mutable std::map< unsigned int, std::pair< unsigned int, unsigned int > > m_appliedVramLockedClocks;
+  mutable std::map< unsigned int, std::map< int /*clockType*pstate*/, int > > m_appliedOffsets;
+
+  // Function pointer types
+  using InitFn = nvml::nvmlReturn_t ( * )();
+  using ShutdownFn = nvml::nvmlReturn_t ( * )();
+  using DeviceGetCountFn = nvml::nvmlReturn_t ( * )( unsigned int* );
+  using DeviceGetHandleByIndexFn = nvml::nvmlReturn_t ( * )( unsigned int, nvml::nvmlDevice_t* );
+  using DeviceGetNameFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, char*, unsigned int );
+  using DeviceGetPciBusIdFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, char*, unsigned int );
+  using DeviceGetSupportedPstatesFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPstates_t*, unsigned int );
+  using DeviceGetMinMaxClockFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClockType_t, nvml::nvmlPstates_t, unsigned int*, unsigned int* );
+  using DeviceGetClockOffsetsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClockOffset_t* );
+  using DeviceSetClockOffsetsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClockOffset_t* );
+  using DeviceSetGpuLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int );
+  using DeviceSetMemLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int );
+  using DeviceResetGpuLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t );
+  using DeviceResetMemLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t );
+  using DeviceGetTemperatureFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetTemperatureThresholdFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetPowerUsageFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+  using DeviceGetPowerManagementLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+  using DeviceSetPowerManagementLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int );
+  using DeviceGetPowerManagementLimitConstraintsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
+  using DeviceGetPowerManagementDefaultLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+  using DeviceGetPerformanceStateFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPstates_t* );
+  using DeviceGetClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetMaxClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetEnforcedPowerLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+
+  // Function pointers (loaded via dlsym)
+  InitFn m_init = nullptr;
+  ShutdownFn m_shutdown = nullptr;
+  DeviceGetCountFn m_getCount = nullptr;
+  DeviceGetHandleByIndexFn m_getHandle = nullptr;
+  DeviceGetNameFn m_getName = nullptr;
+  DeviceGetPciBusIdFn m_getPciBusId = nullptr;
+  DeviceGetSupportedPstatesFn m_getSupportedPstates = nullptr;
+  DeviceGetMinMaxClockFn m_getMinMaxClock = nullptr;
+  DeviceGetClockOffsetsFn m_getClockOffsets = nullptr;
+  DeviceSetClockOffsetsFn m_setClockOffsets = nullptr;
+  DeviceSetGpuLockedClocksFn m_setGpuLockedClocks = nullptr;
+  DeviceSetMemLockedClocksFn m_setMemLockedClocks = nullptr;
+  DeviceResetGpuLockedClocksFn m_resetGpuLockedClocks = nullptr;
+  DeviceResetMemLockedClocksFn m_resetMemLockedClocks = nullptr;
+  DeviceGetTemperatureFn m_getTemperature = nullptr;
+  DeviceGetTemperatureThresholdFn m_getTemperatureThreshold = nullptr;
+  DeviceGetPowerUsageFn m_getPowerUsage = nullptr;
+  DeviceGetPowerManagementLimitFn m_getPowerLimit = nullptr;
+  DeviceSetPowerManagementLimitFn m_setPowerLimit = nullptr;
+  DeviceGetPowerManagementLimitConstraintsFn m_getPowerLimitConstraints = nullptr;
+  DeviceGetPowerManagementDefaultLimitFn m_getPowerLimitDefault = nullptr;
+  DeviceGetPerformanceStateFn m_getPerformanceState = nullptr;
+  DeviceGetClockInfoFn m_getClockInfo = nullptr;
+  DeviceGetMaxClockInfoFn m_getMaxClockInfo = nullptr;
+  DeviceGetEnforcedPowerLimitFn m_getEnforcedPowerLimit = nullptr;
+
+  /**
+   * @brief Load a function pointer from the NVML library.
+   */
+  template< typename T >
+  T loadSym( const char* name )
+  {
+    auto* ptr = reinterpret_cast< T >( dlsym( m_lib, name ) );
+    if ( !ptr )
+      std::cerr << "[NvmlWrapper] Could not load symbol: " << name << std::endl;
+    return ptr;
+  }
+
+  /**
+   * @brief Get a device handle by index.
+   */
+  [[nodiscard]] std::optional< nvml::nvmlDevice_t > getDevice( unsigned int index ) const;
+};

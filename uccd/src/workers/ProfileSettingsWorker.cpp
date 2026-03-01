@@ -14,6 +14,7 @@
  */
 
 #include "workers/ProfileSettingsWorker.hpp"
+#include "NvmlWrapper.hpp"
 #include "Utils.hpp"
 #include <tuxedo_io_lib/tuxedo_io_api.hh>
 
@@ -694,52 +695,16 @@ void ProfileSettingsWorker::applyNVIDIACTGPOffset()
 
 void ProfileSettingsWorker::queryNVIDIAPowerLimits()
 {
-  m_nvidiaPowerCTRLDefaultPowerLimit =
-    executeNvidiaSmi( "nvidia-smi --format=csv,noheader,nounits --query-gpu=power.default_limit" );
-
-  m_nvidiaPowerCTRLMaxPowerLimit =
-    executeNvidiaSmi( "nvidia-smi --format=csv,noheader,nounits --query-gpu=power.max_limit" );
+  NvmlWrapper nvml;
+  if ( nvml.isAvailable() && nvml.deviceCount() > 0 )
+  {
+    if ( auto v = nvml.getPowerDefaultLimitW( 0 ) )
+      m_nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+    if ( auto v = nvml.getPowerMaxLimitW( 0 ) )
+      m_nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+  }
 
   std::cout << "[NVIDIAPowerCTRL] NVIDIA GPU power limits - Default: "
             << m_nvidiaPowerCTRLDefaultPowerLimit << "W, Max: " << m_nvidiaPowerCTRLMaxPowerLimit
             << "W" << std::endl;
-}
-
-int32_t ProfileSettingsWorker::executeNvidiaSmi( const std::string &command )
-{
-  // Use executeProcess() with argument array to avoid shell injection.
-  // The 'command' parameter contains the full nvidia-smi invocation;
-  // we parse it into executable + args.
-
-  // All callers pass "nvidia-smi --flag1 --flag2 ..." so we split on spaces.
-  // For safety, we hard-code the executable path / name.
-  std::vector< std::string > args;
-  std::istringstream iss( command );
-  std::string token;
-  bool first = true;
-  while ( iss >> token )
-  {
-    if ( first )
-    {
-      first = false; // skip the "nvidia-smi" executable name from the string
-      continue;
-    }
-    args.push_back( token );
-  }
-
-  std::string result = ucc::executeProcess( "nvidia-smi", args );
-
-  // Trim whitespace and convert to int
-  result.erase( 0, result.find_first_not_of( " \t\n\r" ) );
-  result.erase( result.find_last_not_of( " \t\n\r" ) + 1 );
-
-  try
-  {
-    return std::stoi( result );
-  }
-  catch ( ... )
-  {
-    std::cerr << "[NVIDIAPowerCTRL] Failed to parse nvidia-smi output: " << result << std::endl;
-    return 0;
-  }
 }

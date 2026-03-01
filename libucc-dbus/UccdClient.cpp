@@ -881,6 +881,77 @@ std::optional< std::string > UccdClient::getPrimeProfile()
   return std::nullopt;
 }
 
+// ---------------------------------------------------------------------------
+// NVIDIA GPU OC Control
+// ---------------------------------------------------------------------------
+
+std::optional< bool > UccdClient::getNvidiaOCAvailable()
+{
+  return callMethod< bool >( "GetNvidiaOCAvailable" );
+}
+
+std::optional< std::string > UccdClient::getNvidiaOCState( int deviceIndex )
+{
+  if ( auto result = callMethod< QString, int >( "GetNvidiaOCState", deviceIndex ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+bool UccdClient::setNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz )
+{
+  return callMethod< bool, int, int, int, int >( "SetNvidiaClockOffset",
+      deviceIndex, clockType, pstate, offsetMHz ).value_or( false );
+}
+
+bool UccdClient::setNvidiaGpuLockedClocks( int deviceIndex, int minMHz, int maxMHz )
+{
+  return callMethod< bool, int, int, int >( "SetNvidiaGpuLockedClocks",
+      deviceIndex, minMHz, maxMHz ).value_or( false );
+}
+
+bool UccdClient::setNvidiaVramLockedClocks( int deviceIndex, int minMHz, int maxMHz )
+{
+  return callMethod< bool, int, int, int >( "SetNvidiaVramLockedClocks",
+      deviceIndex, minMHz, maxMHz ).value_or( false );
+}
+
+bool UccdClient::resetNvidiaGpuLockedClocks( int deviceIndex )
+{
+  return callMethod< bool, int >( "ResetNvidiaGpuLockedClocks", deviceIndex ).value_or( false );
+}
+
+bool UccdClient::resetNvidiaVramLockedClocks( int deviceIndex )
+{
+  return callMethod< bool, int >( "ResetNvidiaVramLockedClocks", deviceIndex ).value_or( false );
+}
+
+bool UccdClient::resetNvidiaAllClockOffsets( int deviceIndex )
+{
+  return callMethod< bool, int >( "ResetNvidiaAllClockOffsets", deviceIndex ).value_or( false );
+}
+
+bool UccdClient::setNvidiaGpuPowerLimit( int deviceIndex, double watts )
+{
+  return callMethod< bool, int, double >( "SetNvidiaGpuPowerLimit",
+      deviceIndex, watts ).value_or( false );
+}
+
+bool UccdClient::resetNvidiaGpuPowerLimit( int deviceIndex )
+{
+  return callMethod< bool, int >( "ResetNvidiaGpuPowerLimit", deviceIndex ).value_or( false );
+}
+
+bool UccdClient::applyNvidiaGpuOCProfile( const std::string &profileJSON, int deviceIndex )
+{
+  return callMethod< bool, QString, int >( "ApplyNvidiaGpuOCProfile",
+      QString::fromStdString( profileJSON ), deviceIndex ).value_or( false );
+}
+
+bool UccdClient::resetNvidiaGpuOCAll( int deviceIndex )
+{
+  return callMethod< bool, int >( "ResetNvidiaGpuOCAll", deviceIndex ).value_or( false );
+}
+
 bool UccdClient::setKeyboardBacklight( const std::string &config )
 {
   if ( hasMethod( m_interface.get(), "SetKeyboardBacklightStatesJSON" ) )

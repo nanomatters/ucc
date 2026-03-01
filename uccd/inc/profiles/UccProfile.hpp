@@ -24,6 +24,45 @@
 #include <cstdint>
 
 /**
+ * @brief GPU OC profile — stores per-pstate clock offsets, locked clocks, and power limit.
+ *
+ * Mirrors the data surfaced by NvmlWrapper and is serialised as part of
+ * the system profile JSON.  Only NVIDIA GPUs via NVML are supported.
+ */
+struct GpuOCClockOffset
+{
+  unsigned int pstate = 0;
+  int offsetMHz = 0;
+};
+
+struct GpuOCLockedClockRange
+{
+  unsigned int minMHz = 0;
+  unsigned int maxMHz = 0;
+  bool enabled = false;
+};
+
+struct UccProfileGpuOC
+{
+  std::string gpuProfileId;   ///< UUID reference kept in UccProfile
+  std::string gpuProfileName;
+
+  // Per-pstate GPU core offsets
+  std::vector< GpuOCClockOffset > gpuCoreOffsets;
+  // Per-pstate VRAM offsets
+  std::vector< GpuOCClockOffset > vramOffsets;
+
+  // Locked clock ranges (optional)
+  GpuOCLockedClockRange gpuLockedClocks;
+  GpuOCLockedClockRange vramLockedClocks;
+
+  // Power limit in watts (0 = use default)
+  double powerLimitW = 0.0;
+
+  UccProfileGpuOC() = default;
+};
+
+/**
  * @brief Display settings for a profile
  */
 struct UccProfileDisplay
@@ -202,6 +241,7 @@ struct UccProfile
   UccODMProfile odmProfile;
   UccODMPowerLimits odmPowerLimits;
   std::optional< TccNVIDIAPowerCTRLProfile > nvidiaPowerCTRLProfile;
+  std::string gpuProfileId;     ///< UUID reference to GPU OC profile (stored in GUI QSettings)
   std::string chargingProfile;  ///< firmware-level charging profile descriptor (e.g. "balanced")
   std::string chargingPriority; ///< USB-C PD charging priority (e.g. "charge_battery", "performance")
   std::string chargeType;       ///< charge type: "Standard" or "Custom"
@@ -229,6 +269,7 @@ struct UccProfile
       odmProfile( other.odmProfile ),
       odmPowerLimits( other.odmPowerLimits ),
       nvidiaPowerCTRLProfile( other.nvidiaPowerCTRLProfile ),
+      gpuProfileId( other.gpuProfileId ),
       chargingProfile( other.chargingProfile ),
       chargingPriority( other.chargingPriority ),
       chargeType( other.chargeType ),
@@ -253,6 +294,7 @@ struct UccProfile
       odmProfile = other.odmProfile;
       odmPowerLimits = other.odmPowerLimits;
       nvidiaPowerCTRLProfile = other.nvidiaPowerCTRLProfile;
+      gpuProfileId = other.gpuProfileId;
       chargingProfile = other.chargingProfile;
       chargingPriority = other.chargingPriority;
       chargeType = other.chargeType;

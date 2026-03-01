@@ -26,13 +26,16 @@ add_executable(uccd
   src/uccd.cpp
   src/UccDBusService.cpp
   src/SystemInfo.cpp
+  src/NvmlWrapper.cpp
   src/workers/ProfileSettingsWorker.cpp
+  src/workers/NvidiaOCWorker.cpp
   src/workers/LCTWaterCoolerWorker.cpp
   src/workers/DisplayWorker.cpp
   src/workers/HardwareMonitorWorker.cpp
   inc/UccDBusService.hpp
   inc/workers/LCTWaterCoolerWorker.hpp
   inc/workers/DaemonWorker.hpp
+  inc/workers/NvidiaOCWorker.hpp
   src/profiles/FanProfiles.cpp
   src/profiles/UccProfile.cpp
   src/profiles/DefaultProfiles.cpp
@@ -49,6 +52,7 @@ target_link_libraries(uccd PRIVATE
 # Link system libraries
 target_link_libraries(uccd PRIVATE
   udev
+  dl
   Qt6::Core
   Qt6::Bluetooth
   Qt6::DBus
