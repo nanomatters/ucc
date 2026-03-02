@@ -68,6 +68,7 @@ class ProfileSettingsWorker
 public:
   ProfileSettingsWorker(
     TuxedoIOAPI &ioApi,
+    std::shared_ptr< NvmlWrapper > nvml,
     std::function< UccProfile() > getActiveProfileCallback,
     std::function< void( const std::vector< std::string > & ) > setOdmProfilesAvailableCallback,
     std::function< void( const std::string & ) > setOdmPowerLimitsJSON,
@@ -80,6 +81,7 @@ public:
     std::atomic< bool > &cTGPAdjustmentSupported,
     bool skipAcpiPlatformProfile = false )
     : m_ioApi( ioApi ),
+      m_nvml( std::move( nvml ) ),
       m_getActiveProfile( std::move( getActiveProfileCallback ) ),
       m_setOdmProfilesAvailable( std::move( setOdmProfilesAvailableCallback ) ),
       m_setOdmPowerLimitsJSON( std::move( setOdmPowerLimitsJSON ) ),
@@ -167,6 +169,7 @@ private:
   };
 
   TuxedoIOAPI &m_ioApi;
+  std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< void( const std::vector< std::string > & ) > m_setOdmProfilesAvailable;
   std::function< void( const std::string & ) > m_setOdmPowerLimitsJSON;

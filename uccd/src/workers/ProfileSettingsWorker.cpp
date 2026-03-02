@@ -695,12 +695,11 @@ void ProfileSettingsWorker::applyNVIDIACTGPOffset()
 
 void ProfileSettingsWorker::queryNVIDIAPowerLimits()
 {
-  NvmlWrapper nvml;
-  if ( nvml.isAvailable() && nvml.deviceCount() > 0 )
+  if ( m_nvml && m_nvml->isAvailable() && m_nvml->deviceCount() > 0 )
   {
-    if ( auto v = nvml.getPowerDefaultLimitW( 0 ) )
+    if ( auto v = m_nvml->getPowerDefaultLimitW( 0 ) )
       m_nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
-    if ( auto v = nvml.getPowerMaxLimitW( 0 ) )
+    if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
       m_nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
   }
 

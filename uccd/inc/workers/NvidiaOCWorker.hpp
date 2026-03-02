@@ -32,7 +32,8 @@
 class NvidiaOCWorker
 {
 public:
-  explicit NvidiaOCWorker( std::function< void( const std::string & ) > logFunction );
+  explicit NvidiaOCWorker( std::shared_ptr< NvmlWrapper > nvml,
+                           std::function< void( const std::string & ) > logFunction );
   ~NvidiaOCWorker() = default;
 
   // Non-copyable
@@ -85,6 +86,6 @@ public:
 private:
   void log( const std::string &msg ) const;
 
-  std::unique_ptr< NvmlWrapper > m_nvml;
+  std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< void( const std::string & ) > m_logFunction;
 };

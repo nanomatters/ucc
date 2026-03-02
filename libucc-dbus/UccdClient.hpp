@@ -68,6 +68,8 @@ public:
   bool deleteCustomProfile( const std::string &profileId );
   std::optional< std::string > getFanProfile( const std::string &fanProfileId );
   std::optional< std::string > getFanProfilesJSON();
+  std::optional< std::string > getGpuProfile( const std::string &gpuProfileId );
+  std::optional< std::string > getGpuProfilesJSON();
   std::optional< bool > setFanProfile( const std::string &fanProfileId, const std::string &json );
 
   // Display Control
@@ -186,6 +188,8 @@ public:
   std::optional< int > getDGpuCurrentPstate();        ///< Current P-state index (0–15)
   std::optional< int > getDGpuGrClockOffsetMHz();     ///< Graphics-clock offset at current P-state
   std::optional< int > getDGpuMemClockOffsetMHz();    ///< Memory-clock offset at current P-state
+  std::optional< int > getDGpuVramFrequencyMHz();     ///< VRAM frequency in MHz
+  std::optional< int > getDGpuCoreVoltageMv();        ///< Core voltage in mV
   std::optional< int > getFanSpeedRPM();
   std::optional< int > getGpuFanSpeedRPM();
   std::optional< int > getFanSpeedPercent();
@@ -218,12 +222,18 @@ public:
   bool isConnected() const;
 
 signals:
-  void profileChanged( const QString &profileId, const QString &keyboardProfileId, const QString &fanProfileId );
+  void profileChanged( const QString &profileId,
+                       const QString &keyboardProfileId,
+                       const QString &fanProfileId,
+                       const QString &gpuProfileId );
   void powerStateChanged( const QString &state );
   void connectionStatusChanged( bool connected );
 
 private slots:
-  void onProfileChangedSignal( const QString &profileId, const QString &keyboardProfileId, const QString &fanProfileId );
+  void onProfileChangedSignal( const QString &profileId,
+                               const QString &keyboardProfileId,
+                               const QString &fanProfileId,
+                               const QString &gpuProfileId );
   void onPowerStateChangedSignal( const QString &state );
   void onServiceRegistered( const QString &service );
   void onServiceUnregistered( const QString &service );

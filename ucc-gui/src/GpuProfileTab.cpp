@@ -25,8 +25,14 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QCheckBox>
+#include <QDir>
 #include <QDebug>
 #include <QMessageBox>
+#include <algorithm>
+#include <cmath>
 
 namespace ucc
 {
@@ -44,6 +50,8 @@ GpuProfileTab::GpuProfileTab( UccdClient *client,
 
   setupUI();
   connectSignals();
+  reloadGpuProfiles();
+  updateButtonStates( m_uccdClient && m_uccdClient->isConnected() );
 
   // Initial hardware state read
   if ( m_ocAvailable )
@@ -60,20 +68,9 @@ void GpuProfileTab::setupUI()
 
   // ── Top bar: GPU profile selection ──
   QHBoxLayout *selectLayout = new QHBoxLayout();
-  QLabel *profileLabel = new QLabel( "Active GPU Profile:" );
-  profileLabel->setStyleSheet( "font-weight: bold;" );
   m_gpuProfileCombo = new QComboBox();
   m_gpuProfileCombo->setEditable( true );
   m_gpuProfileCombo->setInsertPolicy( QComboBox::NoInsert );
-
-  // Load custom GPU profiles
-  for ( const auto &v : m_profileManager->customGpuProfilesData() )
-  {
-    QJsonObject o = v.toObject();
-    QString id = o["id"].toString();
-    QString name = o["name"].toString();
-    m_gpuProfileCombo->addItem( name, id );
-  }
 
   m_applyButton = new QPushButton( "Apply" );
   m_applyButton->setMaximumWidth( 80 );
@@ -90,12 +87,21 @@ void GpuProfileTab::setupUI()
   m_removeButton = new QPushButton( "Remove" );
   m_removeButton->setMaximumWidth( 70 );
 
-  selectLayout->addWidget( profileLabel );
+  m_refreshButton = new QPushButton( "Refresh" );
+  m_refreshButton->setMaximumWidth( 100 );
+  m_refreshButton->setVisible( m_ocAvailable );
+
+  m_resetButton = new QPushButton( "Reset" );
+  m_resetButton->setMaximumWidth( 80 );
+  m_resetButton->setVisible( m_ocAvailable );
+
   selectLayout->addWidget( m_gpuProfileCombo, 1 );
   selectLayout->addWidget( m_applyButton );
   selectLayout->addWidget( m_saveButton );
   selectLayout->addWidget( m_copyButton );
   selectLayout->addWidget( m_removeButton );
+  selectLayout->addWidget( m_refreshButton );
+  selectLayout->addWidget( m_resetButton );
   mainLayout->addLayout( selectLayout );
 
   QFrame *separator = new QFrame();
@@ -118,45 +124,63 @@ void GpuProfileTab::setupUI()
   m_notAvailableLabel->setVisible( !m_ocAvailable );
   contentLayout->addWidget( m_notAvailableLabel );
 
-  // Warning label
-  m_warningLabel = new QLabel(
-    "<span style='color: #e65100;'>"
-    "&#9888; <b>Warning:</b> Overclocking your GPU may cause system instability, crashes, or "
-    "hardware damage. Use at your own risk. Changes take effect immediately when applied.</span>" );
-  m_warningLabel->setWordWrap( true );
-  m_warningLabel->setVisible( m_ocAvailable );
-  contentLayout->addWidget( m_warningLabel );
+  // === GPU INFO SECTION (unboxed) ===
+  QWidget *infoSection = new QWidget();
+  infoSection->setVisible( m_ocAvailable );
+  QVBoxLayout *infoSectionLayout = new QVBoxLayout( infoSection );
+  infoSectionLayout->setContentsMargins( 0, 0, 0, 0 );
+  infoSectionLayout->setSpacing( 6 );
 
-  // === GPU INFO SECTION ===
-  QGroupBox *infoGroup = new QGroupBox( "GPU Information" );
-  infoGroup->setVisible( m_ocAvailable );
-  QGridLayout *infoLayout = new QGridLayout( infoGroup );
+  QGridLayout *infoLayout = new QGridLayout();
+  infoLayout->setHorizontalSpacing( 18 );
+  infoLayout->setVerticalSpacing( 4 );
+  QLabel *tempLabel = new QLabel( "Temperature" );
+  QLabel *powerLabel = new QLabel( "Power draw" );
+  QPalette muted = tempLabel->palette();
+  muted.setColor( QPalette::WindowText, muted.color( QPalette::Mid ) );
+  tempLabel->setPalette( muted );
+  powerLabel->setPalette( muted );
+
   m_gpuNameLabel = new QLabel( "—" );
   m_tempLabel = new QLabel( "—" );
   m_powerDrawLabel = new QLabel( "—" );
-  infoLayout->addWidget( new QLabel( "GPU:" ), 0, 0 );
-  infoLayout->addWidget( m_gpuNameLabel, 0, 1 );
-  infoLayout->addWidget( new QLabel( "Temperature:" ), 0, 2 );
+  QFont valueFont = m_gpuNameLabel->font();
+  valueFont.setBold( true );
+  m_gpuNameLabel->setFont( valueFont );
+  m_tempLabel->setFont( valueFont );
+  m_powerDrawLabel->setFont( valueFont );
+
+  infoLayout->addWidget( m_gpuNameLabel, 0, 0 );
+  infoLayout->addWidget( tempLabel, 0, 2 );
   infoLayout->addWidget( m_tempLabel, 0, 3 );
-  infoLayout->addWidget( new QLabel( "Power draw:" ), 0, 4 );
+  infoLayout->addWidget( powerLabel, 0, 4 );
   infoLayout->addWidget( m_powerDrawLabel, 0, 5 );
   infoLayout->setColumnStretch( 1, 1 );
-  contentLayout->addWidget( infoGroup );
+  infoSectionLayout->addLayout( infoLayout );
+  contentLayout->addWidget( infoSection );
 
   // === CLOCK OFFSETS (grouped by P-state) ===
-  QGroupBox *offsetsGroup = new QGroupBox( "Clock Offsets (per P-state)" );
-  offsetsGroup->setVisible( m_ocAvailable );
-  m_pstatesLayout = new QVBoxLayout( offsetsGroup );
+  m_pstatesLayout = new QVBoxLayout();
   m_pstatesLayout->setSpacing( 8 );
-  contentLayout->addWidget( offsetsGroup );
+
+  // === cTGP (same semantics as Profiles page) ===
+  QGroupBox *powerGroup = new QGroupBox( "Configurable graphics power (TGP)" );
+  powerGroup->setVisible( m_ocAvailable );
+  QHBoxLayout *powerLayout = new QHBoxLayout( powerGroup );
+  powerLayout->addWidget( new QLabel( "TGP:" ) );
+  m_powerLimitSlider = new QSlider( Qt::Horizontal );
+  m_powerLimitSlider->setMinimum( 40 );
+  m_powerLimitSlider->setMaximum( 175 );
+  m_powerLimitValue = new QLabel( "0 W" );
+  m_powerLimitValue->setMinimumWidth( 60 );
+  powerLayout->addWidget( m_powerLimitSlider, 1 );
+  powerLayout->addWidget( m_powerLimitValue );
+  contentLayout->addWidget( powerGroup );
 
   // === GPU LOCKED CLOCKS ===
   QGroupBox *gpuLockedGroup = new QGroupBox( "GPU Core Locked Clocks" );
   gpuLockedGroup->setVisible( m_ocAvailable );
   QVBoxLayout *gpuLockedLayout = new QVBoxLayout( gpuLockedGroup );
-
-  m_gpuLockedClocksEnable = new QCheckBox( "Enable GPU locked clocks" );
-  gpuLockedLayout->addWidget( m_gpuLockedClocksEnable );
 
   QHBoxLayout *gpuLockedRow = new QHBoxLayout();
   gpuLockedRow->addWidget( new QLabel( "Min:" ) );
@@ -173,17 +197,12 @@ void GpuProfileTab::setupUI()
   gpuLockedRow->addWidget( m_gpuLockedMaxSpin );
   gpuLockedLayout->addLayout( gpuLockedRow );
 
-  m_gpuLockedRangeLabel = new QLabel();
-  gpuLockedLayout->addWidget( m_gpuLockedRangeLabel );
   contentLayout->addWidget( gpuLockedGroup );
 
   // === VRAM LOCKED CLOCKS ===
   QGroupBox *vramLockedGroup = new QGroupBox( "VRAM Locked Clocks" );
   vramLockedGroup->setVisible( m_ocAvailable );
   QVBoxLayout *vramLockedLayout = new QVBoxLayout( vramLockedGroup );
-
-  m_vramLockedClocksEnable = new QCheckBox( "Enable VRAM locked clocks" );
-  vramLockedLayout->addWidget( m_vramLockedClocksEnable );
 
   QHBoxLayout *vramLockedRow = new QHBoxLayout();
   vramLockedRow->addWidget( new QLabel( "Min:" ) );
@@ -200,40 +219,10 @@ void GpuProfileTab::setupUI()
   vramLockedRow->addWidget( m_vramLockedMaxSpin );
   vramLockedLayout->addLayout( vramLockedRow );
 
-  m_vramLockedRangeLabel = new QLabel();
-  vramLockedLayout->addWidget( m_vramLockedRangeLabel );
   contentLayout->addWidget( vramLockedGroup );
 
-  // === POWER LIMIT ===
-  QGroupBox *powerGroup = new QGroupBox( "GPU Power Limit" );
-  powerGroup->setVisible( m_ocAvailable );
-  QHBoxLayout *powerLayout = new QHBoxLayout( powerGroup );
-  powerLayout->addWidget( new QLabel( "Power limit:" ) );
-  m_powerLimitSlider = new QSlider( Qt::Horizontal );
-  m_powerLimitSlider->setMinimum( 0 );
-  m_powerLimitSlider->setMaximum( 600 );
-  m_powerLimitValue = new QLabel( "0 W" );
-  m_powerLimitValue->setMinimumWidth( 60 );
-  powerLayout->addWidget( m_powerLimitSlider, 1 );
-  powerLayout->addWidget( m_powerLimitValue );
-  contentLayout->addWidget( powerGroup );
-
-  m_powerLimitRangeLabel = new QLabel();
-  m_powerLimitRangeLabel->setVisible( m_ocAvailable );
-  contentLayout->addWidget( m_powerLimitRangeLabel );
-
-  // Action buttons
-  QHBoxLayout *actionLayout = new QHBoxLayout();
-  m_refreshButton = new QPushButton( "Refresh" );
-  m_refreshButton->setMaximumWidth( 100 );
-  m_refreshButton->setVisible( m_ocAvailable );
-  m_resetButton = new QPushButton( "Reset All to Defaults" );
-  m_resetButton->setMaximumWidth( 180 );
-  m_resetButton->setVisible( m_ocAvailable );
-  actionLayout->addWidget( m_refreshButton );
-  actionLayout->addWidget( m_resetButton );
-  actionLayout->addStretch();
-  contentLayout->addLayout( actionLayout );
+  // === CLOCK OFFSETS (grouped by P-state) ===
+  contentLayout->addLayout( m_pstatesLayout );
 
   contentLayout->addStretch();
   scrollArea->setWidget( scrollWidget );
@@ -259,73 +248,48 @@ void GpuProfileTab::connectSignals()
   }
 
   // Action buttons
-  connect( m_applyButton, &QPushButton::clicked, this, &GpuProfileTab::applyRequested );
-  connect( m_saveButton, &QPushButton::clicked, this, &GpuProfileTab::saveRequested );
+  connect( m_applyButton, &QPushButton::clicked, this, [this]() {
+    if ( !ensureOverclockWarningAcknowledged() )
+      return;
+    emit applyRequested();
+  } );
+  connect( m_saveButton, &QPushButton::clicked, this, [this]() {
+    if ( !ensureOverclockWarningAcknowledged() )
+      return;
+    emit saveRequested();
+  } );
   connect( m_copyButton, &QPushButton::clicked, this, &GpuProfileTab::copyRequested );
   connect( m_removeButton, &QPushButton::clicked, this, &GpuProfileTab::removeRequested );
   connect( m_refreshButton, &QPushButton::clicked, this, &GpuProfileTab::onRefreshClicked );
   connect( m_resetButton, &QPushButton::clicked, this, &GpuProfileTab::onResetClicked );
 
-  // Locked clocks enable/disable
-  auto connectLockedClocks = [this]( QCheckBox *cb, QSlider *minS, QSlider *maxS,
-                                     QSpinBox *minSp, QSpinBox *maxSp ) {
-    connect( cb, &QCheckBox::toggled, this, [minS, maxS, minSp, maxSp, this]( bool en ) {
-      minS->setEnabled( en ); maxS->setEnabled( en );
-      minSp->setEnabled( en ); maxSp->setEnabled( en );
-      emit changed();
-    } );
-  };
+  // GPU locked clocks: bidirectional slider <-> spinbox sync
+  connect( m_gpuLockedMinSlider, &QSlider::valueChanged, m_gpuLockedMinSpin, &QSpinBox::setValue );
+  connect( m_gpuLockedMinSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_gpuLockedMinSlider, &QSlider::setValue );
+  connect( m_gpuLockedMaxSlider, &QSlider::valueChanged, m_gpuLockedMaxSpin, &QSpinBox::setValue );
+  connect( m_gpuLockedMaxSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_gpuLockedMaxSlider, &QSlider::setValue );
+  connect( m_gpuLockedMinSlider, &QSlider::valueChanged, this, [this]( int v ) {
+    if ( v > m_gpuLockedMaxSlider->value() ) m_gpuLockedMaxSlider->setValue( v );
+    emit changed();
+  } );
+  connect( m_gpuLockedMaxSlider, &QSlider::valueChanged, this, [this]( int v ) {
+    if ( v < m_gpuLockedMinSlider->value() ) m_gpuLockedMinSlider->setValue( v );
+    emit changed();
+  } );
 
-  if ( m_gpuLockedClocksEnable )
-  {
-    connectLockedClocks( m_gpuLockedClocksEnable,
-                         m_gpuLockedMinSlider, m_gpuLockedMaxSlider,
-                         m_gpuLockedMinSpin, m_gpuLockedMaxSpin );
-    // Bidirectional slider <-> spinbox sync
-    connect( m_gpuLockedMinSlider, &QSlider::valueChanged, m_gpuLockedMinSpin, &QSpinBox::setValue );
-    connect( m_gpuLockedMinSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_gpuLockedMinSlider, &QSlider::setValue );
-    connect( m_gpuLockedMaxSlider, &QSlider::valueChanged, m_gpuLockedMaxSpin, &QSpinBox::setValue );
-    connect( m_gpuLockedMaxSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_gpuLockedMaxSlider, &QSlider::setValue );
-    // Enforce min <= max
-    connect( m_gpuLockedMinSlider, &QSlider::valueChanged, this, [this]( int v ) {
-      if ( v > m_gpuLockedMaxSlider->value() ) m_gpuLockedMaxSlider->setValue( v );
-      emit changed();
-    } );
-    connect( m_gpuLockedMaxSlider, &QSlider::valueChanged, this, [this]( int v ) {
-      if ( v < m_gpuLockedMinSlider->value() ) m_gpuLockedMinSlider->setValue( v );
-      emit changed();
-    } );
-
-    // Initial disable
-    m_gpuLockedMinSlider->setEnabled( false );
-    m_gpuLockedMaxSlider->setEnabled( false );
-    m_gpuLockedMinSpin->setEnabled( false );
-    m_gpuLockedMaxSpin->setEnabled( false );
-  }
-
-  if ( m_vramLockedClocksEnable )
-  {
-    connectLockedClocks( m_vramLockedClocksEnable,
-                         m_vramLockedMinSlider, m_vramLockedMaxSlider,
-                         m_vramLockedMinSpin, m_vramLockedMaxSpin );
-    connect( m_vramLockedMinSlider, &QSlider::valueChanged, m_vramLockedMinSpin, &QSpinBox::setValue );
-    connect( m_vramLockedMinSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_vramLockedMinSlider, &QSlider::setValue );
-    connect( m_vramLockedMaxSlider, &QSlider::valueChanged, m_vramLockedMaxSpin, &QSpinBox::setValue );
-    connect( m_vramLockedMaxSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_vramLockedMaxSlider, &QSlider::setValue );
-    connect( m_vramLockedMinSlider, &QSlider::valueChanged, this, [this]( int v ) {
-      if ( v > m_vramLockedMaxSlider->value() ) m_vramLockedMaxSlider->setValue( v );
-      emit changed();
-    } );
-    connect( m_vramLockedMaxSlider, &QSlider::valueChanged, this, [this]( int v ) {
-      if ( v < m_vramLockedMinSlider->value() ) m_vramLockedMinSlider->setValue( v );
-      emit changed();
-    } );
-
-    m_vramLockedMinSlider->setEnabled( false );
-    m_vramLockedMaxSlider->setEnabled( false );
-    m_vramLockedMinSpin->setEnabled( false );
-    m_vramLockedMaxSpin->setEnabled( false );
-  }
+  // VRAM locked clocks: bidirectional slider <-> spinbox sync
+  connect( m_vramLockedMinSlider, &QSlider::valueChanged, m_vramLockedMinSpin, &QSpinBox::setValue );
+  connect( m_vramLockedMinSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_vramLockedMinSlider, &QSlider::setValue );
+  connect( m_vramLockedMaxSlider, &QSlider::valueChanged, m_vramLockedMaxSpin, &QSpinBox::setValue );
+  connect( m_vramLockedMaxSpin, QOverload< int >::of( &QSpinBox::valueChanged ), m_vramLockedMaxSlider, &QSlider::setValue );
+  connect( m_vramLockedMinSlider, &QSlider::valueChanged, this, [this]( int v ) {
+    if ( v > m_vramLockedMaxSlider->value() ) m_vramLockedMaxSlider->setValue( v );
+    emit changed();
+  } );
+  connect( m_vramLockedMaxSlider, &QSlider::valueChanged, this, [this]( int v ) {
+    if ( v < m_vramLockedMinSlider->value() ) m_vramLockedMinSlider->setValue( v );
+    emit changed();
+  } );
 
   // Power limit slider <-> label
   if ( m_powerLimitSlider )
@@ -344,6 +308,15 @@ void GpuProfileTab::reloadGpuProfiles()
   QString prevId = m_gpuProfileCombo ? m_gpuProfileCombo->currentData().toString() : QString();
   if ( m_gpuProfileCombo )
     m_gpuProfileCombo->clear();
+
+  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
+  {
+    QJsonObject o = v.toObject();
+    QString id = o["id"].toString();
+    QString name = o["name"].toString();
+    if ( !id.isEmpty() )
+      m_gpuProfileCombo->addItem( name, id );
+  }
 
   for ( const auto &v : m_profileManager->customGpuProfilesData() )
   {
@@ -372,15 +345,25 @@ void GpuProfileTab::updateButtonStates( bool uccdConnected )
 {
   const QString id = m_gpuProfileCombo ? m_gpuProfileCombo->currentData().toString() : QString();
   const bool hasSelection = !id.isEmpty();
+  bool isBuiltin = false;
+  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
+  {
+    if ( v.isObject() && v.toObject().value( "id" ).toString() == id )
+    {
+      isBuiltin = true;
+      break;
+    }
+  }
 
   if ( m_applyButton )   m_applyButton->setEnabled( uccdConnected && m_ocAvailable );
-  if ( m_saveButton )    m_saveButton->setEnabled( hasSelection );
+  if ( m_saveButton )    m_saveButton->setEnabled( hasSelection && !isBuiltin );
   if ( m_copyButton )    m_copyButton->setEnabled( hasSelection || m_ocAvailable );
-  if ( m_removeButton )  m_removeButton->setEnabled( hasSelection );
+  if ( m_removeButton )  m_removeButton->setEnabled( hasSelection && !isBuiltin );
+  if ( m_resetButton )   m_resetButton->setEnabled( uccdConnected && m_ocAvailable );
 
   // Allow renaming custom profiles
   if ( m_gpuProfileCombo && m_gpuProfileCombo->lineEdit() )
-    m_gpuProfileCombo->lineEdit()->setReadOnly( !hasSelection );
+    m_gpuProfileCombo->lineEdit()->setReadOnly( !hasSelection || isBuiltin );
 }
 
 void GpuProfileTab::refreshOCState()
@@ -403,24 +386,36 @@ void GpuProfileTab::refreshOCState()
   m_tempLabel->setText( QString::number( state["tempC"].toInt() ) + " °C" );
   m_powerDrawLabel->setText( QString::number( state["powerDrawW"].toDouble(), 'f', 1 ) + " W" );
 
-  // Power limit range
+  // cTGP range (Profiles-page compatible semantics)
   m_powerMinW = state["powerMinW"].toDouble();
   m_powerMaxW = state["powerMaxW"].toDouble();
   m_powerDefaultW = state["powerDefaultW"].toDouble();
 
-  if ( m_powerMaxW > 0 )
+  int defaultPower = static_cast< int >( std::round( m_powerDefaultW ) );
+  if ( auto v = m_uccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
+    defaultPower = *v;
+
+  int maxPower = static_cast< int >( std::round( m_powerMaxW ) );
+  if ( auto v = m_uccdClient->getNVIDIAPowerCTRLMaxPowerLimit() )
+    maxPower = *v;
+
+  int currentOffset = 0;
+  if ( auto v = m_uccdClient->getNVIDIAPowerOffset() )
+    currentOffset = *v;
+
+  if ( defaultPower > 0 && maxPower >= defaultPower )
   {
+    const int currentPower = std::clamp( defaultPower + currentOffset, defaultPower, maxPower );
+
     m_powerLimitSlider->blockSignals( true );
-    m_powerLimitSlider->setMinimum( static_cast< int >( m_powerMinW ) );
-    m_powerLimitSlider->setMaximum( static_cast< int >( m_powerMaxW ) );
-    m_powerLimitSlider->setValue( static_cast< int >( state["powerLimitW"].toDouble() ) );
+    m_powerLimitSlider->setMinimum( defaultPower );
+    m_powerLimitSlider->setMaximum( maxPower );
+    m_powerLimitSlider->setValue( currentPower );
     m_powerLimitSlider->blockSignals( false );
-    m_powerLimitValue->setText( QString::number( state["powerLimitW"].toDouble(), 'f', 0 ) + " W" );
-    m_powerLimitRangeLabel->setText(
-      QString( "Range: %1 – %2 W  (Default: %3 W)" )
-        .arg( m_powerMinW, 0, 'f', 0 )
-        .arg( m_powerMaxW, 0, 'f', 0 )
-        .arg( m_powerDefaultW, 0, 'f', 0 ) );
+    m_powerLimitValue->setText( QString::number( currentPower ) + " W" );
+
+    m_powerDefaultW = defaultPower;
+    m_powerMaxW = maxPower;
   }
 
   // GPU clock range for locked clocks
@@ -436,7 +431,6 @@ void GpuProfileTab::refreshOCState()
     m_gpuLockedMinSpin->setMaximum( hi );
     m_gpuLockedMaxSpin->setMinimum( lo );
     m_gpuLockedMaxSpin->setMaximum( hi );
-    m_gpuLockedRangeLabel->setText( QString( "Range: %1 – %2 MHz" ).arg( lo ).arg( hi ) );
 
     // Set defaults
     m_gpuLockedMinSlider->setValue( lo );
@@ -455,7 +449,6 @@ void GpuProfileTab::refreshOCState()
     m_vramLockedMinSpin->setMaximum( hi );
     m_vramLockedMaxSpin->setMinimum( lo );
     m_vramLockedMaxSpin->setMaximum( hi );
-    m_vramLockedRangeLabel->setText( QString( "Range: %1 – %2 MHz" ).arg( lo ).arg( hi ) );
 
     m_vramLockedMinSlider->setValue( lo );
     m_vramLockedMaxSlider->setValue( hi );
@@ -465,25 +458,15 @@ void GpuProfileTab::refreshOCState()
   if ( state.contains( "gpuLockedClocks" ) )
   {
     QJsonObject lc = state["gpuLockedClocks"].toObject();
-    m_gpuLockedClocksEnable->setChecked( true );
     m_gpuLockedMinSlider->setValue( lc["min"].toInt() );
     m_gpuLockedMaxSlider->setValue( lc["max"].toInt() );
-  }
-  else
-  {
-    m_gpuLockedClocksEnable->setChecked( false );
   }
 
   if ( state.contains( "vramLockedClocks" ) )
   {
     QJsonObject lc = state["vramLockedClocks"].toObject();
-    m_vramLockedClocksEnable->setChecked( true );
     m_vramLockedMinSlider->setValue( lc["min"].toInt() );
     m_vramLockedMaxSlider->setValue( lc["max"].toInt() );
-  }
-  else
-  {
-    m_vramLockedClocksEnable->setChecked( false );
   }
 
   // Populate P-state offset rows
@@ -495,10 +478,14 @@ void GpuProfileTab::refreshOCState()
   bool offsetsSupported = state["offsetsSupported"].toBool( false );
   bool lockedSupported = state["lockedClocksSupported"].toBool( false );
 
-  if ( m_gpuLockedClocksEnable )
-    m_gpuLockedClocksEnable->setVisible( lockedSupported );
-  if ( m_vramLockedClocksEnable )
-    m_vramLockedClocksEnable->setVisible( lockedSupported );
+  m_gpuLockedMinSlider->setEnabled( lockedSupported );
+  m_gpuLockedMaxSlider->setEnabled( lockedSupported );
+  m_gpuLockedMinSpin->setEnabled( lockedSupported );
+  m_gpuLockedMaxSpin->setEnabled( lockedSupported );
+  m_vramLockedMinSlider->setEnabled( lockedSupported );
+  m_vramLockedMaxSlider->setEnabled( lockedSupported );
+  m_vramLockedMinSpin->setEnabled( lockedSupported );
+  m_vramLockedMaxSpin->setEnabled( lockedSupported );
 
   // Disable offset sliders if not supported
   for ( auto &grp : m_pstateGroups )
@@ -643,41 +630,56 @@ QString GpuProfileTab::buildProfileJSON() const
 
   // Clock offsets grouped by P-state
   QJsonArray offsets;
+  QJsonArray gpuCoreOffsets;
+  QJsonArray vramOffsets;
   for ( const auto &grp : m_pstateGroups )
   {
     QJsonObject o;
     o["pstate"] = static_cast< int >( grp.pstate );
     if ( grp.gpuRow.slider )
+    {
       o["gpuOffsetMHz"] = grp.gpuRow.slider->value();
+      QJsonObject legacyGpu;
+      legacyGpu["pstate"] = static_cast< int >( grp.pstate );
+      legacyGpu["offsetMHz"] = grp.gpuRow.slider->value();
+      gpuCoreOffsets.append( legacyGpu );
+    }
     if ( grp.vramRow.slider )
+    {
       o["vramOffsetMHz"] = grp.vramRow.slider->value();
+      QJsonObject legacyVram;
+      legacyVram["pstate"] = static_cast< int >( grp.pstate );
+      legacyVram["offsetMHz"] = grp.vramRow.slider->value();
+      vramOffsets.append( legacyVram );
+    }
     offsets.append( o );
   }
   root["offsets"] = offsets;
+  // Backward-compatible fields expected by current daemon implementation
+  root["gpuCoreOffsets"] = gpuCoreOffsets;
+  root["vramOffsets"] = vramOffsets;
 
-  // GPU locked clocks
-  if ( m_gpuLockedClocksEnable )
-  {
-    QJsonObject lc;
-    lc["enabled"] = m_gpuLockedClocksEnable->isChecked();
-    lc["min"] = m_gpuLockedMinSlider->value();
-    lc["max"] = m_gpuLockedMaxSlider->value();
-    root["gpuLockedClocks"] = lc;
-  }
+  // GPU locked clocks (only include enabled when feature is supported)
+  QJsonObject gpuLocked;
+  gpuLocked["enabled"] = m_gpuLockedMinSlider && m_gpuLockedMinSlider->isEnabled();
+  gpuLocked["min"] = m_gpuLockedMinSlider->value();
+  gpuLocked["max"] = m_gpuLockedMaxSlider->value();
+  root["gpuLockedClocks"] = gpuLocked;
 
-  // VRAM locked clocks
-  if ( m_vramLockedClocksEnable )
-  {
-    QJsonObject lc;
-    lc["enabled"] = m_vramLockedClocksEnable->isChecked();
-    lc["min"] = m_vramLockedMinSlider->value();
-    lc["max"] = m_vramLockedMaxSlider->value();
-    root["vramLockedClocks"] = lc;
-  }
+  // VRAM locked clocks (only include enabled when feature is supported)
+  QJsonObject vramLocked;
+  vramLocked["enabled"] = m_vramLockedMinSlider && m_vramLockedMinSlider->isEnabled();
+  vramLocked["min"] = m_vramLockedMinSlider->value();
+  vramLocked["max"] = m_vramLockedMaxSlider->value();
+  root["vramLockedClocks"] = vramLocked;
 
-  // Power limit
+  // cTGP profile payload (same field as Profiles page)
   if ( m_powerLimitSlider )
-    root["powerLimitW"] = m_powerLimitSlider->value();
+  {
+    QJsonObject nvidiaPowerObj;
+    nvidiaPowerObj["cTGPOffset"] = m_powerLimitSlider->value() - static_cast< int >( std::round( m_powerDefaultW ) );
+    root["nvidiaPowerCTRLProfile"] = nvidiaPowerObj;
+  }
 
   QJsonDocument doc( root );
   return QString::fromUtf8( doc.toJson( QJsonDocument::Compact ) );
@@ -781,18 +783,9 @@ void GpuProfileTab::loadProfile( const QString &json )
   }
 
   // Load GPU locked clocks
-  if ( m_gpuLockedClocksEnable && obj.contains( "gpuLockedClocks" ) )
+  if ( obj.contains( "gpuLockedClocks" ) )
   {
     QJsonObject lc = obj["gpuLockedClocks"].toObject();
-    m_gpuLockedClocksEnable->blockSignals( true );
-    m_gpuLockedClocksEnable->setChecked( lc["enabled"].toBool( false ) );
-    m_gpuLockedClocksEnable->blockSignals( false );
-
-    bool en = lc["enabled"].toBool( false );
-    m_gpuLockedMinSlider->setEnabled( en );
-    m_gpuLockedMaxSlider->setEnabled( en );
-    m_gpuLockedMinSpin->setEnabled( en );
-    m_gpuLockedMaxSpin->setEnabled( en );
 
     m_gpuLockedMinSlider->blockSignals( true );
     m_gpuLockedMinSlider->setValue( lc["min"].toInt() );
@@ -803,18 +796,9 @@ void GpuProfileTab::loadProfile( const QString &json )
   }
 
   // Load VRAM locked clocks
-  if ( m_vramLockedClocksEnable && obj.contains( "vramLockedClocks" ) )
+  if ( obj.contains( "vramLockedClocks" ) )
   {
     QJsonObject lc = obj["vramLockedClocks"].toObject();
-    m_vramLockedClocksEnable->blockSignals( true );
-    m_vramLockedClocksEnable->setChecked( lc["enabled"].toBool( false ) );
-    m_vramLockedClocksEnable->blockSignals( false );
-
-    bool en = lc["enabled"].toBool( false );
-    m_vramLockedMinSlider->setEnabled( en );
-    m_vramLockedMaxSlider->setEnabled( en );
-    m_vramLockedMinSpin->setEnabled( en );
-    m_vramLockedMaxSpin->setEnabled( en );
 
     m_vramLockedMinSlider->blockSignals( true );
     m_vramLockedMinSlider->setValue( lc["min"].toInt() );
@@ -824,8 +808,20 @@ void GpuProfileTab::loadProfile( const QString &json )
     m_vramLockedMaxSlider->blockSignals( false );
   }
 
-  // Load power limit
-  if ( obj.contains( "powerLimitW" ) && m_powerLimitSlider )
+  // Load cTGP offset profile data (preferred)
+  if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj["nvidiaPowerCTRLProfile"].isObject() && m_powerLimitSlider )
+  {
+    QJsonObject gpuObj = obj["nvidiaPowerCTRLProfile"].toObject();
+    int offset = gpuObj["cTGPOffset"].toInt( 0 );
+    int valueW = static_cast< int >( std::round( m_powerDefaultW ) ) + offset;
+
+    m_powerLimitSlider->blockSignals( true );
+    m_powerLimitSlider->setValue( std::clamp( valueW, m_powerLimitSlider->minimum(), m_powerLimitSlider->maximum() ) );
+    m_powerLimitSlider->blockSignals( false );
+    m_powerLimitValue->setText( QString::number( m_powerLimitSlider->value() ) + " W" );
+  }
+  // Backward compat with older GPU profiles
+  else if ( obj.contains( "powerLimitW" ) && m_powerLimitSlider )
   {
     m_powerLimitSlider->blockSignals( true );
     m_powerLimitSlider->setValue( static_cast< int >( obj["powerLimitW"].toDouble() ) );
@@ -892,7 +888,33 @@ void GpuProfileTab::onResetClicked()
 
   if ( reply == QMessageBox::Yes )
   {
-    if ( m_uccdClient->resetNvidiaGpuOCAll( 0 ) )
+    if ( m_uccdClient->getCTGPAdjustmentSupported().value_or( false ) )
+      (void)m_uccdClient->setNVIDIAPowerOffset( 0 );
+
+    bool ok = m_uccdClient->resetNvidiaGpuOCAll( 0 );
+
+    // Fallback for platforms where monolithic reset reports failure
+    // due to partially unsupported operations.
+    if ( !ok )
+    {
+      bool anySucceeded = false;
+
+      if ( m_uccdClient->resetNvidiaAllClockOffsets( 0 ) )
+        anySucceeded = true;
+
+      if ( m_uccdClient->resetNvidiaGpuLockedClocks( 0 ) )
+        anySucceeded = true;
+
+      if ( m_uccdClient->resetNvidiaVramLockedClocks( 0 ) )
+        anySucceeded = true;
+
+      if ( m_uccdClient->resetNvidiaGpuPowerLimit( 0 ) )
+        anySucceeded = true;
+
+      ok = anySucceeded;
+    }
+
+    if ( ok )
     {
       refreshOCState();
       if ( auto *mw = qobject_cast< QMainWindow * >( window() ) )
@@ -906,6 +928,68 @@ void GpuProfileTab::onResetClicked()
       QMessageBox::warning( this, "Error", "Failed to reset GPU OC settings." );
     }
   }
+}
+
+bool GpuProfileTab::ensureOverclockWarningAcknowledged()
+{
+  if ( !m_ocAvailable )
+    return false;
+
+  if ( isOverclockWarningAcknowledged() )
+    return true;
+
+  return showOverclockWarningDialog();
+}
+
+bool GpuProfileTab::isOverclockWarningAcknowledged() const
+{
+  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+  return settings.value( "gpu/ocWarningAcknowledged", false ).toBool();
+}
+
+void GpuProfileTab::setOverclockWarningAcknowledged( bool acknowledged )
+{
+  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+  settings.setValue( "gpu/ocWarningAcknowledged", acknowledged );
+  settings.sync();
+}
+
+bool GpuProfileTab::showOverclockWarningDialog()
+{
+  QDialog dialog( this );
+  dialog.setWindowTitle( "GPU Overclocking Warning" );
+  dialog.setModal( true );
+
+  QVBoxLayout *layout = new QVBoxLayout( &dialog );
+  QLabel *msg = new QLabel(
+    "Overclocking your GPU may cause instability, crashes, or hardware damage. "
+    "Changes take effect immediately when applied." );
+  msg->setWordWrap( true );
+  layout->addWidget( msg );
+
+  QCheckBox *ack = new QCheckBox( "I understand" );
+  layout->addWidget( ack );
+
+  QDialogButtonBox *buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel );
+  QPushButton *okButton = buttons->button( QDialogButtonBox::Ok );
+  if ( okButton )
+    okButton->setEnabled( false );
+
+  connect( ack, &QCheckBox::toggled, this, [okButton]( bool checked ) {
+    if ( okButton )
+      okButton->setEnabled( checked );
+  } );
+  connect( buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept );
+  connect( buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject );
+  layout->addWidget( buttons );
+
+  if ( dialog.exec() == QDialog::Accepted && ack->isChecked() )
+  {
+    setOverclockWarningAcknowledged( true );
+    return true;
+  }
+
+  return false;
 }
 
 } // namespace ucc

@@ -26,8 +26,8 @@ private slots:
               std::string( "cpuTemp" ) );
     QCOMPARE( std::string( metricName( MetricId::GpuPower ) ),
               std::string( "gpuPower" ) );
-    QCOMPARE( std::string( metricName( MetricId::WaterCoolerPumpLevel ) ),
-              std::string( "waterCoolerPumpLevel" ) );
+    QCOMPARE( std::string( metricName( MetricId::GpuCoreVoltage ) ),
+              std::string( "gpuCoreVoltage" ) );
   }
 
   void metricName_sentinel()

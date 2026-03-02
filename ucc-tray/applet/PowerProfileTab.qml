@@ -132,6 +132,42 @@ PC3.ScrollView {
                 }
             }
 
+            // ── GPU OC Profile ──
+            PC3.Label {
+                text: i18n("GPU OC profile:")
+                opacity: 0.7
+                visible: powerTab.backend.gpuProfileIds.length > 0
+            }
+            PC3.ComboBox {
+                id: gpuCombo
+                Layout.fillWidth: true
+                model: powerTab.backend.gpuProfileNames
+                visible: powerTab.backend.gpuProfileIds.length > 0
+                currentIndex: {
+                    var idx = powerTab.backend.gpuProfileIds.indexOf(powerTab.backend.activeProfileGpuId)
+                    return idx >= 0 ? idx : 0
+                }
+
+                Connections {
+                    target: powerTab.backend
+                    function onActiveProfileChanged() {
+                        var idx = powerTab.backend.gpuProfileIds.indexOf(powerTab.backend.activeProfileGpuId)
+                        gpuCombo.currentIndex = idx >= 0 ? idx : 0
+                    }
+                    function onGpuProfilesChanged() {
+                        Qt.callLater(function() {
+                            var idx = powerTab.backend.gpuProfileIds.indexOf(powerTab.backend.activeProfileGpuId)
+                            gpuCombo.currentIndex = idx >= 0 ? idx : 0
+                        })
+                    }
+                }
+
+                onActivated: function(index) {
+                    var id = powerTab.backend.gpuProfileIds[index]
+                    if (id) powerTab.backend.setActiveGpuProfile(id)
+                }
+            }
+
             PC3.Label {
                 text: i18n("Switching profile applies it immediately.")
                 opacity: 0.6

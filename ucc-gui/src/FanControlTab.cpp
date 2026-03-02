@@ -81,8 +81,6 @@ void FanControlTab::setupUI()
 
   // ── Top bar: fan profile selection ──
   QHBoxLayout *selectLayout = new QHBoxLayout();
-  QLabel *profileLabel = new QLabel( "Active Profile:" );
-  profileLabel->setStyleSheet( "font-weight: bold;" );
   m_fanProfileCombo = new QComboBox();
   m_fanProfileCombo->setEditable( true );
   m_fanProfileCombo->setInsertPolicy( QComboBox::NoInsert );
@@ -120,7 +118,6 @@ void FanControlTab::setupUI()
   m_removeFanProfileButton = new QPushButton( "Remove" );
   m_removeFanProfileButton->setMaximumWidth( 70 );
 
-  selectLayout->addWidget( profileLabel );
   selectLayout->addWidget( m_fanProfileCombo, 1 );
   selectLayout->addWidget( m_applyFanProfilesButton );
   selectLayout->addWidget( m_saveFanProfilesButton );

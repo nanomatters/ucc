@@ -322,7 +322,7 @@ void MainWindow::onKeyboardProfileChanged(const QString& profileId)
 
   if ( doc.isObject() )
   {
-    QJsonObject obj = doc.object();
+  QJsonObject obj = doc.object();
 
     // Check for top-level brightness (new format)
     if ( obj.contains( "brightness" ) )

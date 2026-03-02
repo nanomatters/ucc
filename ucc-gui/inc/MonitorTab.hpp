@@ -58,7 +58,8 @@ enum class MetricGroup
   Temp,   ///< Temperature (°C)
   Duty,   ///< Fan duty cycle (%)
   Power,  ///< Power consumption (W)
-  Freq    ///< Clock frequency (MHz)
+  Freq,   ///< Clock frequency (MHz)
+  Volt    ///< Core voltage (mV)
 };
 
 /**
@@ -93,6 +94,7 @@ private:
   void setupDutyChart();
   void setupPowerChart();
   void setupFrequencyChart();
+  void setupVoltageChart();
   void setupControls();
   void setupUnifiedChart();
 
@@ -159,21 +161,25 @@ private:
   QChart *m_dutyChart     = nullptr;
   QChart *m_powerChart    = nullptr;
   QChart *m_freqChart     = nullptr;
+  QChart *m_voltChart     = nullptr;
 
   QChartView *m_tempChartView  = nullptr;
   QChartView *m_dutyChartView  = nullptr;
   QChartView *m_powerChartView = nullptr;
   QChartView *m_freqChartView  = nullptr;
+  QChartView *m_voltChartView  = nullptr;
 
   QDateTimeAxis *m_tempXAxis  = nullptr;
   QDateTimeAxis *m_dutyXAxis  = nullptr;
   QDateTimeAxis *m_powerXAxis = nullptr;
   QDateTimeAxis *m_freqXAxis  = nullptr;
+  QDateTimeAxis *m_voltXAxis  = nullptr;
 
   QValueAxis *m_tempYAxis  = nullptr;
   QValueAxis *m_dutyYAxis  = nullptr;
   QValueAxis *m_powerYAxis = nullptr;
   QValueAxis *m_freqYAxis  = nullptr;
+  QValueAxis *m_voltYAxis  = nullptr;
 
   // --- Unified "all-in-one" chart ---
   QChart          *m_unifiedChart     = nullptr;

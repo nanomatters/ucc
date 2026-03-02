@@ -22,11 +22,12 @@
 #include <syslog.h>
 #include <sstream>
 
-NvidiaOCWorker::NvidiaOCWorker( std::function< void( const std::string & ) > logFunction )
-  : m_logFunction( std::move( logFunction ) )
+NvidiaOCWorker::NvidiaOCWorker( std::shared_ptr< NvmlWrapper > nvml,
+                                std::function< void( const std::string & ) > logFunction )
+  : m_nvml( std::move( nvml ) )
+  , m_logFunction( std::move( logFunction ) )
 {
-  m_nvml = std::make_unique< NvmlWrapper >();
-  if ( m_nvml->isInitialized() )
+  if ( m_nvml && m_nvml->isInitialized() )
     log( "NvidiaOCWorker: NVML initialised, " + std::to_string( m_nvml->deviceCount() ) + " GPU(s)" );
   else
     log( "NvidiaOCWorker: NVML not available" );
@@ -97,6 +98,7 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
       gpu["currentOffset"] = pair.first->currentOffset;
       gpu["minOffset"] = pair.first->minOffset;
       gpu["maxOffset"] = pair.first->maxOffset;
+      gpu["offsetWritable"] = pair.first->offsetWritable;
       o["gpu"] = gpu;
     }
     if ( pair.second )
@@ -107,6 +109,7 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
       vram["currentOffset"] = pair.second->currentOffset;
       vram["minOffset"] = pair.second->minOffset;
       vram["maxOffset"] = pair.second->maxOffset;
+      vram["offsetWritable"] = pair.second->offsetWritable;
       o["vram"] = vram;
     }
 
@@ -144,6 +147,10 @@ bool NvidiaOCWorker::setClockOffset( unsigned int deviceIndex,
 
   auto ct = static_cast< nvml::nvmlClockType_t >( clockType );
   auto ps = static_cast< nvml::nvmlPstates_t >( pstate );
+
+  if ( !m_nvml->isClockOffsetWritable( deviceIndex, ct, ps ) && offsetMHz == 0 )
+    return true;
+
   bool ok = m_nvml->setClockOffset( deviceIndex, ct, ps, offsetMHz );
   if ( ok )
     log( "Set clock offset: type=" + std::to_string( clockType ) +
@@ -230,30 +237,82 @@ bool NvidiaOCWorker::applyGpuOCProfile( const std::string &profileJSON, unsigned
   QJsonObject obj = doc.object();
   bool anyFailed = false;
 
+  auto applyOffsets = [this, deviceIndex, &anyFailed]( const QJsonArray &arr,
+                                                        unsigned int clockType,
+                                                        const char *name ) {
+    bool requestedNonZero = false;
+    bool appliedNonZero = false;
+    bool requestedP0NonZero = false;
+    bool appliedP0NonZero = false;
+
+    auto applyEntry = [this, deviceIndex, clockType, name,
+                       &requestedNonZero, &appliedNonZero,
+                       &requestedP0NonZero, &appliedP0NonZero]( const QJsonObject &o ) {
+      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
+      const int offset = o["offsetMHz"].toInt();
+
+      const bool ok = setClockOffset( deviceIndex, clockType, ps, offset );
+      if ( ok && offset != 0 )
+      {
+        appliedNonZero = true;
+        if ( ps == 0 )
+          appliedP0NonZero = true;
+      }
+
+      if ( offset != 0 )
+      {
+        requestedNonZero = true;
+        if ( ps == 0 )
+          requestedP0NonZero = true;
+
+        if ( !ok )
+        {
+          log( std::string( "Offset write rejected for " ) + name +
+               " pstate=" + std::to_string( ps ) +
+               " offset=" + std::to_string( offset ) + " MHz" );
+        }
+      }
+    };
+
+    // Apply P0 first when present so user-requested performance-state offset
+    // is prioritized and its failure is visible to the caller.
+    for ( const auto &v : arr )
+    {
+      QJsonObject o = v.toObject();
+      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
+      if ( ps == 0 )
+        applyEntry( o );
+    }
+
+    for ( const auto &v : arr )
+    {
+      QJsonObject o = v.toObject();
+      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
+      if ( ps != 0 )
+        applyEntry( o );
+    }
+
+    if ( requestedP0NonZero && !appliedP0NonZero )
+      anyFailed = true;
+
+    if ( requestedNonZero && !appliedNonZero )
+      anyFailed = true;
+  };
+
   // Apply GPU core offsets
   if ( obj.contains( "gpuCoreOffsets" ) && obj["gpuCoreOffsets"].isArray() )
   {
-    for ( const auto &v : obj["gpuCoreOffsets"].toArray() )
-    {
-      QJsonObject o = v.toObject();
-      unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
-      int offset = o["offsetMHz"].toInt();
-      if ( !setClockOffset( deviceIndex, nvml::NVML_CLOCK_GRAPHICS, ps, offset ) )
-        anyFailed = true;
-    }
+    applyOffsets( obj["gpuCoreOffsets"].toArray(),
+                  nvml::NVML_CLOCK_GRAPHICS,
+                  "graphics" );
   }
 
   // Apply VRAM offsets
   if ( obj.contains( "vramOffsets" ) && obj["vramOffsets"].isArray() )
   {
-    for ( const auto &v : obj["vramOffsets"].toArray() )
-    {
-      QJsonObject o = v.toObject();
-      unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
-      int offset = o["offsetMHz"].toInt();
-      if ( !setClockOffset( deviceIndex, nvml::NVML_CLOCK_MEM, ps, offset ) )
-        anyFailed = true;
-    }
+    applyOffsets( obj["vramOffsets"].toArray(),
+                  nvml::NVML_CLOCK_MEM,
+                  "memory" );
   }
 
   // Apply GPU locked clocks

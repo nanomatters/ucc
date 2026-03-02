@@ -62,13 +62,8 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Metric definitions — device-based colour palette
-//   CPU  = shades of red
-//   dGPU = shades of blue
-//   iGPU = shades of grey (neutral, distinct from coloured devices)
-//   WC   = shades of green
-// Within each device the hues are close but differ in brightness/saturation
-// so individual metrics remain easily distinguishable.
+// Metric definitions — higher-contrast palette with more greens to improve
+// readability between neighbouring lines.
 // ---------------------------------------------------------------------------
 struct MetricDef
 {
@@ -78,28 +73,21 @@ struct MetricDef
   MetricGroup group;
 };
 
-static constexpr int METRIC_COUNT = 13;
+static constexpr int METRIC_COUNT = 10;
 
 // Order matches MetricId enum in MetricsHistoryStore.hpp
 static const MetricDef kMetrics[ METRIC_COUNT ] =
 {
-  // ── CPU (reds) ─────────────────────────────────────────────────────
-  { "cpuTemp",             "CPU Temp",            QColor( 200,  30,  30 ), MetricGroup::Temp  },
-  { "cpuFanDuty",          "CPU Fan Duty",        QColor( 255,  80,  80 ), MetricGroup::Duty  },
-  { "cpuPower",            "CPU Power",           QColor( 180,  20,  60 ), MetricGroup::Power },
-  { "cpuFrequency",        "CPU Frequency",       QColor( 255, 150, 150 ), MetricGroup::Freq  },
-  // ── dGPU (blues) ──────────────────────────────────────────────────
-  { "gpuTemp",             "dGPU Temp",           QColor(  30, 140, 255 ), MetricGroup::Temp  },
-  { "gpuFanDuty",          "dGPU Fan Duty",       QColor(  80, 120, 180 ), MetricGroup::Duty  },
-  { "gpuPower",            "dGPU Power",          QColor(  20, 100, 130 ), MetricGroup::Power },
-  { "gpuFrequency",        "dGPU Frequency",      QColor( 100, 100, 220 ), MetricGroup::Freq  },
-  // ── iGPU (greys) ──────────────────────────────────────────────────
-  { "igpuTemp",            "iGPU Temp",           QColor( 220, 220, 220 ), MetricGroup::Temp  },
-  { "igpuPower",           "iGPU Power",          QColor( 160, 160, 160 ), MetricGroup::Power },
-  { "igpuFrequency",       "iGPU Frequency",      QColor( 100, 100, 100 ), MetricGroup::Freq  },
-  // ── Water Cooler (greens) ─────────────────────────────────────────
-  { "waterCoolerFanDuty",  "WC Fan Duty",         QColor(  30, 160,  40 ), MetricGroup::Duty  },
-  { "waterCoolerPumpLevel","WC Pump Level",       QColor(  60, 230,  80 ), MetricGroup::Duty  },
+  { "cpuTemp",             "CPU Temp",            QColor( 124, 179, 66 ),  MetricGroup::Temp  },
+  { "cpuFanDuty",          "CPU Fan Duty",        QColor( 255, 193, 7 ),   MetricGroup::Duty  },
+  { "cpuPower",            "CPU Power",           QColor( 102, 187, 106 ), MetricGroup::Power },
+  { "cpuFrequency",        "CPU Frequency",       QColor( 0, 200, 83 ),    MetricGroup::Freq  },
+  { "gpuTemp",             "dGPU Temp",           QColor( 0, 230, 118 ),   MetricGroup::Temp  },
+  { "gpuFanDuty",          "dGPU Fan Duty",       QColor( 0, 188, 212 ),   MetricGroup::Duty  },
+  { "gpuPower",            "dGPU Power",          QColor( 171, 71, 188 ),  MetricGroup::Power },
+  { "gpuFrequency",        "dGPU Frequency",      QColor( 255, 167, 38 ),  MetricGroup::Freq  },
+  { "gpuVramFrequency",    "dGPU VRAM Freq",      QColor( 46, 204, 113 ),  MetricGroup::Freq  },
+  { "gpuCoreVoltage",      "dGPU Core Voltage",   QColor( 174, 234, 0 ),   MetricGroup::Volt  },
 };
 
 // ---------------------------------------------------------------------------
@@ -118,6 +106,7 @@ double MonitorTab::metricFromNormalisedScale( double normalisedValue, MetricGrou
     case MetricGroup::Duty:  return normalisedValue;                     // already %
     case MetricGroup::Power: return normalisedValue / (100.0 / m_maxPowerW);  // 0–100 → 0–m_maxPowerW W
     case MetricGroup::Freq:  return normalisedValue / (100.0 / 6000.0);  // 0–100 → 0–6000 MHz
+    case MetricGroup::Volt:  return normalisedValue / (100.0 / 1500.0);  // 0–100 → 0–1500 mV
   }
   return normalisedValue;
 }
@@ -134,6 +123,7 @@ double MonitorTab::metricToNormalisedScale( MetricGroup g )
     case MetricGroup::Duty:  return 1.0;             // already %
     case MetricGroup::Power: return 100.0 / m_maxPowerW;  // 0–m_maxPowerW W → 0–100
     case MetricGroup::Freq:  return 100.0 / 6000.0;  // 0–6000 MHz→ 0–100
+    case MetricGroup::Volt:  return 100.0 / 1500.0;  // 0–1500 mV → 0–100
   }
   return 1.0;
 }
@@ -146,6 +136,7 @@ static const char *metricGroupUnit( MetricGroup g )
     case MetricGroup::Duty:  return "%";
     case MetricGroup::Power: return "W";
     case MetricGroup::Freq:  return "MHz";
+    case MetricGroup::Volt:  return "mV";
   }
   return "";
 }
@@ -340,11 +331,13 @@ void MonitorTab::setupUI()
   setupDutyChart();
   setupPowerChart();
   setupFrequencyChart();
+  setupVoltageChart();
 
   chartsLayout->addWidget( m_tempChartView, 1 );
   chartsLayout->addWidget( m_dutyChartView, 1 );
   chartsLayout->addWidget( m_powerChartView, 1 );
   chartsLayout->addWidget( m_freqChartView, 1 );
+  chartsLayout->addWidget( m_voltChartView, 1 );
 
   // Wrap the per-group charts in a scroll area so the window can be
   // resized smaller than the combined minimum height of 4 charts.
@@ -372,6 +365,7 @@ void MonitorTab::setupUI()
   installHoverCallout( m_dutyChart );
   installHoverCallout( m_powerChart );
   installHoverCallout( m_freqChart );
+  installHoverCallout( m_voltChart );
   // Unified chart hover is installed lazily in setUnifiedMode()
   // because its series don't exist yet at this point.
 
@@ -730,6 +724,7 @@ QChart *MonitorTab::chartForGroup( MetricGroup g ) const
     case MetricGroup::Duty:  return m_dutyChart;
     case MetricGroup::Power: return m_powerChart;
     case MetricGroup::Freq:  return m_freqChart;
+    case MetricGroup::Volt:  return m_voltChart;
   }
   return m_tempChart;
 }
@@ -1677,6 +1672,25 @@ void MonitorTab::setupFrequencyChart()
   m_freqChartView = createChartView( m_freqChart );
 }
 
+void MonitorTab::setupVoltageChart()
+{
+  m_voltChart = createChart();
+  m_voltXAxis = createXAxis();
+  m_voltYAxis = createYAxis( "Core Voltage (mV)", 0, 1500 );
+  m_voltChart->addAxis( m_voltXAxis, Qt::AlignBottom );
+  m_voltChart->addAxis( m_voltYAxis, Qt::AlignLeft );
+
+  for ( const auto &md : kMetrics )
+  {
+    if ( md.group != MetricGroup::Volt ) continue;
+    auto *s = m_seriesMap[ md.key ].series;
+    m_voltChart->addSeries( s );
+    s->attachAxis( m_voltXAxis );
+    s->attachAxis( m_voltYAxis );
+  }
+  m_voltChartView = createChartView( m_voltChart );
+}
+
 // ---------------------------------------------------------------------------
 // Incremental data fetch
 // ---------------------------------------------------------------------------
@@ -1695,6 +1709,7 @@ void MonitorTab::fetchData()
   m_dutyChartView->setUpdatesEnabled( false );
   m_powerChartView->setUpdatesEnabled( false );
   m_freqChartView->setUpdatesEnabled( false );
+  m_voltChartView->setUpdatesEnabled( false );
   m_unifiedChartView->setUpdatesEnabled( false );
 
   applyBinaryData( *result );
@@ -1708,6 +1723,7 @@ void MonitorTab::fetchData()
   m_dutyChartView->setUpdatesEnabled( true );
   m_powerChartView->setUpdatesEnabled( true );
   m_freqChartView->setUpdatesEnabled( true );
+  m_voltChartView->setUpdatesEnabled( true );
   m_unifiedChartView->setUpdatesEnabled( true );
 
   // Refresh floating crosshair labels so they don't lag behind the scrolling data
@@ -1859,6 +1875,7 @@ void MonitorTab::updateAxes()
     setRange( m_dutyXAxis );
     setRange( m_powerXAxis );
     setRange( m_freqXAxis );
+    setRange( m_voltXAxis );
   }
   else
   {
@@ -1879,6 +1896,7 @@ void MonitorTab::updateGroupChartVisibility()
     { MetricGroup::Duty,  m_dutyChartView  },
     { MetricGroup::Power, m_powerChartView },
     { MetricGroup::Freq,  m_freqChartView  },
+    { MetricGroup::Volt,  m_voltChartView  },
   };
 
   for ( const auto &[group, view] : groupViews )

@@ -290,6 +290,7 @@ private:
 // ============================================================================
 
 HardwareMonitorWorker::HardwareMonitorWorker(
+  std::shared_ptr< NvmlWrapper > nvml,
   CpuPowerCallback cpuPowerUpdateCallback,
   std::function< bool() > getSensorDataCollectionStatus,
   std::function< void( const std::string & ) > setPrimeStateCallback,
@@ -297,6 +298,7 @@ HardwareMonitorWorker::HardwareMonitorWorker(
   : DaemonWorker( std::chrono::milliseconds( 800 ), false )
   , m_gpuDetector()
   , m_deviceCounts( m_gpuDetector.detectGpuDevices() )
+  , m_nvml( std::move( nvml ) )
   , m_gpuDataCallback( nullptr )
   , m_hwmonIGpuRetryCount( 3 )
   , m_hwmonDGpuRetryCount( 3 )
@@ -597,7 +599,7 @@ DGpuInfo HardwareMonitorWorker::getDGpuValues() noexcept
   DGpuInfo values{};
   bool metricsUsage = true;
 
-  if ( m_deviceCounts.nvidiaCount == 1 and m_nvml.isAvailable() and metricsUsage )
+  if ( m_deviceCounts.nvidiaCount == 1 and m_nvml->isAvailable() and metricsUsage )
   {
     values = getNvidiaDGpuValues();
   }
@@ -613,58 +615,64 @@ DGpuInfo HardwareMonitorWorker::getDGpuValues() noexcept
 
 DGpuInfo HardwareMonitorWorker::getNvidiaDGpuValues() const noexcept
 {
-  if ( !m_nvml.isAvailable() )
+  if ( !m_nvml->isAvailable() )
     return DGpuInfo{};
 
   DGpuInfo values{};
 
-  if ( auto v = m_nvml.getTemperatureDegC( 0 ) )
+  if ( auto v = m_nvml->getTemperatureDegC( 0 ) )
     values.m_temp = static_cast< double >( *v );
 
-  if ( auto v = m_nvml.getPowerDrawW( 0 ) )
+  if ( auto v = m_nvml->getPowerDrawW( 0 ) )
     values.m_powerDraw = *v;
 
-  if ( auto v = m_nvml.getPowerMaxLimitW( 0 ) )
+  if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
     values.m_maxPowerLimit = *v;
 
-  if ( auto v = m_nvml.getEnforcedPowerLimitW( 0 ) )
+  if ( auto v = m_nvml->getEnforcedPowerLimitW( 0 ) )
     values.m_enforcedPowerLimit = *v;
 
-  if ( auto v = m_nvml.getGpuClockMHz( 0 ) )
+  if ( auto v = m_nvml->getGpuClockMHz( 0 ) )
     values.m_coreFrequency = static_cast< double >( *v );
 
-  if ( auto v = m_nvml.getMaxGpuClockMHz( 0 ) )
+  if ( auto v = m_nvml->getMemClockMHz( 0 ) )
+    values.m_vramFrequency = static_cast< double >( *v );
+
+  if ( auto v = m_nvml->getMaxGpuClockMHz( 0 ) )
     values.m_maxCoreFrequency = static_cast< double >( *v );
 
-  if ( auto v = m_nvml.getComputeUtilPct( 0 ) )
+  if ( auto v = m_nvml->getComputeUtilPct( 0 ) )
     values.m_computeUtilPct = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getMemoryUtilPct( 0 ) )
+  if ( auto v = m_nvml->getMemoryUtilPct( 0 ) )
     values.m_memoryUtilPct = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getVramUsedMiB( 0 ) )
+  if ( auto v = m_nvml->getVramUsedMiB( 0 ) )
     values.m_vramUsedMiB = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getVramTotalMiB( 0 ) )
+  if ( auto v = m_nvml->getVramTotalMiB( 0 ) )
     values.m_vramTotalMiB = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getPerfLimitReason( 0 ) )
+  if ( auto v = m_nvml->getPerfLimitReason( 0 ) )
     values.m_perfLimitReason = *v;
 
-  if ( auto v = m_nvml.getEncoderUtilPct( 0 ) )
+  if ( auto v = m_nvml->getEncoderUtilPct( 0 ) )
     values.m_encoderUtilPct = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getDecoderUtilPct( 0 ) )
+  if ( auto v = m_nvml->getDecoderUtilPct( 0 ) )
     values.m_decoderUtilPct = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getCurrentPstate( 0 ) )
+  if ( auto v = m_nvml->getCurrentPstate( 0 ) )
     values.m_currentPstate = static_cast< int >( *v );
 
-  if ( auto v = m_nvml.getGrClockOffsetMHz( 0 ) )
+  if ( auto v = m_nvml->getGrClockOffsetMHz( 0 ) )
     values.m_grClockOffsetMHz = *v;
 
-  if ( auto v = m_nvml.getMemClockOffsetMHz( 0 ) )
+  if ( auto v = m_nvml->getMemClockOffsetMHz( 0 ) )
     values.m_memClockOffsetMHz = *v;
+
+  if ( auto v = m_nvml->getCoreVoltageMv( 0 ) )
+    values.m_coreVoltageMv = static_cast< int >( *v );
 
   return values;
 }

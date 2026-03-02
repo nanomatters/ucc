@@ -18,7 +18,6 @@
 #include <QWidget>
 #include <QComboBox>
 #include <QPushButton>
-#include <QCheckBox>
 #include <QSlider>
 #include <QSpinBox>
 #include <QLabel>
@@ -29,6 +28,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <QSettings>
 #include <vector>
 
 #include "../../libucc-dbus/UccdClient.hpp"
@@ -86,7 +86,7 @@ signals:
   void removeRequested();
   void gpuProfileChanged( const QString &gpuProfileId );
   void gpuProfileRenamed( const QString &oldName, const QString &newName );
-  void changed();   ///< emitted when any slider/checkbox is modified
+  void changed();   ///< emitted when any slider/spin is modified
 
 private slots:
   void onGpuProfileComboRenamed();
@@ -98,6 +98,10 @@ private:
   void connectSignals();
   void populatePStates( const QJsonArray &pstates );
   void clearPStateWidgets();
+  bool ensureOverclockWarningAcknowledged();
+  bool isOverclockWarningAcknowledged() const;
+  void setOverclockWarningAcknowledged( bool acknowledged );
+  bool showOverclockWarningDialog();
 
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;
@@ -134,24 +138,19 @@ private:
   QVBoxLayout *m_pstatesLayout = nullptr;
 
   // Locked clocks
-  QCheckBox *m_gpuLockedClocksEnable = nullptr;
   QSlider *m_gpuLockedMinSlider = nullptr;
   QSlider *m_gpuLockedMaxSlider = nullptr;
   QSpinBox *m_gpuLockedMinSpin = nullptr;
   QSpinBox *m_gpuLockedMaxSpin = nullptr;
-  QLabel *m_gpuLockedRangeLabel = nullptr;
 
-  QCheckBox *m_vramLockedClocksEnable = nullptr;
   QSlider *m_vramLockedMinSlider = nullptr;
   QSlider *m_vramLockedMaxSlider = nullptr;
   QSpinBox *m_vramLockedMinSpin = nullptr;
   QSpinBox *m_vramLockedMaxSpin = nullptr;
-  QLabel *m_vramLockedRangeLabel = nullptr;
 
   // Power limit
   QSlider *m_powerLimitSlider = nullptr;
   QLabel *m_powerLimitValue = nullptr;
-  QLabel *m_powerLimitRangeLabel = nullptr;
   double m_powerMinW = 0.0;
   double m_powerMaxW = 0.0;
   double m_powerDefaultW = 0.0;
@@ -161,7 +160,6 @@ private:
   QPushButton *m_resetButton = nullptr;
 
   // Warnings
-  QLabel *m_warningLabel = nullptr;
   QLabel *m_notAvailableLabel = nullptr;
 };
 

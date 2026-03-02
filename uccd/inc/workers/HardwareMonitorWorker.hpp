@@ -47,6 +47,7 @@ struct DGpuInfo
 {
   double m_temp = -1.0;
   double m_coreFrequency = -1.0;
+  double m_vramFrequency = -1.0;
   double m_maxCoreFrequency = -1.0;
   double m_powerDraw = -1.0;
   double m_maxPowerLimit = -1.0;
@@ -64,6 +65,7 @@ struct DGpuInfo
   int m_currentPstate  = -1;     ///< Current P-state index (0–15), or -1 if unknown
   int m_grClockOffsetMHz  = INT_MIN; ///< Graphics-clock offset at current P-state, INT_MIN = unavailable
   int m_memClockOffsetMHz = INT_MIN; ///< Memory-clock offset at current P-state, INT_MIN = unavailable
+  int m_coreVoltageMv = -1;      ///< Core voltage in mV, or -1
 
   void print() const noexcept;
 };
@@ -279,6 +281,7 @@ public:
    * @param setPrimeStateCallback Called with prime state string when updated
    */
   explicit HardwareMonitorWorker(
+    std::shared_ptr< NvmlWrapper > nvml,
     CpuPowerCallback cpuPowerUpdateCallback,
     std::function< bool() > getSensorDataCollectionStatus,
     std::function< void( const std::string & ) > setPrimeStateCallback,
@@ -346,7 +349,7 @@ private:
   // --- GPU state ---
   GpuDeviceDetector m_gpuDetector;
   GpuDeviceCounts m_deviceCounts;
-  NvmlWrapper m_nvml; ///< NVML API wrapper (no-op if libnvidia-ml not present)
+  std::shared_ptr< NvmlWrapper > m_nvml; ///< NVML API wrapper (shared, no-op if libnvidia-ml not present)
   GpuDataCallback m_gpuDataCallback;
   std::optional< std::string > m_amdIGpuHwmonPath;
   std::optional< std::string > m_amdDGpuHwmonPath;

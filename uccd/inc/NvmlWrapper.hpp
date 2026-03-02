@@ -123,6 +123,7 @@ struct NvmlPStateClockInfo
   int currentOffset;       ///< Currently applied clock offset in MHz
   int minOffset;           ///< Minimum allowed clock offset in MHz
   int maxOffset;           ///< Maximum allowed clock offset in MHz
+  bool offsetWritable = false; ///< Whether writing offset is supported for this clock/P-state
 };
 
 /**
@@ -168,7 +169,7 @@ struct NvmlOCState
 class NvmlWrapper
 {
 public:
-  NvmlWrapper();
+  explicit NvmlWrapper( bool enableOcFeatures = true );
   ~NvmlWrapper();
 
   // Non-copyable, non-movable
@@ -245,6 +246,11 @@ public:
    */
   bool resetPowerLimit( unsigned int deviceIndex );
 
+  /** @brief Whether offset writes are known to be writable for this clock/P-state. */
+  [[nodiscard]] bool isClockOffsetWritable( unsigned int deviceIndex,
+                                            nvml::nvmlClockType_t clockType,
+                                            nvml::nvmlPstates_t pstate ) const;
+
   // ---- Live monitoring getters (replace nvidia-smi subprocess calls) ----
 
   /** @brief GPU temperature in °C. */
@@ -267,6 +273,12 @@ public:
 
   /** @brief Maximum (boost) graphics clock in MHz. */
   [[nodiscard]] std::optional< unsigned int > getMaxGpuClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current memory clock in MHz. */
+  [[nodiscard]] std::optional< unsigned int > getMemClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current core voltage in mV (via NvAPI), if available. */
+  [[nodiscard]] std::optional< unsigned int > getCoreVoltageMv( unsigned int deviceIndex ) const noexcept;
 
   /** @brief GPU compute utilization in percent (0–100). */
   [[nodiscard]] std::optional< unsigned int > getComputeUtilPct( unsigned int deviceIndex ) const noexcept;
@@ -302,14 +314,29 @@ public:
   bool isInitialized() const { return m_initialized; }
 
 private:
+  struct NvApiVoltage
+  {
+    uint32_t version;
+    uint32_t flags;
+    uint32_t padding[8];
+    uint32_t valueUv;
+    uint32_t padding2[8];
+  };
+
   void* m_lib = nullptr;
+  void* m_nvapiLib = nullptr;
   bool m_initialized = false;
+  bool m_nvapiInitialized = false;
+  bool m_enableOcFeatures = true;
   unsigned int m_deviceCount = 0;
+  std::vector< void * > m_nvapiGpuHandles;
 
   // Tracked state for locked clocks (NVML doesn't report these back)
   mutable std::map< unsigned int, std::pair< unsigned int, unsigned int > > m_appliedGpuLockedClocks;
   mutable std::map< unsigned int, std::pair< unsigned int, unsigned int > > m_appliedVramLockedClocks;
   mutable std::map< unsigned int, std::map< int /*clockType*pstate*/, int > > m_appliedOffsets;
+  std::map< unsigned int, std::map< int /*clockType*pstate*/, bool > > m_writableOffsets;
+  std::map< unsigned int, std::vector< nvml::nvmlPstates_t > > m_supportedPstates;
 
   // Function pointer types
   using InitFn = nvml::nvmlReturn_t ( * )();
@@ -343,6 +370,12 @@ private:
   using DeviceGetEncoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
   using DeviceGetDecoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
 
+  using NvApiQueryInterfaceFn = void * ( * )( uint32_t );
+  using NvApiInitializeFn = int32_t ( * )( void );
+  using NvApiUnloadFn = int32_t ( * )( void );
+  using NvApiEnumPhysicalGPUsFn = int32_t ( * )( void *handles[64], uint32_t *count );
+  using NvApiGetVoltageFn = int32_t ( * )( void *handle, NvApiVoltage *data );
+
   // Function pointers (loaded via dlsym)
   InitFn m_init = nullptr;
   ShutdownFn m_shutdown = nullptr;
@@ -375,6 +408,12 @@ private:
   DeviceGetEncoderUtilizationFn m_getEncoderUtilization = nullptr;
   DeviceGetDecoderUtilizationFn m_getDecoderUtilization = nullptr;
 
+  NvApiQueryInterfaceFn m_nvapiQueryInterface = nullptr;
+  NvApiInitializeFn m_nvapiInitialize = nullptr;
+  NvApiUnloadFn m_nvapiUnload = nullptr;
+  NvApiEnumPhysicalGPUsFn m_nvapiEnumPhysicalGpus = nullptr;
+  NvApiGetVoltageFn m_nvapiGetVoltage = nullptr;
+
   /**
    * @brief Load a function pointer from the NVML library.
    */
@@ -391,4 +430,8 @@ private:
    * @brief Get a device handle by index.
    */
   [[nodiscard]] std::optional< nvml::nvmlDevice_t > getDevice( unsigned int index ) const;
+
+  void cacheSupportedPstates();
+  void initNvapi();
+  void probeWritableOffsetPstates();
 };

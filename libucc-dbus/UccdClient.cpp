@@ -115,14 +115,14 @@ void UccdClient::subscribeDbusSignals()
   // multiple reconnect cycles.
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "ProfileChanged", this,
-                  SLOT( onProfileChangedSignal( QString, QString, QString ) ) );
+                  SLOT( onProfileChangedSignal( QString, QString, QString, QString ) ) );
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "PowerStateChanged", this,
                   SLOT( onPowerStateChangedSignal( QString ) ) );
 
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "ProfileChanged", this,
-               SLOT( onProfileChangedSignal( QString, QString, QString ) ) );
+               SLOT( onProfileChangedSignal( QString, QString, QString, QString ) ) );
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "PowerStateChanged", this,
                SLOT( onPowerStateChangedSignal( QString ) ) );
@@ -190,9 +190,12 @@ bool UccdClient::isConnected() const
 }
 
 // Signal handlers
-void UccdClient::onProfileChangedSignal( const QString &profileId, const QString &keyboardProfileId, const QString &fanProfileId )
+void UccdClient::onProfileChangedSignal( const QString &profileId,
+                                         const QString &keyboardProfileId,
+                                         const QString &fanProfileId,
+                                         const QString &gpuProfileId )
 {
-  emit profileChanged( profileId, keyboardProfileId, fanProfileId );
+  emit profileChanged( profileId, keyboardProfileId, fanProfileId, gpuProfileId );
 }
 
 void UccdClient::onPowerStateChangedSignal( const QString &state )
@@ -411,6 +414,30 @@ std::optional< std::string > UccdClient::getFanProfile( const std::string &fanPr
 std::optional< std::string > UccdClient::getFanProfilesJSON()
 {
   if ( auto result = callMethod< QString >( "GetFanProfileNames" ) )
+  {
+    return result->toStdString();
+  }
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getGpuProfile( const std::string &gpuProfileId )
+{
+  if ( !hasMethod( m_interface.get(), "GetGpuProfile" ) )
+    return std::nullopt;
+
+  if ( auto result = callMethod< QString >( "GetGpuProfile", QString::fromStdString( gpuProfileId ) ) )
+  {
+    return result->toStdString();
+  }
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getGpuProfilesJSON()
+{
+  if ( !hasMethod( m_interface.get(), "GetGpuProfileNames" ) )
+    return std::nullopt;
+
+  if ( auto result = callMethod< QString >( "GetGpuProfileNames" ) )
   {
     return result->toStdString();
   }
@@ -826,10 +853,27 @@ bool UccdClient::setChargeType( const std::string &type )
 
 bool UccdClient::setNVIDIAPowerOffset( [[maybe_unused]] int offset )
 {
-  // NVIDIA cTGP offset is managed through the profile (nvidiaPowerCTRLProfile.cTGPOffset).
-  // There is no separate D-Bus method — apply a profile with the desired offset instead.
-  // This matches TCC behaviour where the offset is always part of the profile.
-  return false;
+  if ( hasMethod( m_interface.get(), "SetNVIDIAPowerOffset" ) )
+    return callVoidMethod( "SetNVIDIAPowerOffset", offset );
+
+  // Legacy fallback for older daemons that do not expose SetNVIDIAPowerOffset.
+  // NVIDIA cTGP offset is managed through the active profile field
+  // nvidiaPowerCTRLProfile.cTGPOffset. Update that field and re-apply profile.
+  auto activeProfileJson = getActiveProfileJSON();
+  if ( !activeProfileJson.has_value() || activeProfileJson->empty() )
+    return false;
+
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *activeProfileJson ) );
+  if ( !doc.isObject() )
+    return false;
+
+  QJsonObject root = doc.object();
+  QJsonObject nvidiaObj = root.value( "nvidiaPowerCTRLProfile" ).toObject();
+  nvidiaObj["cTGPOffset"] = offset;
+  root["nvidiaPowerCTRLProfile"] = nvidiaObj;
+
+  QJsonDocument outDoc( root );
+  return applyProfile( outDoc.toJson( QJsonDocument::Compact ).toStdString() );
 }
 
 std::optional< int > UccdClient::getNVIDIAPowerOffset()
@@ -1264,6 +1308,18 @@ std::optional< int > UccdClient::getDGpuMemClockOffsetMHz()
 {
   auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "memClockOffsetMHz" );
   return ( v && *v != -999 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuVramFrequencyMHz()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "vramFrequency" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuCoreVoltageMv()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "coreVoltageMv" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
 }
 
 std::optional< int > UccdClient::getFanSpeedRPM()

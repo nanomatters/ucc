@@ -75,7 +75,6 @@ namespace ucc
     void onODMPowerLimit1Changed( int value );
     void onODMPowerLimit2Changed( int value );
     void onODMPowerLimit3Changed( int value );
-    void onGpuPowerChanged( int value );
     void onApplyClicked();
     void onSaveClicked();
     void onApplyFanProfilesClicked();
@@ -227,10 +226,6 @@ namespace ucc
     QLabel *m_odmPowerLimit2Value = nullptr;
     QSlider *m_odmPowerLimit3Slider = nullptr;
     QLabel *m_odmPowerLimit3Value = nullptr;
-
-    // GPU power control
-    QSlider *m_gpuPowerSlider = nullptr;
-    QLabel *m_gpuPowerValue = nullptr;
 
     // Keyboard backlight widgets
     QSlider *m_keyboardBrightnessSlider = nullptr;

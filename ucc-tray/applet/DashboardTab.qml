@@ -139,6 +139,27 @@ PC3.ScrollView {
                     visible: dashTab.backend.gpuCurrentPstate >= 0
                 }
                 PC3.Label {
+                    text: i18n("VRAM Freq")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuVramFreqMHz >= 0
+                }
+                PC3.Label {
+                    text: dashTab.backend.gpuVramFreqMHz + " MHz"
+                    font.bold: true
+                    visible: dashTab.backend.gpuVramFreqMHz >= 0
+                }
+
+                PC3.Label {
+                    text: i18n("Core Voltage")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuCoreVoltageMv >= 0
+                }
+                PC3.Label {
+                    text: dashTab.backend.gpuCoreVoltageMv + " mV"
+                    font.bold: true
+                    visible: dashTab.backend.gpuCoreVoltageMv >= 0
+                }
+                PC3.Label {
                     text: i18n("Clock Offsets")
                     opacity: 0.7
                     visible: dashTab.backend.gpuGrClockOffsetMHz !== -999
