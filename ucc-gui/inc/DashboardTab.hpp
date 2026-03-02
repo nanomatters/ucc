@@ -16,6 +16,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QFrame>
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -69,6 +70,10 @@ namespace ucc
     void onIGpuTempChanged();
     void onFanSpeedChanged();
     void onGpuFanSpeedChanged();
+    void onDGpuComputeUtilChanged();
+    void onDGpuMemoryUtilChanged();
+    void onDGpuPstateChanged();
+    void onDGpuClockOffsetsChanged();
     void onWaterCoolerConnected();
     void onWaterCoolerDisconnected();
     void onWaterCoolerDiscoveryStarted();
@@ -105,6 +110,13 @@ namespace ucc
     QLabel *m_iGpuFanSpeedLabel = nullptr;
     QLabel *m_iGpuFrequencyLabel = nullptr;
     QLabel *m_iGpuPowerLabel = nullptr;
+    // Extended dGPU metrics (second row, NVIDIA-only)
+    QLabel *m_gpuComputeUtilLabel = nullptr;
+    QLabel *m_gpuMemoryUtilLabel  = nullptr;
+    QLabel *m_gpuPstateLabel      = nullptr;
+    QLabel *m_gpuClockOffsetLabel = nullptr;
+    QWidget *m_dGpuExtraRow  = nullptr;
+    QFrame  *m_dGpuExtraHSep = nullptr;
     QLabel *m_waterCoolerFanSpeedLabel = nullptr;
     QLabel *m_waterCoolerPumpLabel = nullptr;
     QGridLayout *m_waterCoolerGrid = nullptr;

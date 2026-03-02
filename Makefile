@@ -27,7 +27,7 @@ ARCHIVE := $(DISTNAME).tar.gz
 TMPDIR := dist/$(DISTNAME)-tmp
 
 # Exclude patterns for tar (paths are relative to repo root)
-EXCLUDES := --exclude=build --exclude=dist --exclude=.git --exclude='$(TMPDIR)' --exclude='*.o' --exclude='*.a' --exclude='*.so*'
+EXCLUDES := --exclude='build*' --exclude=dist --exclude=.git --exclude='$(TMPDIR)' --exclude='*.o' --exclude='*.a' --exclude='*.so*'
 
 help:
 	@echo "Uniwill Control Center - Build and Package Targets"
@@ -67,7 +67,7 @@ distclean: clean
 	@rm -rf dist
 	@echo "Distclean complete"
 
-dist: distclean
+dist:
 	@echo "Creating source archive: $(ARCHIVE)"
 	@mkdir -p dist
 	@rm -rf $(TMPDIR); mkdir -p $(TMPDIR)

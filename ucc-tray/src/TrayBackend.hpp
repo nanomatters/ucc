@@ -64,6 +64,11 @@ class TrayBackend : public QObject
   // Extended NVIDIA dGPU metrics
   Q_PROPERTY( int  gpuComputeUtilPct   READ gpuComputeUtilPct   NOTIFY metricsUpdated )
   Q_PROPERTY( int  gpuMemoryUtilPct    READ gpuMemoryUtilPct    NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuVramUsedMiB      READ gpuVramUsedMiB      NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuVramTotalMiB     READ gpuVramTotalMiB     NOTIFY metricsUpdated )
+  Q_PROPERTY( QString gpuPerfLimitReason READ gpuPerfLimitReason NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuEncoderUtilPct   READ gpuEncoderUtilPct   NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuDecoderUtilPct   READ gpuDecoderUtilPct   NOTIFY metricsUpdated )
   Q_PROPERTY( int  gpuCurrentPstate    READ gpuCurrentPstate    NOTIFY metricsUpdated )
   Q_PROPERTY( int  gpuGrClockOffsetMHz READ gpuGrClockOffsetMHz NOTIFY metricsUpdated )
   Q_PROPERTY( int  gpuMemClockOffsetMHz READ gpuMemClockOffsetMHz NOTIFY metricsUpdated )
@@ -143,6 +148,11 @@ public:
   // Extended NVIDIA dGPU metrics (-1 when unavailable)
   int gpuComputeUtilPct() const;
   int gpuMemoryUtilPct() const;
+  int gpuVramUsedMiB() const;
+  int gpuVramTotalMiB() const;
+  QString gpuPerfLimitReason() const;
+  int gpuEncoderUtilPct() const;
+  int gpuDecoderUtilPct() const;
   int gpuCurrentPstate() const;
   int gpuGrClockOffsetMHz() const;
   int gpuMemClockOffsetMHz() const;
@@ -264,6 +274,11 @@ private:
   // Extended NVIDIA dGPU metrics
   int m_gpuComputeUtilPct  = -1;
   int m_gpuMemoryUtilPct   = -1;
+  int m_gpuVramUsedMiB     = -1;
+  int m_gpuVramTotalMiB    = -1;
+  QString m_gpuPerfLimitReason;
+  int m_gpuEncoderUtilPct  = -1;
+  int m_gpuDecoderUtilPct  = -1;
   int m_gpuCurrentPstate   = -1;
   int m_gpuGrClockOffsetMHz  = -999;
   int m_gpuMemClockOffsetMHz = -999;

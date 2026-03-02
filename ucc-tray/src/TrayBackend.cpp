@@ -114,6 +114,11 @@ int    TrayBackend::wcFanSpeed()   const { return m_wcFanSpeed; }
 int    TrayBackend::wcPumpLevel()  const { return m_wcPumpLevel; }
 int    TrayBackend::gpuComputeUtilPct()   const { return m_gpuComputeUtilPct; }
 int    TrayBackend::gpuMemoryUtilPct()    const { return m_gpuMemoryUtilPct; }
+int    TrayBackend::gpuVramUsedMiB()      const { return m_gpuVramUsedMiB; }
+int    TrayBackend::gpuVramTotalMiB()     const { return m_gpuVramTotalMiB; }
+QString TrayBackend::gpuPerfLimitReason() const { return m_gpuPerfLimitReason; }
+int    TrayBackend::gpuEncoderUtilPct()   const { return m_gpuEncoderUtilPct; }
+int    TrayBackend::gpuDecoderUtilPct()   const { return m_gpuDecoderUtilPct; }
 int    TrayBackend::gpuCurrentPstate()    const { return m_gpuCurrentPstate; }
 int    TrayBackend::gpuGrClockOffsetMHz() const { return m_gpuGrClockOffsetMHz; }
 int    TrayBackend::gpuMemClockOffsetMHz() const { return m_gpuMemClockOffsetMHz; }
@@ -402,6 +407,26 @@ void TrayBackend::pollMetrics()
   // Extended NVIDIA dGPU metrics
   update( m_gpuComputeUtilPct,   m_client->getDGpuComputeUtilPct() );
   update( m_gpuMemoryUtilPct,    m_client->getDGpuMemoryUtilPct() );
+  update( m_gpuVramUsedMiB,      m_client->getDGpuVramUsedMiB() );
+  update( m_gpuVramTotalMiB,     m_client->getDGpuVramTotalMiB() );
+
+  if ( auto v = m_client->getDGpuPerfLimitReason() )
+  {
+    QString reason = QString::fromStdString( *v );
+    if ( m_gpuPerfLimitReason != reason )
+    {
+      m_gpuPerfLimitReason = reason;
+      changed = true;
+    }
+  }
+  else if ( !m_gpuPerfLimitReason.isEmpty() )
+  {
+    m_gpuPerfLimitReason.clear();
+    changed = true;
+  }
+
+  update( m_gpuEncoderUtilPct,   m_client->getDGpuEncoderUtilPct() );
+  update( m_gpuDecoderUtilPct,   m_client->getDGpuDecoderUtilPct() );
   update( m_gpuCurrentPstate,    m_client->getDGpuCurrentPstate() );
   update( m_gpuGrClockOffsetMHz,  m_client->getDGpuGrClockOffsetMHz() );
   update( m_gpuMemClockOffsetMHz, m_client->getDGpuMemClockOffsetMHz() );

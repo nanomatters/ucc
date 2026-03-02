@@ -222,6 +222,33 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get dGPU extended metrics (NVIDIA-only; getters return nullopt when unavailable)
+  {
+    int val = -1;
+    if ( auto v = m_client->getDGpuComputeUtilPct() ) val = *v;
+    if ( m_dGpuComputeUtil != val ) { m_dGpuComputeUtil = val; emit dGpuComputeUtilChanged(); }
+  }
+  {
+    int val = -1;
+    if ( auto v = m_client->getDGpuMemoryUtilPct() ) val = *v;
+    if ( m_dGpuMemoryUtil != val ) { m_dGpuMemoryUtil = val; emit dGpuMemoryUtilChanged(); }
+  }
+  {
+    int val = -1;
+    if ( auto v = m_client->getDGpuCurrentPstate() ) val = *v;
+    if ( m_dGpuPstate != val ) { m_dGpuPstate = val; emit dGpuPstateChanged(); }
+  }
+  {
+    int val = -999;
+    if ( auto v = m_client->getDGpuGrClockOffsetMHz() ) val = *v;
+    if ( m_dGpuGrClockOffset != val ) { m_dGpuGrClockOffset = val; emit dGpuGrClockOffsetChanged(); }
+  }
+  {
+    int val = -999;
+    if ( auto v = m_client->getDGpuMemClockOffsetMHz() ) val = *v;
+    if ( m_dGpuMemClockOffset != val ) { m_dGpuMemClockOffset = val; emit dGpuMemClockOffsetChanged(); }
+  }
+
   // Get water cooler fan speed (percentage) if available via uccd
   {
     QString wcFan = "--";

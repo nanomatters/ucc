@@ -168,41 +168,88 @@ void DashboardTab::setupUI()
   m_waterCoolerStatusLabel->setStyleSheet( QString("font-weight: bold; color: %1;").arg(m_ringColorHex) );
   m_waterCoolerStatusLabel->setVisible( false );
 
-  auto makeGauge = [&]( const QString &caption, const QString &unit, QLabel *&valueLabel ) -> QWidget * {
-    QWidget *container = new QWidget();
-    QVBoxLayout *outer = new QVBoxLayout( container );
-    outer->setContentsMargins( 0, 0, 0, 0 );
-    outer->setSpacing( 8 );
-    outer->setAlignment( Qt::AlignHCenter );
+  // makeCard: compact value+unit+caption cell — no border (the panel provides it)
+  auto makeCard = [&]( const QString &caption, const QString &unit, QLabel *&valueLabel ) -> QWidget * {
+    QWidget *card = new QWidget();
+    QVBoxLayout *vl = new QVBoxLayout( card );
+    vl->setContentsMargins( 16, 16, 16, 14 );
+    vl->setSpacing( 6 );
+    vl->setAlignment( Qt::AlignCenter );
 
-    QFrame *ring = new QFrame();
-    ring->setFixedSize( 140, 140 );
-    // Thicker red ring for better visibility; use explicit red to ensure contrast
-    ring->setStyleSheet( QString("QFrame { border: 12px solid %1; border-radius: 70px; background: transparent; }").arg(m_ringColorHex) );
-
-    QVBoxLayout *ringLayout = new QVBoxLayout( ring );
-    ringLayout->setAlignment( Qt::AlignCenter );
-    ringLayout->setSpacing( 2 );
+    // Value + unit side-by-side, unit smaller and pushed to baseline
+    QWidget *valueRow = new QWidget();
+    QHBoxLayout *hl = new QHBoxLayout( valueRow );
+    hl->setContentsMargins( 0, 0, 0, 0 );
+    hl->setSpacing( 4 );
+    hl->setAlignment( Qt::AlignCenter );
 
     valueLabel = new QLabel( "--" );
-    valueLabel->setStyleSheet( QString("font-size: 28px; font-weight: bold; color: %1; background: transparent; border: none;").arg(innerTextHex) );
+    valueLabel->setStyleSheet( QString("font-size: 26px; font-weight: bold; color: %1; background: transparent; border: none;").arg(innerTextHex) );
     valueLabel->setAlignment( Qt::AlignCenter );
 
     QLabel *unitLabel = new QLabel( unit );
-    unitLabel->setStyleSheet( QString("font-size: 12px; color: %1; background: transparent; border: none;").arg(innerTextHex) );
-    unitLabel->setAlignment( Qt::AlignCenter );
+    unitLabel->setStyleSheet( QString("font-size: 11px; color: %1; background: transparent; border: none; padding-top: 9px;").arg(innerTextHex) );
+    unitLabel->setAlignment( Qt::AlignVCenter );
 
-    ringLayout->addWidget( valueLabel );
-    ringLayout->addWidget( unitLabel );
+    hl->addWidget( valueLabel );
+    hl->addWidget( unitLabel );
 
     QLabel *captionLabel = new QLabel( caption );
-    // Caption should follow primary window text for reliable contrast in light themes
-    captionLabel->setStyleSheet( QString("font-size: 12px; color: %1;").arg(textHex) );
+    captionLabel->setStyleSheet( QString("font-size: 11px; color: %1; background: transparent; border: none;").arg(textHex) );
     captionLabel->setAlignment( Qt::AlignCenter );
 
-    outer->addWidget( ring );
-    outer->addWidget( captionLabel );
-    return container;
+    vl->addWidget( valueRow );
+    vl->addWidget( captionLabel );
+    return card;
+  };
+
+  // makeCardRow: horizontal row of cards with dashed vertical dividers, no outer border
+  auto makeCardRow = [&]( std::initializer_list<QWidget *> cards ) -> QWidget * {
+    QWidget *row = new QWidget();
+    QHBoxLayout *hl = new QHBoxLayout( row );
+    hl->setContentsMargins( 0, 0, 0, 0 );
+    hl->setSpacing( 0 );
+    bool first = true;
+    for ( QWidget *card : cards )
+    {
+      if ( !first )
+      {
+        QFrame *sep = new QFrame();
+        sep->setFrameShape( QFrame::VLine );
+        sep->setFixedWidth( 1 );
+        sep->setStyleSheet( QString("QFrame { border: none; border-left: 2px dashed %1; background: transparent; }").arg(m_ringColorHex) );
+        hl->addWidget( sep );
+      }
+      hl->addWidget( card, 1 );
+      first = false;
+    }
+    return row;
+  };
+
+  // makePanel: wraps N cards in one bordered box with dashed vertical dividers
+  auto makePanel = [&]( std::initializer_list<QWidget *> cards ) -> QFrame * {
+    QFrame *panel = new QFrame();
+    panel->setStyleSheet( QString("QFrame#metricPanel { border: 2px solid %1; border-radius: 6px; background: transparent; }"
+                                  "QWidget { background: transparent; }").arg(m_ringColorHex) );
+    panel->setObjectName( "metricPanel" );
+    QHBoxLayout *hl = new QHBoxLayout( panel );
+    hl->setContentsMargins( 0, 0, 0, 0 );
+    hl->setSpacing( 0 );
+    bool first = true;
+    for ( QWidget *card : cards )
+    {
+      if ( !first )
+      {
+        QFrame *sep = new QFrame();
+        sep->setFrameShape( QFrame::VLine );
+        sep->setFixedWidth( 1 );
+        sep->setStyleSheet( QString("QFrame { border: none; border-left: 2px dashed %1; background: transparent; }").arg(m_ringColorHex) );
+        hl->addWidget( sep );
+      }
+      hl->addWidget( card, 1 );
+      first = false;
+    }
+    return panel;
   };
 
   // CPU section
@@ -212,14 +259,12 @@ void DashboardTab::setupUI()
   cpuHeader->setAlignment( Qt::AlignCenter );
   layout->addWidget( cpuHeader );
 
-  QGridLayout *cpuGrid = new QGridLayout();
-  cpuGrid->setHorizontalSpacing( 24 );
-  cpuGrid->setVerticalSpacing( 16 );
-  cpuGrid->addWidget( makeGauge( "CPU - Temp", "°C", m_cpuTempLabel ), 0, 0 );
-  cpuGrid->addWidget( makeGauge( "CPU - Fan", "%", m_fanSpeedLabel ), 0, 1 );
-  cpuGrid->addWidget( makeGauge( "CPU - Frequency", "GHz", m_cpuFrequencyLabel ), 0, 2 );
-  cpuGrid->addWidget( makeGauge( "CPU - Power", "W", m_cpuPowerLabel ), 0, 3 );
-  layout->addLayout( cpuGrid );
+  layout->addWidget( makePanel({
+    makeCard( "CPU - Temp",      "°C", m_cpuTempLabel ),
+    makeCard( "CPU - Fan",       "%",  m_fanSpeedLabel ),
+    makeCard( "CPU - Frequency", "GHz", m_cpuFrequencyLabel ),
+    makeCard( "CPU - Power",     "W",  m_cpuPowerLabel )
+  }) );
 
   // GPU section — single section with toggle between dGPU and iGPU
   // Initial GPU header text: prefer dGPU model, fall back to iGPU model
@@ -243,28 +288,66 @@ void DashboardTab::setupUI()
   gpuHeaderLayout->addWidget( m_gpuToggleButton, 0, 0, Qt::AlignRight | Qt::AlignVCenter );
   layout->addLayout( gpuHeaderLayout );
 
-  // dGPU gauges (default view)
+  // dGPU panel (default view) — two-row box: main metrics + NVIDIA extended row (hidden until data)
   m_dGpuGaugeContainer = new QWidget();
-  QGridLayout *gpuGrid = new QGridLayout( m_dGpuGaugeContainer );
-  gpuGrid->setContentsMargins( 0, 0, 0, 0 );
-  gpuGrid->setHorizontalSpacing( 24 );
-  gpuGrid->setVerticalSpacing( 16 );
-  gpuGrid->addWidget( makeGauge( "dGPU - Temp", "°C", m_gpuTempLabel ), 0, 0 );
-  gpuGrid->addWidget( makeGauge( "dGPU - Fan", "%", m_gpuFanSpeedLabel ), 0, 1 );
-  gpuGrid->addWidget( makeGauge( "dGPU - Frequency", "GHz", m_gpuFrequencyLabel ), 0, 2 );
-  gpuGrid->addWidget( makeGauge( "dGPU - Power", "W", m_gpuPowerLabel ), 0, 3 );
+  {
+    QVBoxLayout *outerVL = new QVBoxLayout( m_dGpuGaugeContainer );
+    outerVL->setContentsMargins( 0, 0, 0, 0 );
+    outerVL->setSpacing( 0 );
+
+    QFrame *panel = new QFrame();
+    panel->setObjectName( "metricPanel" );
+    panel->setStyleSheet( QString("QFrame#metricPanel { border: 2px solid %1; border-radius: 6px; background: transparent; }"
+                                  "QWidget { background: transparent; }").arg(m_ringColorHex) );
+
+    QVBoxLayout *panelVL = new QVBoxLayout( panel );
+    panelVL->setContentsMargins( 0, 0, 0, 0 );
+    panelVL->setSpacing( 0 );
+
+    // Row 1: primary dGPU metrics
+    panelVL->addWidget( makeCardRow({
+      makeCard( "Temp",      "\u00b0C", m_gpuTempLabel ),
+      makeCard( "Fan",       "%",   m_gpuFanSpeedLabel ),
+      makeCard( "Core Frequency", "GHz", m_gpuFrequencyLabel ),
+      makeCard( "Power",     "W",   m_gpuPowerLabel )
+    }) );
+
+    // Horizontal dashed separator (only visible when row 2 is shown)
+    m_dGpuExtraHSep = new QFrame();
+    m_dGpuExtraHSep->setFrameShape( QFrame::HLine );
+    m_dGpuExtraHSep->setFixedHeight( 2 );
+    m_dGpuExtraHSep->setStyleSheet( QString("QFrame { border: none; border-top: 2px dashed %1; background: transparent; margin: 0px 8px; }").arg(m_ringColorHex) );
+    m_dGpuExtraHSep->setVisible( false );
+    panelVL->addWidget( m_dGpuExtraHSep );
+
+    // Row 2: NVIDIA extended metrics — hidden until data arrives
+    m_dGpuExtraRow = makeCardRow({
+      makeCard( "GPU Load",     "%",   m_gpuComputeUtilLabel ),
+      makeCard( "VRAM Load",    "%",   m_gpuMemoryUtilLabel ),
+      makeCard( "P-State",      "",    m_gpuPstateLabel ),
+      makeCard( "Clock Offset", "MHz", m_gpuClockOffsetLabel )
+    });
+    m_gpuClockOffsetLabel->setStyleSheet( QString("font-size: 18px; font-weight: bold; color: %1; background: transparent; border: none;").arg(innerTextHex) );
+    m_dGpuExtraRow->setVisible( false );
+    panelVL->addWidget( m_dGpuExtraRow );
+
+    outerVL->addWidget( panel );
+  }
   layout->addWidget( m_dGpuGaugeContainer );
 
-  // iGPU gauges (hidden by default)
+  // iGPU panel (hidden by default)
   m_iGpuGaugeContainer = new QWidget();
-  QGridLayout *iGpuGrid = new QGridLayout( m_iGpuGaugeContainer );
-  iGpuGrid->setContentsMargins( 0, 0, 0, 0 );
-  iGpuGrid->setHorizontalSpacing( 24 );
-  iGpuGrid->setVerticalSpacing( 16 );
-  iGpuGrid->addWidget( makeGauge( "iGPU - Temp", "°C", m_iGpuTempLabel ), 0, 0 );
-  iGpuGrid->addWidget( makeGauge( "iGPU - Fan", "%", m_iGpuFanSpeedLabel ), 0, 1 );
-  iGpuGrid->addWidget( makeGauge( "iGPU - Frequency", "GHz", m_iGpuFrequencyLabel ), 0, 2 );
-  iGpuGrid->addWidget( makeGauge( "iGPU - Power", "W", m_iGpuPowerLabel ), 0, 3 );
+  {
+    QVBoxLayout *vl = new QVBoxLayout( m_iGpuGaugeContainer );
+    vl->setContentsMargins( 0, 0, 0, 0 );
+    vl->setSpacing( 0 );
+    vl->addWidget( makePanel({
+      makeCard( "iGPU - Temp",      "°C", m_iGpuTempLabel ),
+      makeCard( "iGPU - Fan",       "%",  m_iGpuFanSpeedLabel ),
+      makeCard( "iGPU - Frequency", "GHz", m_iGpuFrequencyLabel ),
+      makeCard( "iGPU - Power",     "W",  m_iGpuPowerLabel )
+    }) );
+  }
   m_iGpuGaugeContainer->setVisible( false );
   layout->addWidget( m_iGpuGaugeContainer );
 
@@ -275,10 +358,11 @@ void DashboardTab::setupUI()
   layout->addWidget( m_waterCoolerHeader );
 
   m_waterCoolerGrid = new QGridLayout();
-  m_waterCoolerGrid->setHorizontalSpacing( 24 );
-  m_waterCoolerGrid->setVerticalSpacing( 16 );
-  m_waterCoolerGrid->addWidget( makeGauge( "Water Cooler - Fan", "%", m_waterCoolerFanSpeedLabel ), 0, 1 );
-  m_waterCoolerGrid->addWidget( makeGauge( "Water Cooler - Pump", "Level", m_waterCoolerPumpLabel ), 0, 2 );
+  m_waterCoolerGrid->setContentsMargins( 0, 0, 0, 0 );
+  m_waterCoolerGrid->addWidget( makePanel({
+    makeCard( "Water Cooler - Fan",  "%",     m_waterCoolerFanSpeedLabel ),
+    makeCard( "Water Cooler - Pump", "Level", m_waterCoolerPumpLabel )
+  }), 0, 0 );
   layout->addLayout( m_waterCoolerGrid );
 
   // Hide water cooler monitor section if water cooler not supported
@@ -320,6 +404,16 @@ void DashboardTab::connectSignals()
            this, &DashboardTab::onFanSpeedChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuFanSpeedChanged,
            this, &DashboardTab::onGpuFanSpeedChanged );
+  connect( m_systemMonitor, &SystemMonitor::dGpuComputeUtilChanged,
+           this, &DashboardTab::onDGpuComputeUtilChanged );
+  connect( m_systemMonitor, &SystemMonitor::dGpuMemoryUtilChanged,
+           this, &DashboardTab::onDGpuMemoryUtilChanged );
+  connect( m_systemMonitor, &SystemMonitor::dGpuPstateChanged,
+           this, &DashboardTab::onDGpuPstateChanged );
+  connect( m_systemMonitor, &SystemMonitor::dGpuGrClockOffsetChanged,
+           this, &DashboardTab::onDGpuClockOffsetsChanged );
+  connect( m_systemMonitor, &SystemMonitor::dGpuMemClockOffsetChanged,
+           this, &DashboardTab::onDGpuClockOffsetsChanged );
   connect( m_systemMonitor, &SystemMonitor::waterCoolerFanSpeedChanged,
            this, &DashboardTab::onWaterCoolerFanSpeedChanged );
   connect( m_systemMonitor, &SystemMonitor::waterCoolerPumpLevelChanged,
@@ -623,6 +717,51 @@ void DashboardTab::onFanSpeedChanged()
 void DashboardTab::onGpuFanSpeedChanged()
 {
   m_gpuFanSpeedLabel->setText( formatFanSpeed( m_systemMonitor->gpuFanSpeed() ) );
+}
+
+void DashboardTab::onDGpuComputeUtilChanged()
+{
+  int val = m_systemMonitor->dGpuComputeUtil();
+  if ( val >= 0 )
+  {
+    m_gpuComputeUtilLabel->setText( QString::number( val ) );
+    if ( m_dGpuExtraRow && !m_dGpuExtraRow->isVisible() )
+    {
+      m_dGpuExtraRow->setVisible( true );
+      if ( m_dGpuExtraHSep ) m_dGpuExtraHSep->setVisible( true );
+    }
+  }
+  else
+    m_gpuComputeUtilLabel->setText( "--" );
+}
+
+void DashboardTab::onDGpuMemoryUtilChanged()
+{
+  int val = m_systemMonitor->dGpuMemoryUtil();
+  m_gpuMemoryUtilLabel->setText( val >= 0 ? QString::number( val ) : "--" );
+}
+
+void DashboardTab::onDGpuPstateChanged()
+{
+  int val = m_systemMonitor->dGpuPstate();
+  m_gpuPstateLabel->setText( val >= 0 ? QStringLiteral( "P" ) + QString::number( val ) : "--" );
+}
+
+void DashboardTab::onDGpuClockOffsetsChanged()
+{
+  int gr  = m_systemMonitor->dGpuGrClockOffset();
+  int mem = m_systemMonitor->dGpuMemClockOffset();
+  if ( gr > -999 || mem > -999 )
+  {
+    auto fmt = []( int v ) -> QString {
+      return ( v >= 0 ? QStringLiteral( "+" ) : QString() ) + QString::number( v );
+    };
+    m_gpuClockOffsetLabel->setText(
+      ( gr  > -999 ? fmt( gr )  : "--" ) + " / " +
+      ( mem > -999 ? fmt( mem ) : "--" ) );
+  }
+  else
+    m_gpuClockOffsetLabel->setText( "--" );
 }
 
 void DashboardTab::onWaterCoolerFanSpeedChanged()

@@ -45,6 +45,11 @@ class SystemMonitor : public QObject
   Q_PROPERTY( QString iGpuTemp READ iGpuTemp NOTIFY iGpuTempChanged )
   Q_PROPERTY( QString cpuFanSpeed READ cpuFanSpeed NOTIFY fanSpeedChanged )
   Q_PROPERTY( QString gpuFanSpeed READ gpuFanSpeed NOTIFY gpuFanSpeedChanged )
+  Q_PROPERTY( int dGpuComputeUtil   READ dGpuComputeUtil   NOTIFY dGpuComputeUtilChanged )
+  Q_PROPERTY( int dGpuMemoryUtil    READ dGpuMemoryUtil    NOTIFY dGpuMemoryUtilChanged )
+  Q_PROPERTY( int dGpuPstate        READ dGpuPstate        NOTIFY dGpuPstateChanged )
+  Q_PROPERTY( int dGpuGrClockOffset  READ dGpuGrClockOffset  NOTIFY dGpuGrClockOffsetChanged )
+  Q_PROPERTY( int dGpuMemClockOffset READ dGpuMemClockOffset NOTIFY dGpuMemClockOffsetChanged )
   Q_PROPERTY( QString waterCoolerFanSpeed READ waterCoolerFanSpeed NOTIFY waterCoolerFanSpeedChanged )
   Q_PROPERTY( QString waterCoolerPumpLevel READ waterCoolerPumpLevel NOTIFY waterCoolerPumpLevelChanged )
   Q_PROPERTY( int displayBrightness READ displayBrightness WRITE setDisplayBrightness NOTIFY displayBrightnessChanged )
@@ -79,6 +84,11 @@ public:
   QString iGpuTemp() const { return m_iGpuTemp; }
   QString cpuFanSpeed() const { return m_fanSpeed; }
   QString gpuFanSpeed() const { return m_gpuFanSpeed; }
+  int dGpuComputeUtil()    const { return m_dGpuComputeUtil; }
+  int dGpuMemoryUtil()     const { return m_dGpuMemoryUtil; }
+  int dGpuPstate()         const { return m_dGpuPstate; }
+  int dGpuGrClockOffset()  const { return m_dGpuGrClockOffset; }
+  int dGpuMemClockOffset() const { return m_dGpuMemClockOffset; }
   QString waterCoolerFanSpeed() const { return m_waterCoolerFanSpeed; }
   QString waterCoolerPumpLevel() const { return m_waterCoolerPumpLevel; }
   int displayBrightness() const { return m_displayBrightness; }
@@ -124,6 +134,11 @@ signals:
   void iGpuTempChanged();
   void fanSpeedChanged();
   void gpuFanSpeedChanged();
+  void dGpuComputeUtilChanged();
+  void dGpuMemoryUtilChanged();
+  void dGpuPstateChanged();
+  void dGpuGrClockOffsetChanged();
+  void dGpuMemClockOffsetChanged();
   void waterCoolerFanSpeedChanged();
   void waterCoolerPumpLevelChanged();
   void displayBrightnessChanged();
@@ -163,6 +178,11 @@ private:
   QString m_iGpuTemp = "0\u00b0C";
   QString m_fanSpeed = "0 RPM";
   QString m_gpuFanSpeed = "0 RPM";
+  int m_dGpuComputeUtil    = -1;
+  int m_dGpuMemoryUtil     = -1;
+  int m_dGpuPstate         = -1;
+  int m_dGpuGrClockOffset  = -999;
+  int m_dGpuMemClockOffset = -999;
   QString m_waterCoolerFanSpeed = "--";
   QString m_waterCoolerPumpLevel = "--";
   int m_displayBrightness = 50;

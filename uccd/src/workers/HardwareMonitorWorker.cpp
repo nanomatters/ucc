@@ -642,6 +642,21 @@ DGpuInfo HardwareMonitorWorker::getNvidiaDGpuValues() const noexcept
   if ( auto v = m_nvml.getMemoryUtilPct( 0 ) )
     values.m_memoryUtilPct = static_cast< int >( *v );
 
+  if ( auto v = m_nvml.getVramUsedMiB( 0 ) )
+    values.m_vramUsedMiB = static_cast< int >( *v );
+
+  if ( auto v = m_nvml.getVramTotalMiB( 0 ) )
+    values.m_vramTotalMiB = static_cast< int >( *v );
+
+  if ( auto v = m_nvml.getPerfLimitReason( 0 ) )
+    values.m_perfLimitReason = *v;
+
+  if ( auto v = m_nvml.getEncoderUtilPct( 0 ) )
+    values.m_encoderUtilPct = static_cast< int >( *v );
+
+  if ( auto v = m_nvml.getDecoderUtilPct( 0 ) )
+    values.m_decoderUtilPct = static_cast< int >( *v );
+
   if ( auto v = m_nvml.getCurrentPstate( 0 ) )
     values.m_currentPstate = static_cast< int >( *v );
 

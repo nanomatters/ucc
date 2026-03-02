@@ -178,6 +178,11 @@ public:
   // Extended discrete GPU metrics (NVIDIA, -1 when unavailable)
   std::optional< int > getDGpuComputeUtilPct();       ///< Compute utilization 0–100 %
   std::optional< int > getDGpuMemoryUtilPct();        ///< Memory-controller utilization 0–100 %
+  std::optional< int > getDGpuVramUsedMiB();          ///< Used VRAM in MiB
+  std::optional< int > getDGpuVramTotalMiB();         ///< Total VRAM in MiB
+  std::optional< std::string > getDGpuPerfLimitReason(); ///< Perf-cap/throttle reason
+  std::optional< int > getDGpuEncoderUtilPct();       ///< NVENC utilization 0–100 %
+  std::optional< int > getDGpuDecoderUtilPct();       ///< NVDEC utilization 0–100 %
   std::optional< int > getDGpuCurrentPstate();        ///< Current P-state index (0–15)
   std::optional< int > getDGpuGrClockOffsetMHz();     ///< Graphics-clock offset at current P-state
   std::optional< int > getDGpuMemClockOffsetMHz();    ///< Memory-clock offset at current P-state

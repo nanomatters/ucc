@@ -1115,6 +1115,35 @@ std::optional< double > readJsonDouble( QDBusInterface *iface, const QString &me
   double val = obj[ key ].toDouble();
   return ( val >= 0.0 ) ? std::optional< double >( val ) : std::nullopt;
 }
+
+std::optional< std::string > readJsonString( QDBusInterface *iface, const QString &method, const QString &key )
+{
+  if ( !iface )
+  {
+    return std::nullopt;
+  }
+
+  QDBusMessage reply = iface->call( method );
+  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
+  {
+    return std::nullopt;
+  }
+
+  const QString json = reply.arguments().at( 0 ).toString();
+  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
+  if ( doc.isNull() || !doc.isObject() )
+  {
+    return std::nullopt;
+  }
+
+  QJsonObject obj = doc.object();
+  if ( !obj.contains( key ) || !obj[ key ].isString() )
+  {
+    return std::nullopt;
+  }
+
+  return obj[ key ].toString().toStdString();
+}
 } // namespace
 
 // System Monitoring implementations
@@ -1186,6 +1215,36 @@ std::optional< int > UccdClient::getDGpuComputeUtilPct()
 std::optional< int > UccdClient::getDGpuMemoryUtilPct()
 {
   auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "memoryUtilPct" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuVramUsedMiB()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "vramUsedMiB" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuVramTotalMiB()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "vramTotalMiB" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getDGpuPerfLimitReason()
+{
+  auto v = readJsonString( m_interface.get(), "GetDGpuInfoValuesJSON", "perfLimitReason" );
+  return ( v && !v->empty() ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuEncoderUtilPct()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "encoderUtilPct" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuDecoderUtilPct()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "decoderUtilPct" );
   return ( v && *v >= 0 ) ? v : std::nullopt;
 }
 

@@ -44,6 +44,8 @@ namespace
 {
 }
 
+static std::string jsonEscape( const std::string &value );
+
 // helper function to convert GPU info to JSON
 std::string dgpuInfoToJSON( const DGpuInfo &info )
 {
@@ -58,6 +60,11 @@ std::string dgpuInfoToJSON( const DGpuInfo &info )
       << "\"enforcedPowerLimit\":" << info.m_enforcedPowerLimit << ","
       << "\"computeUtilPct\":" << info.m_computeUtilPct << ","
       << "\"memoryUtilPct\":" << info.m_memoryUtilPct << ","
+      << "\"vramUsedMiB\":" << info.m_vramUsedMiB << ","
+      << "\"vramTotalMiB\":" << info.m_vramTotalMiB << ","
+      << "\"perfLimitReason\":\"" << jsonEscape( info.m_perfLimitReason ) << "\","
+      << "\"encoderUtilPct\":" << info.m_encoderUtilPct << ","
+      << "\"decoderUtilPct\":" << info.m_decoderUtilPct << ","
       << "\"currentPstate\":" << info.m_currentPstate << ","
       << "\"grClockOffsetMHz\":" << ( info.m_grClockOffsetMHz == INT_MIN ? -999 : info.m_grClockOffsetMHz ) << ","
       << "\"memClockOffsetMHz\":" << ( info.m_memClockOffsetMHz == INT_MIN ? -999 : info.m_memClockOffsetMHz ) << ","
@@ -2009,7 +2016,7 @@ UccDBusService::UccDBusService()
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
-  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999}";
+  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999}";
   m_dbusData.iGpuInfoValuesJSON = "{\"vendor\":\"unknown\",\"temp\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"powerDraw\":-1}";
 
   // Keyboard backlight will be detected during worker initialization

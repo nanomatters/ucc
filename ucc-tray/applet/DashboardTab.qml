@@ -149,6 +149,41 @@ PC3.ScrollView {
                     font.bold: true
                     visible: dashTab.backend.gpuGrClockOffsetMHz !== -999
                 }
+
+                PC3.Label {
+                    text: i18n("VRAM")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuVramTotalMiB > 0
+                }
+                PC3.Label {
+                    text: dashTab.backend.gpuVramUsedMiB + " / " + dashTab.backend.gpuVramTotalMiB + " MiB"
+                    font.bold: true
+                    visible: dashTab.backend.gpuVramTotalMiB > 0
+                }
+                PC3.Label {
+                    text: i18n("Perf Limit")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuPerfLimitReason.length > 0
+                }
+                PC3.Label {
+                    text: dashTab.backend.gpuPerfLimitReason
+                    font.bold: true
+                    visible: dashTab.backend.gpuPerfLimitReason.length > 0
+                }
+
+                PC3.Label {
+                    text: i18n("NVENC/DEC")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuEncoderUtilPct >= 0 || dashTab.backend.gpuDecoderUtilPct >= 0
+                }
+                PC3.Label {
+                    text: (dashTab.backend.gpuEncoderUtilPct >= 0 ? dashTab.backend.gpuEncoderUtilPct : "--")
+                          + " / "
+                          + (dashTab.backend.gpuDecoderUtilPct >= 0 ? dashTab.backend.gpuDecoderUtilPct : "--")
+                          + " %"
+                    font.bold: true
+                    visible: dashTab.backend.gpuEncoderUtilPct >= 0 || dashTab.backend.gpuDecoderUtilPct >= 0
+                }
             }
         }
     }

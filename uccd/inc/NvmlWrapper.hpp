@@ -90,6 +90,26 @@ struct nvmlUtilization_t
   unsigned int memory; ///< Memory utilization in percent over the last sample period
 };
 
+/// Device memory information returned by nvmlDeviceGetMemoryInfo(_v2)
+struct nvmlMemory_t
+{
+  unsigned long long total;
+  unsigned long long free;
+  unsigned long long used;
+};
+
+using nvmlClocksThrottleReasons_t = unsigned long long;
+
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_GPU_IDLE = 0x0000000000000001ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_APPLICATIONS_CLOCKS_SETTING = 0x0000000000000002ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_SW_POWER_CAP = 0x0000000000000004ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_HW_SLOWDOWN = 0x0000000000000008ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_SYNC_BOOST = 0x0000000000000010ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_SW_THERMAL_SLOWDOWN = 0x0000000000000020ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_HW_THERMAL_SLOWDOWN = 0x0000000000000040ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_HW_POWER_BRAKE_SLOWDOWN = 0x0000000000000080ULL;
+static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_DISPLAY_CLOCK_SETTING = 0x0000000000000100ULL;
+
 } // namespace nvml
 
 /**
@@ -254,6 +274,21 @@ public:
   /** @brief GPU memory-controller utilization in percent (0–100). */
   [[nodiscard]] std::optional< unsigned int > getMemoryUtilPct( unsigned int deviceIndex ) const noexcept;
 
+  /** @brief Used VRAM in MiB. */
+  [[nodiscard]] std::optional< unsigned int > getVramUsedMiB( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Total VRAM in MiB. */
+  [[nodiscard]] std::optional< unsigned int > getVramTotalMiB( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current dominant performance-cap / throttle reason. */
+  [[nodiscard]] std::optional< std::string > getPerfLimitReason( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief NVENC utilization in percent (0–100). */
+  [[nodiscard]] std::optional< unsigned int > getEncoderUtilPct( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief NVDEC utilization in percent (0–100). */
+  [[nodiscard]] std::optional< unsigned int > getDecoderUtilPct( unsigned int deviceIndex ) const noexcept;
+
   /** @brief Current P-state index (0 = P0 maximum, 15 = P15 minimum). */
   [[nodiscard]] std::optional< unsigned int > getCurrentPstate( unsigned int deviceIndex ) const noexcept;
 
@@ -303,6 +338,10 @@ private:
   using DeviceGetMaxClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
   using DeviceGetEnforcedPowerLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
   using DeviceGetUtilizationRatesFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlUtilization_t* );
+  using DeviceGetMemoryInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlMemory_t* );
+  using DeviceGetCurrentClocksThrottleReasonsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClocksThrottleReasons_t* );
+  using DeviceGetEncoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
+  using DeviceGetDecoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
 
   // Function pointers (loaded via dlsym)
   InitFn m_init = nullptr;
@@ -331,6 +370,10 @@ private:
   DeviceGetMaxClockInfoFn m_getMaxClockInfo = nullptr;
   DeviceGetEnforcedPowerLimitFn m_getEnforcedPowerLimit = nullptr;
   DeviceGetUtilizationRatesFn m_getUtilizationRates = nullptr;
+  DeviceGetMemoryInfoFn m_getMemoryInfo = nullptr;
+  DeviceGetCurrentClocksThrottleReasonsFn m_getCurrentClocksThrottleReasons = nullptr;
+  DeviceGetEncoderUtilizationFn m_getEncoderUtilization = nullptr;
+  DeviceGetDecoderUtilizationFn m_getDecoderUtilization = nullptr;
 
   /**
    * @brief Load a function pointer from the NVML library.

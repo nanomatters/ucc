@@ -56,6 +56,11 @@ struct DGpuInfo
   // Extended metrics (NVIDIA only, -1 / INT_MIN when unavailable)
   int m_computeUtilPct = -1;     ///< GPU compute utilization in % (0–100), or -1
   int m_memoryUtilPct  = -1;     ///< GPU memory-controller utilization in % (0–100), or -1
+  int m_vramUsedMiB    = -1;     ///< Used VRAM in MiB, or -1
+  int m_vramTotalMiB   = -1;     ///< Total VRAM in MiB, or -1
+  std::string m_perfLimitReason; ///< Current perf-cap/throttle reason, empty when unavailable
+  int m_encoderUtilPct = -1;     ///< NVENC utilization in %, or -1
+  int m_decoderUtilPct = -1;     ///< NVDEC utilization in %, or -1
   int m_currentPstate  = -1;     ///< Current P-state index (0–15), or -1 if unknown
   int m_grClockOffsetMHz  = INT_MIN; ///< Graphics-clock offset at current P-state, INT_MIN = unavailable
   int m_memClockOffsetMHz = INT_MIN; ///< Memory-clock offset at current P-state, INT_MIN = unavailable

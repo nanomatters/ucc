@@ -46,6 +46,12 @@ NvmlWrapper::NvmlWrapper()
   m_getMaxClockInfo = loadSym< DeviceGetMaxClockInfoFn >( "nvmlDeviceGetMaxClockInfo" );
   m_getEnforcedPowerLimit = loadSym< DeviceGetEnforcedPowerLimitFn >( "nvmlDeviceGetEnforcedPowerLimit" );
   m_getUtilizationRates   = loadSym< DeviceGetUtilizationRatesFn >( "nvmlDeviceGetUtilizationRates" );
+  m_getMemoryInfo = loadSym< DeviceGetMemoryInfoFn >( "nvmlDeviceGetMemoryInfo_v2" );
+  if ( !m_getMemoryInfo )
+    m_getMemoryInfo = loadSym< DeviceGetMemoryInfoFn >( "nvmlDeviceGetMemoryInfo" );
+  m_getCurrentClocksThrottleReasons = loadSym< DeviceGetCurrentClocksThrottleReasonsFn >( "nvmlDeviceGetCurrentClocksThrottleReasons" );
+  m_getEncoderUtilization = loadSym< DeviceGetEncoderUtilizationFn >( "nvmlDeviceGetEncoderUtilization" );
+  m_getDecoderUtilization = loadSym< DeviceGetDecoderUtilizationFn >( "nvmlDeviceGetDecoderUtilization" );
 
   // OC-specific functions (may not exist on older drivers)
   m_getSupportedPstates = loadSym< DeviceGetSupportedPstatesFn >( "nvmlDeviceGetSupportedPerformanceStates" );
@@ -596,6 +602,70 @@ std::optional< unsigned int > NvmlWrapper::getMemoryUtilPct( unsigned int device
   nvml::nvmlUtilization_t util{};
   if ( m_getUtilizationRates( *devOpt, &util ) != nvml::NVML_SUCCESS ) return std::nullopt;
   return util.memory;
+}
+
+std::optional< unsigned int > NvmlWrapper::getVramUsedMiB( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getMemoryInfo ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlMemory_t mem{};
+  if ( m_getMemoryInfo( *devOpt, &mem ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return static_cast< unsigned int >( mem.used / ( 1024ULL * 1024ULL ) );
+}
+
+std::optional< unsigned int > NvmlWrapper::getVramTotalMiB( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getMemoryInfo ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlMemory_t mem{};
+  if ( m_getMemoryInfo( *devOpt, &mem ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return static_cast< unsigned int >( mem.total / ( 1024ULL * 1024ULL ) );
+}
+
+std::optional< std::string > NvmlWrapper::getPerfLimitReason( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getCurrentClocksThrottleReasons ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+
+  nvml::nvmlClocksThrottleReasons_t reasons = 0;
+  if ( m_getCurrentClocksThrottleReasons( *devOpt, &reasons ) != nvml::NVML_SUCCESS )
+    return std::nullopt;
+
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_HW_POWER_BRAKE_SLOWDOWN ) return std::string( "HW Power Brake" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_SW_POWER_CAP ) return std::string( "Power Limit" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_HW_THERMAL_SLOWDOWN ) return std::string( "HW Thermal" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_SW_THERMAL_SLOWDOWN ) return std::string( "SW Thermal" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_HW_SLOWDOWN ) return std::string( "HW Slowdown" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_APPLICATIONS_CLOCKS_SETTING ) return std::string( "App Clocks" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_DISPLAY_CLOCK_SETTING ) return std::string( "Display Limit" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_SYNC_BOOST ) return std::string( "Sync Boost" );
+  if ( reasons & nvml::NVML_CLOCKS_THROTTLE_REASON_GPU_IDLE ) return std::string( "Idle" );
+  return std::string( "None" );
+}
+
+std::optional< unsigned int > NvmlWrapper::getEncoderUtilPct( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getEncoderUtilization ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  unsigned int util = 0;
+  unsigned int sampleUs = 0;
+  if ( m_getEncoderUtilization( *devOpt, &util, &sampleUs ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return util;
+}
+
+std::optional< unsigned int > NvmlWrapper::getDecoderUtilPct( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getDecoderUtilization ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  unsigned int util = 0;
+  unsigned int sampleUs = 0;
+  if ( m_getDecoderUtilization( *devOpt, &util, &sampleUs ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return util;
 }
 
 std::optional< unsigned int > NvmlWrapper::getCurrentPstate( unsigned int deviceIndex ) const noexcept
