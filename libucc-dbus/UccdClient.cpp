@@ -1175,6 +1175,38 @@ std::optional< double > UccdClient::getIGpuPower()
   return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
 }
 
+// ---- Extended discrete GPU metrics ----
+
+std::optional< int > UccdClient::getDGpuComputeUtilPct()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "computeUtilPct" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuMemoryUtilPct()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "memoryUtilPct" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuCurrentPstate()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "currentPstate" );
+  return ( v && *v >= 0 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuGrClockOffsetMHz()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "grClockOffsetMHz" );
+  return ( v && *v != -999 ) ? v : std::nullopt;
+}
+
+std::optional< int > UccdClient::getDGpuMemClockOffsetMHz()
+{
+  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "memClockOffsetMHz" );
+  return ( v && *v != -999 ) ? v : std::nullopt;
+}
+
 std::optional< int > UccdClient::getFanSpeedRPM()
 {
   if ( auto percentage = readFanDataValue( m_interface.get(), "GetFanDataCPU", "speed" ) )

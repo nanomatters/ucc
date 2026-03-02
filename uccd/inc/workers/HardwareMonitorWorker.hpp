@@ -18,6 +18,7 @@
 #include "DaemonWorker.hpp"
 #include "Utils.hpp"
 #include "../NvmlWrapper.hpp"
+#include <climits>
 #include <string>
 #include <optional>
 #include <memory>
@@ -51,6 +52,13 @@ struct DGpuInfo
   double m_maxPowerLimit = -1.0;
   double m_enforcedPowerLimit = -1.0;
   bool m_d0MetricsUsage = false;
+
+  // Extended metrics (NVIDIA only, -1 / INT_MIN when unavailable)
+  int m_computeUtilPct = -1;     ///< GPU compute utilization in % (0–100), or -1
+  int m_memoryUtilPct  = -1;     ///< GPU memory-controller utilization in % (0–100), or -1
+  int m_currentPstate  = -1;     ///< Current P-state index (0–15), or -1 if unknown
+  int m_grClockOffsetMHz  = INT_MIN; ///< Graphics-clock offset at current P-state, INT_MIN = unavailable
+  int m_memClockOffsetMHz = INT_MIN; ///< Memory-clock offset at current P-state, INT_MIN = unavailable
 
   void print() const noexcept;
 };

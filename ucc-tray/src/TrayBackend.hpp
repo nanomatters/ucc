@@ -61,6 +61,12 @@ class TrayBackend : public QObject
   Q_PROPERTY( int gpuFanPercent  READ gpuFanPercent   NOTIFY metricsUpdated )
   Q_PROPERTY( int wcFanSpeed     READ wcFanSpeed      NOTIFY metricsUpdated )
   Q_PROPERTY( int wcPumpLevel    READ wcPumpLevel     NOTIFY metricsUpdated )
+  // Extended NVIDIA dGPU metrics
+  Q_PROPERTY( int  gpuComputeUtilPct   READ gpuComputeUtilPct   NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuMemoryUtilPct    READ gpuMemoryUtilPct    NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuCurrentPstate    READ gpuCurrentPstate    NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuGrClockOffsetMHz READ gpuGrClockOffsetMHz NOTIFY metricsUpdated )
+  Q_PROPERTY( int  gpuMemClockOffsetMHz READ gpuMemClockOffsetMHz NOTIFY metricsUpdated )
 
   // ── Profiles ──
   Q_PROPERTY( QString      activeProfileId READ activeProfileId NOTIFY activeProfileChanged )
@@ -134,6 +140,12 @@ public:
   int gpuFanPercent() const;
   int wcFanSpeed() const;
   int wcPumpLevel() const;
+  // Extended NVIDIA dGPU metrics (-1 when unavailable)
+  int gpuComputeUtilPct() const;
+  int gpuMemoryUtilPct() const;
+  int gpuCurrentPstate() const;
+  int gpuGrClockOffsetMHz() const;
+  int gpuMemClockOffsetMHz() const;
 
   // ── Profiles ──
   QStringList profileNames() const;
@@ -249,6 +261,12 @@ private:
   int m_gpuFanPercent = 0;
   int m_wcFanSpeed = 0;
   int m_wcPumpLevel = -1;
+  // Extended NVIDIA dGPU metrics
+  int m_gpuComputeUtilPct  = -1;
+  int m_gpuMemoryUtilPct   = -1;
+  int m_gpuCurrentPstate   = -1;
+  int m_gpuGrClockOffsetMHz  = -999;
+  int m_gpuMemClockOffsetMHz = -999;
 
   // Profiles (parallel lists: names[i] ↔ ids[i])
   QStringList m_profileNames;

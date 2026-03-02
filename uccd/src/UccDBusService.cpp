@@ -27,6 +27,7 @@
 #include <map>
 #include <thread>
 #include <cmath>
+#include <climits>
 #include <fstream>
 #include <filesystem>
 #include <syslog.h>
@@ -55,6 +56,11 @@ std::string dgpuInfoToJSON( const DGpuInfo &info )
       << "\"powerDraw\":" << info.m_powerDraw << ","
       << "\"maxPowerLimit\":" << info.m_maxPowerLimit << ","
       << "\"enforcedPowerLimit\":" << info.m_enforcedPowerLimit << ","
+      << "\"computeUtilPct\":" << info.m_computeUtilPct << ","
+      << "\"memoryUtilPct\":" << info.m_memoryUtilPct << ","
+      << "\"currentPstate\":" << info.m_currentPstate << ","
+      << "\"grClockOffsetMHz\":" << ( info.m_grClockOffsetMHz == INT_MIN ? -999 : info.m_grClockOffsetMHz ) << ","
+      << "\"memClockOffsetMHz\":" << ( info.m_memClockOffsetMHz == INT_MIN ? -999 : info.m_memClockOffsetMHz ) << ","
       << "\"d0MetricsUsage\":" << ( info.m_d0MetricsUsage ? "true" : "false" )
       << "}";
   return oss.str();
@@ -2003,7 +2009,7 @@ UccDBusService::UccDBusService()
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
-  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1}";
+  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999}";
   m_dbusData.iGpuInfoValuesJSON = "{\"vendor\":\"unknown\",\"temp\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"powerDraw\":-1}";
 
   // Keyboard backlight will be detected during worker initialization

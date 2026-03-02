@@ -45,6 +45,7 @@ NvmlWrapper::NvmlWrapper()
   m_getClockInfo = loadSym< DeviceGetClockInfoFn >( "nvmlDeviceGetClockInfo" );
   m_getMaxClockInfo = loadSym< DeviceGetMaxClockInfoFn >( "nvmlDeviceGetMaxClockInfo" );
   m_getEnforcedPowerLimit = loadSym< DeviceGetEnforcedPowerLimitFn >( "nvmlDeviceGetEnforcedPowerLimit" );
+  m_getUtilizationRates   = loadSym< DeviceGetUtilizationRatesFn >( "nvmlDeviceGetUtilizationRates" );
 
   // OC-specific functions (may not exist on older drivers)
   m_getSupportedPstates = loadSym< DeviceGetSupportedPstatesFn >( "nvmlDeviceGetSupportedPerformanceStates" );
@@ -575,4 +576,67 @@ std::optional< unsigned int > NvmlWrapper::getMaxGpuClockMHz( unsigned int devic
   // NVML_CLOCK_GRAPHICS = 0
   if ( m_getMaxClockInfo( *devOpt, 0, &clk ) != nvml::NVML_SUCCESS ) return std::nullopt;
   return clk;
+}
+
+std::optional< unsigned int > NvmlWrapper::getComputeUtilPct( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getUtilizationRates ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlUtilization_t util{};
+  if ( m_getUtilizationRates( *devOpt, &util ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return util.gpu;
+}
+
+std::optional< unsigned int > NvmlWrapper::getMemoryUtilPct( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getUtilizationRates ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlUtilization_t util{};
+  if ( m_getUtilizationRates( *devOpt, &util ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return util.memory;
+}
+
+std::optional< unsigned int > NvmlWrapper::getCurrentPstate( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getPerformanceState ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlPstates_t pstate = nvml::NVML_PSTATE_UNKNOWN;
+  if ( m_getPerformanceState( *devOpt, &pstate ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  if ( pstate == nvml::NVML_PSTATE_UNKNOWN ) return std::nullopt;
+  return static_cast< unsigned int >( pstate );
+}
+
+std::optional< int > NvmlWrapper::getGrClockOffsetMHz( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getClockOffsets || !m_getPerformanceState ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlPstates_t pstate = nvml::NVML_PSTATE_UNKNOWN;
+  if ( m_getPerformanceState( *devOpt, &pstate ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  if ( pstate == nvml::NVML_PSTATE_UNKNOWN ) return std::nullopt;
+  nvml::nvmlClockOffset_t info{};
+  info.version = NVML_CLOCK_OFFSET_VER1;
+  info.type    = nvml::NVML_CLOCK_GRAPHICS;
+  info.pstate  = pstate;
+  if ( m_getClockOffsets( *devOpt, &info ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return info.clockOffsetMHz;
+}
+
+std::optional< int > NvmlWrapper::getMemClockOffsetMHz( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getClockOffsets || !m_getPerformanceState ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  nvml::nvmlPstates_t pstate = nvml::NVML_PSTATE_UNKNOWN;
+  if ( m_getPerformanceState( *devOpt, &pstate ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  if ( pstate == nvml::NVML_PSTATE_UNKNOWN ) return std::nullopt;
+  nvml::nvmlClockOffset_t info{};
+  info.version = NVML_CLOCK_OFFSET_VER1;
+  info.type    = nvml::NVML_CLOCK_MEM;
+  info.pstate  = pstate;
+  if ( m_getClockOffsets( *devOpt, &info ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return info.clockOffsetMHz;
 }

@@ -105,6 +105,50 @@ PC3.ScrollView {
                 PC3.Label { text: dashTab.backend.gpuPowerW.toFixed(1) + " W"; font.bold: true }
                 PC3.Label { text: i18n("Fan"); opacity: 0.7 }
                 PC3.Label { text: dashTab.backend.gpuFanRPM + " RPM (" + dashTab.backend.gpuFanPercent + "%)"; font.bold: true }
+
+                // Extended NVIDIA metrics — shown only when data is available
+                PC3.Label {
+                    text: i18n("GPU Load")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuComputeUtilPct >= 0
+                }
+                PC3.Label {
+                    text: dashTab.backend.gpuComputeUtilPct + " %"
+                    font.bold: true
+                    visible: dashTab.backend.gpuComputeUtilPct >= 0
+                }
+                PC3.Label {
+                    text: i18n("VRAM Load")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuMemoryUtilPct >= 0
+                }
+                PC3.Label {
+                    text: dashTab.backend.gpuMemoryUtilPct + " %"
+                    font.bold: true
+                    visible: dashTab.backend.gpuMemoryUtilPct >= 0
+                }
+
+                PC3.Label {
+                    text: i18n("P-State")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuCurrentPstate >= 0
+                }
+                PC3.Label {
+                    text: "P" + dashTab.backend.gpuCurrentPstate
+                    font.bold: true
+                    visible: dashTab.backend.gpuCurrentPstate >= 0
+                }
+                PC3.Label {
+                    text: i18n("Clock Offsets")
+                    opacity: 0.7
+                    visible: dashTab.backend.gpuGrClockOffsetMHz !== -999
+                }
+                PC3.Label {
+                    text: (dashTab.backend.gpuGrClockOffsetMHz >= 0 ? "+" : "") + dashTab.backend.gpuGrClockOffsetMHz
+                          + " / " + (dashTab.backend.gpuMemClockOffsetMHz >= 0 ? "+" : "") + dashTab.backend.gpuMemClockOffsetMHz + " MHz"
+                    font.bold: true
+                    visible: dashTab.backend.gpuGrClockOffsetMHz !== -999
+                }
             }
         }
     }

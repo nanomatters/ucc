@@ -636,6 +636,21 @@ DGpuInfo HardwareMonitorWorker::getNvidiaDGpuValues() const noexcept
   if ( auto v = m_nvml.getMaxGpuClockMHz( 0 ) )
     values.m_maxCoreFrequency = static_cast< double >( *v );
 
+  if ( auto v = m_nvml.getComputeUtilPct( 0 ) )
+    values.m_computeUtilPct = static_cast< int >( *v );
+
+  if ( auto v = m_nvml.getMemoryUtilPct( 0 ) )
+    values.m_memoryUtilPct = static_cast< int >( *v );
+
+  if ( auto v = m_nvml.getCurrentPstate( 0 ) )
+    values.m_currentPstate = static_cast< int >( *v );
+
+  if ( auto v = m_nvml.getGrClockOffsetMHz( 0 ) )
+    values.m_grClockOffsetMHz = *v;
+
+  if ( auto v = m_nvml.getMemClockOffsetMHz( 0 ) )
+    values.m_memClockOffsetMHz = *v;
+
   return values;
 }
 

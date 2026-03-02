@@ -175,6 +175,12 @@ public:
   std::optional< double > getCpuPower();
   std::optional< double > getGpuPower();
   std::optional< double > getIGpuPower();
+  // Extended discrete GPU metrics (NVIDIA, -1 when unavailable)
+  std::optional< int > getDGpuComputeUtilPct();       ///< Compute utilization 0–100 %
+  std::optional< int > getDGpuMemoryUtilPct();        ///< Memory-controller utilization 0–100 %
+  std::optional< int > getDGpuCurrentPstate();        ///< Current P-state index (0–15)
+  std::optional< int > getDGpuGrClockOffsetMHz();     ///< Graphics-clock offset at current P-state
+  std::optional< int > getDGpuMemClockOffsetMHz();    ///< Memory-clock offset at current P-state
   std::optional< int > getFanSpeedRPM();
   std::optional< int > getGpuFanSpeedRPM();
   std::optional< int > getFanSpeedPercent();

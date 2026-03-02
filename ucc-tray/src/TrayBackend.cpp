@@ -112,6 +112,11 @@ int    TrayBackend::cpuFanPercent() const { return m_cpuFanPercent; }
 int    TrayBackend::gpuFanPercent() const { return m_gpuFanPercent; }
 int    TrayBackend::wcFanSpeed()   const { return m_wcFanSpeed; }
 int    TrayBackend::wcPumpLevel()  const { return m_wcPumpLevel; }
+int    TrayBackend::gpuComputeUtilPct()   const { return m_gpuComputeUtilPct; }
+int    TrayBackend::gpuMemoryUtilPct()    const { return m_gpuMemoryUtilPct; }
+int    TrayBackend::gpuCurrentPstate()    const { return m_gpuCurrentPstate; }
+int    TrayBackend::gpuGrClockOffsetMHz() const { return m_gpuGrClockOffsetMHz; }
+int    TrayBackend::gpuMemClockOffsetMHz() const { return m_gpuMemClockOffsetMHz; }
 
 // ---------------------------------------------------------------------------
 // Profile getters
@@ -393,6 +398,13 @@ void TrayBackend::pollMetrics()
   update( m_gpuFanRPM,     m_client->getGpuFanSpeedRPM() );
   update( m_cpuFanPercent, m_client->getFanSpeedPercent() );
   update( m_gpuFanPercent, m_client->getGpuFanSpeedPercent() );
+
+  // Extended NVIDIA dGPU metrics
+  update( m_gpuComputeUtilPct,   m_client->getDGpuComputeUtilPct() );
+  update( m_gpuMemoryUtilPct,    m_client->getDGpuMemoryUtilPct() );
+  update( m_gpuCurrentPstate,    m_client->getDGpuCurrentPstate() );
+  update( m_gpuGrClockOffsetMHz,  m_client->getDGpuGrClockOffsetMHz() );
+  update( m_gpuMemClockOffsetMHz, m_client->getDGpuMemClockOffsetMHz() );
 
   if ( m_waterCoolerSupported )
   {

@@ -83,6 +83,13 @@ struct nvmlClockOffset_t
 
 static constexpr unsigned int NVML_MAX_GPU_PERF_PSTATES = 16;
 
+/// Utilization rates returned by nvmlDeviceGetUtilizationRates
+struct nvmlUtilization_t
+{
+  unsigned int gpu;    ///< Compute utilization in percent over the last sample period
+  unsigned int memory; ///< Memory utilization in percent over the last sample period
+};
+
 } // namespace nvml
 
 /**
@@ -241,6 +248,21 @@ public:
   /** @brief Maximum (boost) graphics clock in MHz. */
   [[nodiscard]] std::optional< unsigned int > getMaxGpuClockMHz( unsigned int deviceIndex ) const noexcept;
 
+  /** @brief GPU compute utilization in percent (0–100). */
+  [[nodiscard]] std::optional< unsigned int > getComputeUtilPct( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief GPU memory-controller utilization in percent (0–100). */
+  [[nodiscard]] std::optional< unsigned int > getMemoryUtilPct( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current P-state index (0 = P0 maximum, 15 = P15 minimum). */
+  [[nodiscard]] std::optional< unsigned int > getCurrentPstate( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current graphics-clock offset in MHz at the current P-state. */
+  [[nodiscard]] std::optional< int > getGrClockOffsetMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Current memory-clock offset in MHz at the current P-state. */
+  [[nodiscard]] std::optional< int > getMemClockOffsetMHz( unsigned int deviceIndex ) const noexcept;
+
   /** @brief Returns true if the NVML library was loaded and initialized. */
   bool isInitialized() const { return m_initialized; }
 
@@ -280,6 +302,7 @@ private:
   using DeviceGetClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
   using DeviceGetMaxClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
   using DeviceGetEnforcedPowerLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+  using DeviceGetUtilizationRatesFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlUtilization_t* );
 
   // Function pointers (loaded via dlsym)
   InitFn m_init = nullptr;
@@ -307,6 +330,7 @@ private:
   DeviceGetClockInfoFn m_getClockInfo = nullptr;
   DeviceGetMaxClockInfoFn m_getMaxClockInfo = nullptr;
   DeviceGetEnforcedPowerLimitFn m_getEnforcedPowerLimit = nullptr;
+  DeviceGetUtilizationRatesFn m_getUtilizationRates = nullptr;
 
   /**
    * @brief Load a function pointer from the NVML library.
