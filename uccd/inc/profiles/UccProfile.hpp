@@ -189,16 +189,6 @@ struct UccODMPowerLimits
 };
 
 /**
- * @brief NVIDIA power control profile
- */
-struct TccNVIDIAPowerCTRLProfile
-{
-  int32_t cTGPOffset;
-
-  TccNVIDIAPowerCTRLProfile( int32_t offset = 0 ) : cTGPOffset( offset ) {}
-};
-
-/**
  * @brief Keyboard backlight settings for a profile
  */
 struct UccProfileKeyboard
@@ -240,8 +230,8 @@ struct UccProfile
   UccProfileKeyboard keyboard;
   UccODMProfile odmProfile;
   UccODMPowerLimits odmPowerLimits;
-  std::optional< TccNVIDIAPowerCTRLProfile > nvidiaPowerCTRLProfile;
   std::string gpuProfileId;     ///< UUID reference to GPU OC profile (stored in GUI QSettings)
+  std::string gpuOCProfileData; ///< Embedded GPU OC profile JSON (offsets, locked clocks, powerLimitW)
   std::string chargingProfile;  ///< firmware-level charging profile descriptor (e.g. "balanced")
   std::string chargingPriority; ///< USB-C PD charging priority (e.g. "charge_battery", "performance")
   std::string chargeType;       ///< charge type: "Standard" or "Custom"
@@ -268,8 +258,8 @@ struct UccProfile
       keyboard( other.keyboard ),
       odmProfile( other.odmProfile ),
       odmPowerLimits( other.odmPowerLimits ),
-      nvidiaPowerCTRLProfile( other.nvidiaPowerCTRLProfile ),
       gpuProfileId( other.gpuProfileId ),
+      gpuOCProfileData( other.gpuOCProfileData ),
       chargingProfile( other.chargingProfile ),
       chargingPriority( other.chargingPriority ),
       chargeType( other.chargeType ),
@@ -293,8 +283,8 @@ struct UccProfile
       keyboard = other.keyboard;
       odmProfile = other.odmProfile;
       odmPowerLimits = other.odmPowerLimits;
-      nvidiaPowerCTRLProfile = other.nvidiaPowerCTRLProfile;
       gpuProfileId = other.gpuProfileId;
+      gpuOCProfileData = other.gpuOCProfileData;
       chargingProfile = other.chargingProfile;
       chargingPriority = other.chargingPriority;
       chargeType = other.chargeType;
@@ -310,14 +300,6 @@ struct UccProfile
  * @return A unique profile identifier string
  */
 std::string generateProfileId();
-
-// legacy default profile IDs
-namespace LegacyDefaultProfileIDs
-{
-  inline constexpr const char *Default = "Legacy Default [Built-in]";
-  inline constexpr const char *CoolAndBreezy = "Legacy Cool and Breezy [Built-in]";
-  inline constexpr const char *PowersaveExtreme = "Legacy Powersave Extreme [Built-in]";
-}
 
 // default profile ID constants
 namespace DefaultProfileIDs

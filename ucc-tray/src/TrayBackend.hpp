@@ -271,7 +271,6 @@ private:
   QString resolveFanProfileName( const QString &fanProfileId ) const;
   QString resolveKeyboardProfileName( const QString &kbProfileId ) const;
   QString resolveGpuProfileName( const QString &gpuProfileId ) const;
-  QString resolveKeyboardProfileId( const QString &daemonValue ) const;
 
   std::unique_ptr< ucc::UccdClient > m_client;
   QTimer *m_fastTimer = nullptr;   // ~1 s  — temps, fans

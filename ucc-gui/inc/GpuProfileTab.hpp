@@ -106,6 +106,8 @@ private:
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;
   bool m_ocAvailable = false;
+  bool m_offsetsSupported = false;
+  bool m_lockedSupported = false;
 
   // Profile selection bar
   QComboBox *m_gpuProfileCombo = nullptr;
@@ -118,6 +120,7 @@ private:
   QLabel *m_gpuNameLabel = nullptr;
   QLabel *m_tempLabel = nullptr;
   QLabel *m_powerDrawLabel = nullptr;
+  QLabel *m_currentPstateLabel = nullptr;
 
   // Per-P-state offset controls (GPU core + VRAM grouped together)
   struct PStateOffsetRow
@@ -138,6 +141,8 @@ private:
   QVBoxLayout *m_pstatesLayout = nullptr;
 
   // Locked clocks
+  QGroupBox *m_gpuLockedGroup = nullptr;
+  QGroupBox *m_vramLockedGroup = nullptr;
   QSlider *m_gpuLockedMinSlider = nullptr;
   QSlider *m_gpuLockedMaxSlider = nullptr;
   QSpinBox *m_gpuLockedMinSpin = nullptr;
@@ -161,6 +166,11 @@ private:
 
   // Warnings
   QLabel *m_notAvailableLabel = nullptr;
+
+  // Live metrics refresh
+  QTimer *m_liveMetricsTimer = nullptr;
+
+  void refreshLiveMetrics();
 };
 
 } // namespace ucc

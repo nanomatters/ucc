@@ -13,8 +13,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <iostream>
-
 #include "profiles/DefaultProfiles.hpp"
 
 const UccProfile maxEnergySave = []()
@@ -39,7 +37,6 @@ const UccProfile maxEnergySave = []()
 
   profile.odmProfile.name = "power_save";
   profile.odmPowerLimits.tdpValues = { 5, 10, 15 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -64,7 +61,6 @@ const UccProfile silent = []()
 
   profile.odmProfile.name = "power_save";
   profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -89,7 +85,6 @@ const UccProfile office = []()
 
   profile.odmProfile.name = "enthusiast";
   profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -114,7 +109,6 @@ const UccProfile highPerformance = []()
 
   profile.odmProfile.name = "overboost";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -139,7 +133,6 @@ const UccProfile defaultCustomProfile = []()
   profile.fan.autoControlWC = true;
 
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -166,7 +159,6 @@ const UccProfile defaultMobileCustomProfileTDP = []()
 
   // odmProfile.name is optional, leave unset
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -192,7 +184,6 @@ const UccProfile defaultMobileCustomProfileCl = []()
   profile.fan.autoControlWC = true;
 
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
 
   return profile;
 }();
@@ -217,7 +208,6 @@ const UccProfile highPerformance25WcTGP = []()
 
   profile.odmProfile.name = "overboost";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(25);
 
   return profile;
 }();
@@ -242,88 +232,9 @@ const UccProfile defaultCustomProfile25WcTGP = []()
   profile.fan.autoControlWC = true;
 
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(25);
 
   return profile;
 }();
-
-// Legacy default profiles (for devices not in deviceProfiles map)
-const UccProfile legacyDefault = []()
-{
-  UccProfile profile( "__legacy_default__", "Default" );
-
-  profile.display.brightness = 100;
-  profile.display.useBrightness = false;
-  profile.display.refreshRate = -1;
-  profile.display.useRefRate = false;
-
-  profile.cpu.noTurbo = false;
-
-  profile.webcam.status = true;
-  profile.webcam.useStatus = true;
-
-  profile.fan.useControl = true;
-  profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
-
-  // odmProfile.name is optional, leave unset
-  profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
-
-  return profile;
-}();
-
-const UccProfile legacyCoolAndBreezy = []()
-{
-  UccProfile profile( "__legacy_cool_and_breezy__", "Cool and breezy" );
-
-  profile.display.brightness = 50;
-  profile.display.useBrightness = false;
-  profile.display.refreshRate = -1;
-  profile.display.useRefRate = false;
-
-  profile.cpu.noTurbo = false;
-
-  profile.webcam.status = true;
-  profile.webcam.useStatus = true;
-
-  profile.fan.useControl = true;
-  profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
-  profile.fan.autoControlWC = true;
-
-  // odmProfile.name is optional, leave unset
-  profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
-
-  return profile;
-}();
-
-const UccProfile legacyPowersaveExtreme = []()
-{
-  UccProfile profile( "__legacy_powersave_extreme__", "Powersave extreme" );
-
-  profile.display.brightness = 30;
-  profile.display.useBrightness = false;
-  profile.display.refreshRate = -1;
-  profile.display.useRefRate = false;
-
-  profile.cpu.noTurbo = true;
-
-  profile.webcam.status = false;
-  profile.webcam.useStatus = true;
-
-  profile.fan.useControl = true;
-  profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
-  profile.fan.autoControlWC = true;
-
-  // odmProfile.name is optional, leave unset
-  profile.odmPowerLimits.tdpValues = { 5, 10, 15 };
-  profile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile(0);
-
-  return profile;
-}();
-
-const std::vector< UccProfile > legacyProfiles = { legacyDefault, legacyCoolAndBreezy, legacyPowersaveExtreme };
 
 // device-specific default profiles
 

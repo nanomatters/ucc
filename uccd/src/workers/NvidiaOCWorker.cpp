@@ -20,7 +20,6 @@
 #include <QJsonArray>
 #include <map>
 #include <syslog.h>
-#include <sstream>
 
 NvidiaOCWorker::NvidiaOCWorker( std::shared_ptr< NvmlWrapper > nvml,
                                 std::function< void( const std::string & ) > logFunction )
@@ -299,20 +298,39 @@ bool NvidiaOCWorker::applyGpuOCProfile( const std::string &profileJSON, unsigned
       anyFailed = true;
   };
 
-  // Apply GPU core offsets
-  if ( obj.contains( "gpuCoreOffsets" ) && obj["gpuCoreOffsets"].isArray() )
+  // Apply unified offsets format
+  if ( obj.contains( "offsets" ) && obj["offsets"].isArray() )
   {
-    applyOffsets( obj["gpuCoreOffsets"].toArray(),
-                  nvml::NVML_CLOCK_GRAPHICS,
-                  "graphics" );
-  }
+    QJsonArray coreOffsets;
+    QJsonArray vramOffsets;
 
-  // Apply VRAM offsets
-  if ( obj.contains( "vramOffsets" ) && obj["vramOffsets"].isArray() )
-  {
-    applyOffsets( obj["vramOffsets"].toArray(),
-                  nvml::NVML_CLOCK_MEM,
-                  "memory" );
+    for ( const auto &v : obj["offsets"].toArray() )
+    {
+      QJsonObject o = v.toObject();
+      const int pstate = o["pstate"].toInt();
+
+      if ( o.contains( "gpuOffsetMHz" ) )
+      {
+        QJsonObject coreEntry;
+        coreEntry["pstate"] = pstate;
+        coreEntry["offsetMHz"] = o["gpuOffsetMHz"].toInt();
+        coreOffsets.append( coreEntry );
+      }
+
+      if ( o.contains( "vramOffsetMHz" ) )
+      {
+        QJsonObject vramEntry;
+        vramEntry["pstate"] = pstate;
+        vramEntry["offsetMHz"] = o["vramOffsetMHz"].toInt();
+        vramOffsets.append( vramEntry );
+      }
+    }
+
+    if ( !coreOffsets.isEmpty() )
+      applyOffsets( coreOffsets, nvml::NVML_CLOCK_GRAPHICS, "graphics" );
+
+    if ( !vramOffsets.isEmpty() )
+      applyOffsets( vramOffsets, nvml::NVML_CLOCK_MEM, "memory" );
   }
 
   // Apply GPU locked clocks

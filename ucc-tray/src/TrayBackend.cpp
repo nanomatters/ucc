@@ -19,7 +19,6 @@
 #include <QDebug>
 
 #include <algorithm>
-#include <ranges>
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -557,9 +556,6 @@ void TrayBackend::pollSlowState()
 
       // Extract keyboard profile reference — skip if user manually overrode it
       auto kbId = obj[ "selectedKeyboardProfile" ].toString();
-      // The daemon may return a UUID or a display name (backward compat).
-      // Resolve to a canonical UUID so combo-box indexing works correctly.
-      kbId = resolveKeyboardProfileId( kbId );
       if ( !m_keyboardProfileOverride && kbId != m_activeProfileKeyboardId )
       {
         m_activeProfileKeyboardId = kbId;
@@ -1034,22 +1030,4 @@ QString TrayBackend::resolveGpuProfileName( const QString &gpuProfileId ) const
     return m_gpuProfileNames[ idx ];
 
   return gpuProfileId;
-}
-
-QString TrayBackend::resolveKeyboardProfileId( const QString &daemonValue ) const
-{
-  if ( daemonValue.isEmpty() )
-    return {};
-
-  // If it's already a known ID (UUID), return as-is
-  if ( m_keyboardProfileIds.contains( daemonValue ) )
-    return daemonValue;
-
-  // Otherwise the daemon may have returned a display name (backward compat)
-  // — look it up in the names list and return the corresponding ID
-  if ( auto idx = m_keyboardProfileNames.indexOf( daemonValue ); idx >= 0 )
-    return m_keyboardProfileIds[ idx ];
-
-  // Unknown — return the raw value
-  return daemonValue;
 }

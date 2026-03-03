@@ -18,10 +18,10 @@
 #include "NvmlWrapper.hpp"
 #include "profiles/DefaultProfiles.hpp"
 #include "profiles/FanProfile.hpp"
+#include "PolkitAuthority.hpp"
 #include "StateUtils.hpp"
 #include "Utils.hpp"
 #include "SysfsNode.hpp"
-#include <set>
 #include <sstream>
 #include <iomanip>
 #include <map>
@@ -32,9 +32,7 @@
 #include <filesystem>
 #include <syslog.h>
 #include <libudev.h>
-#include <functional>
 #include <algorithm>
-#include <ranges>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -213,15 +211,14 @@ static std::string profileToJSON( const UccProfile &profile,
 
   oss << "]}";
 
-  if ( profile.nvidiaPowerCTRLProfile.has_value() )
+  // GPU OC profile reference and embedded data
+  if ( !profile.gpuProfileId.empty() )
   {
-    oss << ",\"nvidiaPowerCTRLProfile\":{"
-        << "\"cTGPOffset\":" << profile.nvidiaPowerCTRLProfile->cTGPOffset
-        << "}";
+    oss << ",\"gpuProfileId\":\"" << jsonEscape( profile.gpuProfileId ) << "\"";
   }
-  else
+  if ( !profile.gpuOCProfileData.empty() && profile.gpuOCProfileData != "{}" )
   {
-    oss << ",\"nvidiaPowerCTRLProfile\":null";
+    oss << ",\"gpuOCProfileData\":" << profile.gpuOCProfileData;
   }
 
   // Keyboard section
@@ -748,15 +745,6 @@ bool UccDBusInterfaceAdaptor::SetTempProfile( const QString &profileName )
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   m_data.tempProfileName = profileName.toStdString();
-  return true;
-}
-
-bool UccDBusInterfaceAdaptor::SetTempProfileById( const QString &id )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  m_data.tempProfileId = id.toStdString();
-  // trigger state check would be called here
   return true;
 }
 
@@ -1651,14 +1639,7 @@ bool UccDBusInterfaceAdaptor::SetNVIDIAPowerOffset( int offset )
   if ( !m_service || !m_service->m_profileSettingsWorker ) return false;
   if ( !m_data.nvidiaPowerCTRLAvailable ) return false;
 
-  if ( !m_service->m_activeProfile.nvidiaPowerCTRLProfile.has_value() )
-    m_service->m_activeProfile.nvidiaPowerCTRLProfile = TccNVIDIAPowerCTRLProfile{};
-
-  m_service->m_activeProfile.nvidiaPowerCTRLProfile->cTGPOffset = offset;
-  m_service->m_profileSettingsWorker->onNVIDIAPowerProfileChanged();
-  m_service->updateDBusActiveProfileData();
-
-  return true;
+  return m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( offset );
 }
 
 QString UccDBusInterfaceAdaptor::GetAvailableGovernors()
@@ -1969,6 +1950,26 @@ bool UccDBusInterfaceAdaptor::ApplyNvidiaGpuOCProfile( const QString &profileJSO
 
   if ( !result )
     return false;
+
+  // Apply cTGP offset from GPU profile payload (GPU-profile path only)
+  if ( m_service->m_profileSettingsWorker && m_service->m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( profileJsonStd ) );
+    if ( doc.isObject() )
+    {
+      QJsonObject obj = doc.object();
+      if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj[ "nvidiaPowerCTRLProfile" ].isObject() )
+      {
+        QJsonObject nvidiaObj = obj[ "nvidiaPowerCTRLProfile" ].toObject();
+        int ctgpOffset = nvidiaObj.value( "cTGPOffset" ).toInt( 0 );
+        m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( ctgpOffset );
+      }
+
+      // Update active profile's embedded GPU OC data for readback
+      m_service->m_activeProfile.gpuOCProfileData = profileJsonStd;
+      m_service->updateDBusActiveProfileData();
+    }
+  }
 
   auto extractStr = []( const std::string &json, const std::string &key ) -> std::string {
     std::string search = "\"" + key + "\":\"";
@@ -3420,12 +3421,6 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
         }
       }
 
-      if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )
-      {
-        std::cout << "[Profile] Notifying NVIDIA power control" << std::endl;
-        m_profileSettingsWorker->onNVIDIAPowerProfileChanged();
-      }
-
       if ( m_keyboardBacklightController.isAvailable()
            && m_settings.keyboardBacklightControlEnabled
            && !profile.keyboard.keyboardProfileData.empty()
@@ -3634,6 +3629,9 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
       std::cout << "[Profile] Applying keyboard backlight settings from profile" << std::endl;
       m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
     }
+
+    // Apply GPU OC and cTGP from the profile
+    applyGpuOCFromProfile( profile );
 
     // Emit ProfileChanged signal for DBus clients
     if ( m_adaptor )
@@ -4217,6 +4215,8 @@ void UccDBusService::applyStartupProfile()
        && profile.keyboard.keyboardProfileData != "{}" )
     m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
 
+  applyGpuOCFromProfile( profile );
+
   if ( m_dbusData.waterCoolerSupported )
     setWaterCoolerScanningEnabled( profile.fan.enableWaterCooler );
 }
@@ -4292,6 +4292,40 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
   catch ( const std::exception &e )
   {
     std::cerr << "[FanPump] Failed to apply fan/pump settings: " << e.what() << std::endl;
+  }
+}
+
+void UccDBusService::applyGpuOCFromProfile( const UccProfile &profile )
+{
+  // GPU OC / cTGP data lives exclusively inside gpuOCProfileData.
+  // Profiles with no GPU profile selected have empty gpuOCProfileData and
+  // should not touch GPU state at all.
+  if ( profile.gpuOCProfileData.empty() || profile.gpuOCProfileData == "{}" )
+    return;
+
+  // Extract and apply cTGP offset from embedded GPU profile data
+  if ( m_profileSettingsWorker && m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( profile.gpuOCProfileData ) );
+    if ( doc.isObject() )
+    {
+      QJsonObject obj = doc.object();
+      if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj[ "nvidiaPowerCTRLProfile" ].isObject() )
+      {
+        const int ctgpOffset = obj[ "nvidiaPowerCTRLProfile" ].toObject().value( "cTGPOffset" ).toInt( 0 );
+        std::cout << "[GpuOC] Applying cTGP offset from profile: " << ctgpOffset << std::endl;
+        m_profileSettingsWorker->applyNVIDIAPowerOffset( ctgpOffset );
+      }
+    }
+  }
+
+  // Apply GPU OC settings (clock offsets, locked clocks, power limit)
+  if ( m_nvidiaOCWorker && m_nvidiaOCWorker->isAvailable() )
+  {
+    std::cout << "[GpuOc] Applying embedded GPU OC profile data from profile '"
+              << profile.name << "'" << std::endl;
+    if ( !m_nvidiaOCWorker->applyGpuOCProfile( profile.gpuOCProfileData, 0 ) )
+      std::cerr << "[GpuOC] Failed to apply GPU OC profile data" << std::endl;
   }
 }
 
@@ -4405,6 +4439,9 @@ void UccDBusService::applyProfileForCurrentState()
          && !profile.keyboard.keyboardProfileData.empty()
          && profile.keyboard.keyboardProfileData != "{}" )
       m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
+
+    // Apply GPU OC and cTGP from the profile
+    applyGpuOCFromProfile( profile );
 
     // Water cooler scanning state is preserved from the runtime flag
     // (set via EnableWaterCooler D-Bus call). Do NOT re-read enableWaterCooler

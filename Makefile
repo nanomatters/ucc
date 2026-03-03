@@ -8,9 +8,9 @@ ifeq ($(VERSION),)
   VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
 endif
 
-# If VERSION is still empty, use 0.1.2 as fallback
+# If VERSION is still empty, use 0.2.0 as fallback
 ifeq ($(VERSION),)
-  VERSION := 0.1.2
+  VERSION := 0.2.0
 endif
 
 # Get git hash for archive naming
@@ -123,7 +123,7 @@ deb: dist
 	@cd dist && tar xzf $(ARCHIVE)
 	@cp -r debian dist/ucc-$(VERSION)/
 	@# Update changelog with timestamp
-	@sed -i '1s/(.*)/(0.1.2+$(RELEASE_TS))/' dist/ucc-$(VERSION)/debian/changelog
+	@sed -i '1s/(.*)/(0.2.0+$(RELEASE_TS))/' dist/ucc-$(VERSION)/debian/changelog
 	@cd dist/ucc-$(VERSION) && debuild -uc -us
 	@echo "Debian packages created in dist/"
 

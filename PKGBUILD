@@ -1,7 +1,7 @@
 # Maintainer: nanomatters <nanomatters@github.com>
 
 pkgname=ucc
-pkgver=0.1.2
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Uniwill Control Center - System daemon, GUI, CLI tool and Plasma applet for Uniwill laptops'
 arch=('x86_64')

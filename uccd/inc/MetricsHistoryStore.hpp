@@ -20,6 +20,7 @@
 #include <cstring>
 #include <chrono>
 #include <deque>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <sstream>

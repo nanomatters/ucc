@@ -4,7 +4,7 @@
 
 #pragma once
 
-/** Base version from CMake project(), e.g. "0.1.2" */
+/** Base version from CMake project(), e.g. "0.2.0" */
 #define UCC_VERSION     "@PROJECT_VERSION@"
 
 /** Short git commit hash appended as a release tag, e.g. "abc1234".
@@ -12,5 +12,5 @@
 #define UCC_RELEASE     "@UCC_GIT_HASH@"
 
 /** Full version string: VERSION when RELEASE is empty, VERSION+RELEASE otherwise.
- *  e.g. "0.1.2" or "0.1.2+abc1234" */
+ *  e.g. "0.2.0" or "0.2.0+abc1234" */
 #define UCC_VERSION_FULL "@UCC_VERSION_FULL@"

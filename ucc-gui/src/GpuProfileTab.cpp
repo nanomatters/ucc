@@ -16,6 +16,7 @@
 #include "GpuProfileTab.hpp"
 
 #include <array>
+#include <set>
 #include <QFrame>
 #include <QGroupBox>
 #include <QLineEdit>
@@ -33,6 +34,7 @@
 #include <QMessageBox>
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace ucc
 {
@@ -55,7 +57,14 @@ GpuProfileTab::GpuProfileTab( UccdClient *client,
 
   // Initial hardware state read
   if ( m_ocAvailable )
+  {
     refreshOCState();
+
+    m_liveMetricsTimer = new QTimer( this );
+    m_liveMetricsTimer->setInterval( 1000 );
+    connect( m_liveMetricsTimer, &QTimer::timeout, this, &GpuProfileTab::refreshLiveMetrics );
+    m_liveMetricsTimer->start();
+  }
 }
 
 // ── UI construction ─────────────────────────────────────────────────
@@ -75,6 +84,7 @@ void GpuProfileTab::setupUI()
   m_applyButton = new QPushButton( "Apply" );
   m_applyButton->setMaximumWidth( 80 );
   m_applyButton->setEnabled( false );
+  m_applyButton->setToolTip( "Applies current GPU OC settings temporarily. Use Save to persist." );
 
   m_saveButton = new QPushButton( "Save" );
   m_saveButton->setMaximumWidth( 80 );
@@ -136,25 +146,26 @@ void GpuProfileTab::setupUI()
   infoLayout->setVerticalSpacing( 4 );
   QLabel *tempLabel = new QLabel( "Temperature" );
   QLabel *powerLabel = new QLabel( "Power draw" );
-  QPalette muted = tempLabel->palette();
-  muted.setColor( QPalette::WindowText, muted.color( QPalette::Mid ) );
-  tempLabel->setPalette( muted );
-  powerLabel->setPalette( muted );
+  QLabel *pstateLabel = new QLabel( "Current P-State" );
 
   m_gpuNameLabel = new QLabel( "—" );
   m_tempLabel = new QLabel( "—" );
   m_powerDrawLabel = new QLabel( "—" );
+  m_currentPstateLabel = new QLabel( "—" );
   QFont valueFont = m_gpuNameLabel->font();
   valueFont.setBold( true );
   m_gpuNameLabel->setFont( valueFont );
   m_tempLabel->setFont( valueFont );
   m_powerDrawLabel->setFont( valueFont );
+  m_currentPstateLabel->setFont( valueFont );
 
   infoLayout->addWidget( m_gpuNameLabel, 0, 0 );
   infoLayout->addWidget( tempLabel, 0, 2 );
   infoLayout->addWidget( m_tempLabel, 0, 3 );
   infoLayout->addWidget( powerLabel, 0, 4 );
   infoLayout->addWidget( m_powerDrawLabel, 0, 5 );
+  infoLayout->addWidget( pstateLabel, 0, 6 );
+  infoLayout->addWidget( m_currentPstateLabel, 0, 7 );
   infoLayout->setColumnStretch( 1, 1 );
   infoSectionLayout->addLayout( infoLayout );
   contentLayout->addWidget( infoSection );
@@ -178,9 +189,11 @@ void GpuProfileTab::setupUI()
   contentLayout->addWidget( powerGroup );
 
   // === GPU LOCKED CLOCKS ===
-  QGroupBox *gpuLockedGroup = new QGroupBox( "GPU Core Locked Clocks" );
-  gpuLockedGroup->setVisible( m_ocAvailable );
-  QVBoxLayout *gpuLockedLayout = new QVBoxLayout( gpuLockedGroup );
+  m_gpuLockedGroup = new QGroupBox( "GPU Core Locked Clocks" );
+  m_gpuLockedGroup->setVisible( m_ocAvailable );
+  m_gpuLockedGroup->setCheckable( true );
+  m_gpuLockedGroup->setChecked( true );
+  QVBoxLayout *gpuLockedLayout = new QVBoxLayout( m_gpuLockedGroup );
 
   QHBoxLayout *gpuLockedRow = new QHBoxLayout();
   gpuLockedRow->addWidget( new QLabel( "Min:" ) );
@@ -197,12 +210,14 @@ void GpuProfileTab::setupUI()
   gpuLockedRow->addWidget( m_gpuLockedMaxSpin );
   gpuLockedLayout->addLayout( gpuLockedRow );
 
-  contentLayout->addWidget( gpuLockedGroup );
+  contentLayout->addWidget( m_gpuLockedGroup );
 
   // === VRAM LOCKED CLOCKS ===
-  QGroupBox *vramLockedGroup = new QGroupBox( "VRAM Locked Clocks" );
-  vramLockedGroup->setVisible( m_ocAvailable );
-  QVBoxLayout *vramLockedLayout = new QVBoxLayout( vramLockedGroup );
+  m_vramLockedGroup = new QGroupBox( "VRAM Locked Clocks" );
+  m_vramLockedGroup->setVisible( m_ocAvailable );
+  m_vramLockedGroup->setCheckable( true );
+  m_vramLockedGroup->setChecked( true );
+  QVBoxLayout *vramLockedLayout = new QVBoxLayout( m_vramLockedGroup );
 
   QHBoxLayout *vramLockedRow = new QHBoxLayout();
   vramLockedRow->addWidget( new QLabel( "Min:" ) );
@@ -219,9 +234,10 @@ void GpuProfileTab::setupUI()
   vramLockedRow->addWidget( m_vramLockedMaxSpin );
   vramLockedLayout->addLayout( vramLockedRow );
 
-  contentLayout->addWidget( vramLockedGroup );
+  contentLayout->addWidget( m_vramLockedGroup );
 
   // === CLOCK OFFSETS (grouped by P-state) ===
+  // Individual P-state groups are added directly; no outer wrapper needed.
   contentLayout->addLayout( m_pstatesLayout );
 
   contentLayout->addStretch();
@@ -262,6 +278,9 @@ void GpuProfileTab::connectSignals()
   connect( m_removeButton, &QPushButton::clicked, this, &GpuProfileTab::removeRequested );
   connect( m_refreshButton, &QPushButton::clicked, this, &GpuProfileTab::onRefreshClicked );
   connect( m_resetButton, &QPushButton::clicked, this, &GpuProfileTab::onResetClicked );
+
+  connect( m_gpuLockedGroup, &QGroupBox::toggled, this, [this]( bool ) { emit changed(); } );
+  connect( m_vramLockedGroup, &QGroupBox::toggled, this, [this]( bool ) { emit changed(); } );
 
   // GPU locked clocks: bidirectional slider <-> spinbox sync
   connect( m_gpuLockedMinSlider, &QSlider::valueChanged, m_gpuLockedMinSpin, &QSpinBox::setValue );
@@ -361,6 +380,20 @@ void GpuProfileTab::updateButtonStates( bool uccdConnected )
   if ( m_removeButton )  m_removeButton->setEnabled( hasSelection && !isBuiltin );
   if ( m_resetButton )   m_resetButton->setEnabled( uccdConnected && m_ocAvailable );
 
+  // Built-in GPU profiles are immutable: lock all editable controls.
+  const bool profileEditable = hasSelection && !isBuiltin;
+  for ( auto &grp : m_pstateGroups )
+  {
+    if ( grp.groupBox )
+      grp.groupBox->setEnabled( profileEditable && m_offsetsSupported );
+  }
+  if ( m_gpuLockedGroup )
+    m_gpuLockedGroup->setEnabled( profileEditable && m_lockedSupported );
+  if ( m_vramLockedGroup )
+    m_vramLockedGroup->setEnabled( profileEditable && m_lockedSupported );
+  if ( m_powerLimitSlider )
+    m_powerLimitSlider->setEnabled( profileEditable );
+
   // Allow renaming custom profiles
   if ( m_gpuProfileCombo && m_gpuProfileCombo->lineEdit() )
     m_gpuProfileCombo->lineEdit()->setReadOnly( !hasSelection || isBuiltin );
@@ -375,6 +408,8 @@ void GpuProfileTab::refreshOCState()
   if ( !stateOpt )
     return;
 
+  qDebug() << "[GPU-CTGP] refreshOCState raw state:" << QString::fromStdString( *stateOpt );
+
   QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *stateOpt ) );
   if ( !doc.isObject() )
     return;
@@ -383,8 +418,7 @@ void GpuProfileTab::refreshOCState()
 
   // Update info labels
   m_gpuNameLabel->setText( state["gpuName"].toString( "Unknown" ) );
-  m_tempLabel->setText( QString::number( state["tempC"].toInt() ) + " °C" );
-  m_powerDrawLabel->setText( QString::number( state["powerDrawW"].toDouble(), 'f', 1 ) + " W" );
+  refreshLiveMetrics();
 
   // cTGP range (Profiles-page compatible semantics)
   m_powerMinW = state["powerMinW"].toDouble();
@@ -400,12 +434,40 @@ void GpuProfileTab::refreshOCState()
     maxPower = *v;
 
   int currentOffset = 0;
+  bool haveOffset = false;
   if ( auto v = m_uccdClient->getNVIDIAPowerOffset() )
+  {
     currentOffset = *v;
+    haveOffset = true;
+  }
+
+  int currentPowerFromState = static_cast< int >( std::round( state["powerLimitW"].toDouble( 0.0 ) ) );
+
+  qDebug() << "[GPU-CTGP] refresh inputs"
+           << "powerMinW=" << m_powerMinW
+           << "powerDefaultW(state)=" << m_powerDefaultW
+           << "powerMaxW(state)=" << m_powerMaxW
+           << "defaultPower(iface)=" << defaultPower
+           << "maxPower(iface)=" << maxPower
+           << "haveOffset=" << haveOffset
+           << "offset(iface)=" << currentOffset
+           << "powerLimitW(state)=" << currentPowerFromState;
 
   if ( defaultPower > 0 && maxPower >= defaultPower )
   {
-    const int currentPower = std::clamp( defaultPower + currentOffset, defaultPower, maxPower );
+    int currentPower = defaultPower;
+
+    if ( haveOffset )
+      currentPower = defaultPower + currentOffset;
+    else if ( currentPowerFromState > 0 )
+      currentPower = currentPowerFromState;
+
+    currentPower = std::clamp( currentPower, defaultPower, maxPower );
+
+    qDebug() << "[GPU-CTGP] refresh resolved"
+             << "sliderMin=" << defaultPower
+             << "sliderMax=" << maxPower
+             << "sliderValue=" << currentPower;
 
     m_powerLimitSlider->blockSignals( true );
     m_powerLimitSlider->setMinimum( defaultPower );
@@ -469,31 +531,84 @@ void GpuProfileTab::refreshOCState()
     m_vramLockedMaxSlider->setValue( lc["max"].toInt() );
   }
 
-  // Populate P-state offset rows
+  // Populate P-state offset rows – preserve checked state across refresh
+  std::set< unsigned int > checkedPStates;
+  for ( const auto &grp : m_pstateGroups )
+  {
+    if ( grp.groupBox && grp.groupBox->isChecked() )
+      checkedPStates.insert( grp.pstate );
+  }
+
   clearPStateWidgets();
   if ( state.contains( "pstates" ) )
     populatePStates( state["pstates"].toArray() );
 
+  // Restore checked state for P-states that were enabled before refresh
+  for ( auto &grp : m_pstateGroups )
+  {
+    if ( grp.groupBox )
+      grp.groupBox->setChecked( checkedPStates.count( grp.pstate ) > 0 );
+  }
+
   // Feature support
   bool offsetsSupported = state["offsetsSupported"].toBool( false );
   bool lockedSupported = state["lockedClocksSupported"].toBool( false );
+  m_offsetsSupported = offsetsSupported;
+  m_lockedSupported = lockedSupported;
 
-  m_gpuLockedMinSlider->setEnabled( lockedSupported );
-  m_gpuLockedMaxSlider->setEnabled( lockedSupported );
-  m_gpuLockedMinSpin->setEnabled( lockedSupported );
-  m_gpuLockedMaxSpin->setEnabled( lockedSupported );
-  m_vramLockedMinSlider->setEnabled( lockedSupported );
-  m_vramLockedMaxSlider->setEnabled( lockedSupported );
-  m_vramLockedMinSpin->setEnabled( lockedSupported );
-  m_vramLockedMaxSpin->setEnabled( lockedSupported );
-
-  // Disable offset sliders if not supported
+  if ( m_gpuLockedGroup )
+    m_gpuLockedGroup->setEnabled( lockedSupported );
+  if ( m_vramLockedGroup )
+    m_vramLockedGroup->setEnabled( lockedSupported );
   for ( auto &grp : m_pstateGroups )
   {
-    grp.gpuRow.slider->setEnabled( offsetsSupported );
-    grp.gpuRow.spinBox->setEnabled( offsetsSupported );
-    grp.vramRow.slider->setEnabled( offsetsSupported );
-    grp.vramRow.spinBox->setEnabled( offsetsSupported );
+    if ( grp.groupBox )
+      grp.groupBox->setEnabled( offsetsSupported );
+  }
+
+  updateButtonStates( m_uccdClient && m_uccdClient->isConnected() );
+}
+
+void GpuProfileTab::refreshLiveMetrics()
+{
+  if ( !m_ocAvailable || !m_uccdClient )
+    return;
+
+  std::optional< int > tempC = m_uccdClient->getGpuTemperature();
+  std::optional< double > powerW = m_uccdClient->getGpuPower();
+  std::optional< int > currentPstate = m_uccdClient->getDGpuCurrentPstate();
+
+  if ( !tempC || !powerW )
+  {
+    auto stateOpt = m_uccdClient->getNvidiaOCState( 0 );
+    if ( stateOpt )
+    {
+      const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *stateOpt ) );
+      if ( doc.isObject() )
+      {
+        const QJsonObject state = doc.object();
+        if ( !tempC && state.contains( "tempC" ) )
+          tempC = state["tempC"].toInt();
+        if ( !powerW && state.contains( "powerDrawW" ) )
+          powerW = state["powerDrawW"].toDouble();
+        if ( !currentPstate && state.contains( "currentPstate" ) )
+          currentPstate = state["currentPstate"].toInt( -1 );
+      }
+    }
+  }
+
+  if ( m_tempLabel )
+    m_tempLabel->setText( tempC ? ( QString::number( *tempC ) + " °C" ) : QStringLiteral( "—" ) );
+
+  if ( m_powerDrawLabel )
+    m_powerDrawLabel->setText( powerW ? ( QString::number( *powerW, 'f', 1 ) + " W" ) : QStringLiteral( "—" ) );
+
+  if ( m_currentPstateLabel )
+  {
+    if ( currentPstate && *currentPstate >= 0 )
+      m_currentPstateLabel->setText( QStringLiteral( "P" ) + QString::number( *currentPstate ) );
+    else
+      m_currentPstateLabel->setText( QStringLiteral( "—" ) );
   }
 }
 
@@ -529,6 +644,8 @@ void GpuProfileTab::populatePStates( const QJsonArray &pstates )
       title += QString( " — %1" ).arg( pstateDesc[pstate] );
 
     QGroupBox *group = new QGroupBox( title );
+    group->setCheckable( true );
+    group->setChecked( false );
     QHBoxLayout *groupLayout = new QHBoxLayout( group );
     groupLayout->setSpacing( 8 );
     groupLayout->setContentsMargins( 10, 6, 10, 6 );
@@ -612,6 +729,7 @@ void GpuProfileTab::populatePStates( const QJsonArray &pstates )
     }
 
     m_pstatesLayout->addWidget( group );
+    connect( group, &QGroupBox::toggled, this, [this]( bool ) { emit changed(); } );
     m_pstateGroups.push_back( psg );
   }
 }
@@ -629,59 +747,65 @@ QString GpuProfileTab::buildProfileJSON() const
   QJsonObject root;
 
   // Clock offsets grouped by P-state
-  QJsonArray offsets;
-  QJsonArray gpuCoreOffsets;
-  QJsonArray vramOffsets;
-  for ( const auto &grp : m_pstateGroups )
   {
-    QJsonObject o;
-    o["pstate"] = static_cast< int >( grp.pstate );
-    if ( grp.gpuRow.slider )
+    QJsonArray offsets;
+    for ( const auto &grp : m_pstateGroups )
     {
-      o["gpuOffsetMHz"] = grp.gpuRow.slider->value();
-      QJsonObject legacyGpu;
-      legacyGpu["pstate"] = static_cast< int >( grp.pstate );
-      legacyGpu["offsetMHz"] = grp.gpuRow.slider->value();
-      gpuCoreOffsets.append( legacyGpu );
+      if ( grp.groupBox && !grp.groupBox->isChecked() )
+        continue;
+
+      QJsonObject o;
+      o["pstate"] = static_cast< int >( grp.pstate );
+      if ( grp.gpuRow.slider )
+      {
+        o["gpuOffsetMHz"] = grp.gpuRow.slider->value();
+      }
+      if ( grp.vramRow.slider )
+      {
+        o["vramOffsetMHz"] = grp.vramRow.slider->value();
+      }
+      offsets.append( o );
     }
-    if ( grp.vramRow.slider )
-    {
-      o["vramOffsetMHz"] = grp.vramRow.slider->value();
-      QJsonObject legacyVram;
-      legacyVram["pstate"] = static_cast< int >( grp.pstate );
-      legacyVram["offsetMHz"] = grp.vramRow.slider->value();
-      vramOffsets.append( legacyVram );
-    }
-    offsets.append( o );
+    if ( !offsets.isEmpty() )
+      root["offsets"] = offsets;
   }
-  root["offsets"] = offsets;
-  // Backward-compatible fields expected by current daemon implementation
-  root["gpuCoreOffsets"] = gpuCoreOffsets;
-  root["vramOffsets"] = vramOffsets;
 
   // GPU locked clocks (only include enabled when feature is supported)
-  QJsonObject gpuLocked;
-  gpuLocked["enabled"] = m_gpuLockedMinSlider && m_gpuLockedMinSlider->isEnabled();
-  gpuLocked["min"] = m_gpuLockedMinSlider->value();
-  gpuLocked["max"] = m_gpuLockedMaxSlider->value();
-  root["gpuLockedClocks"] = gpuLocked;
+  if ( m_gpuLockedGroup && m_gpuLockedGroup->isChecked() )
+  {
+    QJsonObject gpuLocked;
+    gpuLocked["enabled"] = true;
+    gpuLocked["min"] = m_gpuLockedMinSlider->value();
+    gpuLocked["max"] = m_gpuLockedMaxSlider->value();
+    root["gpuLockedClocks"] = gpuLocked;
+  }
 
   // VRAM locked clocks (only include enabled when feature is supported)
-  QJsonObject vramLocked;
-  vramLocked["enabled"] = m_vramLockedMinSlider && m_vramLockedMinSlider->isEnabled();
-  vramLocked["min"] = m_vramLockedMinSlider->value();
-  vramLocked["max"] = m_vramLockedMaxSlider->value();
-  root["vramLockedClocks"] = vramLocked;
+  if ( m_vramLockedGroup && m_vramLockedGroup->isChecked() )
+  {
+    QJsonObject vramLocked;
+    vramLocked["enabled"] = true;
+    vramLocked["min"] = m_vramLockedMinSlider->value();
+    vramLocked["max"] = m_vramLockedMaxSlider->value();
+    root["vramLockedClocks"] = vramLocked;
+  }
 
   // cTGP profile payload (same field as Profiles page)
   if ( m_powerLimitSlider )
   {
+    const int ctgpOffset = m_powerLimitSlider->value() - static_cast< int >( std::round( m_powerDefaultW ) );
     QJsonObject nvidiaPowerObj;
-    nvidiaPowerObj["cTGPOffset"] = m_powerLimitSlider->value() - static_cast< int >( std::round( m_powerDefaultW ) );
+    nvidiaPowerObj["cTGPOffset"] = ctgpOffset;
     root["nvidiaPowerCTRLProfile"] = nvidiaPowerObj;
+
+    qDebug() << "[GPU-CTGP] buildProfileJSON"
+             << "sliderValueW=" << m_powerLimitSlider->value()
+             << "baselineDefaultW=" << m_powerDefaultW
+             << "ctgpOffset=" << ctgpOffset;
   }
 
   QJsonDocument doc( root );
+  qDebug() << "[GPU-CTGP] buildProfileJSON payload:" << QString::fromUtf8( doc.toJson( QJsonDocument::Compact ) );
   return QString::fromUtf8( doc.toJson( QJsonDocument::Compact ) );
 }
 
@@ -697,6 +821,12 @@ void GpuProfileTab::loadProfile( const QString &json )
   QJsonObject obj = doc.object();
 
   // Load clock offsets
+  for ( auto &grp : m_pstateGroups )
+  {
+    if ( grp.groupBox )
+      grp.groupBox->setChecked( false );
+  }
+
   if ( obj.contains( "offsets" ) )
   {
     QJsonArray offsets = obj["offsets"].toArray();
@@ -708,6 +838,9 @@ void GpuProfileTab::loadProfile( const QString &json )
       {
         if ( static_cast< int >( grp.pstate ) == ps )
         {
+          if ( grp.groupBox )
+            grp.groupBox->setChecked( true );
+
           if ( o.contains( "gpuOffsetMHz" ) && grp.gpuRow.slider )
           {
             int off = o["gpuOffsetMHz"].toInt();
@@ -734,55 +867,10 @@ void GpuProfileTab::loadProfile( const QString &json )
     }
   }
 
-  // Backwards compat: load old separate gpuCoreOffsets/vramOffsets format
-  if ( obj.contains( "gpuCoreOffsets" ) )
-  {
-    QJsonArray offsets = obj["gpuCoreOffsets"].toArray();
-    for ( const auto &v : offsets )
-    {
-      QJsonObject o = v.toObject();
-      int ps = o["pstate"].toInt();
-      int off = o["offsetMHz"].toInt();
-      for ( auto &grp : m_pstateGroups )
-      {
-        if ( static_cast< int >( grp.pstate ) == ps && grp.gpuRow.slider )
-        {
-          grp.gpuRow.slider->blockSignals( true );
-          grp.gpuRow.slider->setValue( off );
-          grp.gpuRow.slider->blockSignals( false );
-          grp.gpuRow.spinBox->blockSignals( true );
-          grp.gpuRow.spinBox->setValue( off );
-          grp.gpuRow.spinBox->blockSignals( false );
-          break;
-        }
-      }
-    }
-  }
-  if ( obj.contains( "vramOffsets" ) )
-  {
-    QJsonArray offsets = obj["vramOffsets"].toArray();
-    for ( const auto &v : offsets )
-    {
-      QJsonObject o = v.toObject();
-      int ps = o["pstate"].toInt();
-      int off = o["offsetMHz"].toInt();
-      for ( auto &grp : m_pstateGroups )
-      {
-        if ( static_cast< int >( grp.pstate ) == ps && grp.vramRow.slider )
-        {
-          grp.vramRow.slider->blockSignals( true );
-          grp.vramRow.slider->setValue( off );
-          grp.vramRow.slider->blockSignals( false );
-          grp.vramRow.spinBox->blockSignals( true );
-          grp.vramRow.spinBox->setValue( off );
-          grp.vramRow.spinBox->blockSignals( false );
-          break;
-        }
-      }
-    }
-  }
-
   // Load GPU locked clocks
+  if ( m_gpuLockedGroup )
+    m_gpuLockedGroup->setChecked( obj.contains( "gpuLockedClocks" ) );
+
   if ( obj.contains( "gpuLockedClocks" ) )
   {
     QJsonObject lc = obj["gpuLockedClocks"].toObject();
@@ -796,6 +884,9 @@ void GpuProfileTab::loadProfile( const QString &json )
   }
 
   // Load VRAM locked clocks
+  if ( m_vramLockedGroup )
+    m_vramLockedGroup->setChecked( obj.contains( "vramLockedClocks" ) );
+
   if ( obj.contains( "vramLockedClocks" ) )
   {
     QJsonObject lc = obj["vramLockedClocks"].toObject();
@@ -815,18 +906,19 @@ void GpuProfileTab::loadProfile( const QString &json )
     int offset = gpuObj["cTGPOffset"].toInt( 0 );
     int valueW = static_cast< int >( std::round( m_powerDefaultW ) ) + offset;
 
+    qDebug() << "[GPU-CTGP] loadProfile"
+             << "baselineDefaultW=" << m_powerDefaultW
+             << "loadedOffset=" << offset
+             << "targetW=" << valueW
+             << "sliderMin=" << m_powerLimitSlider->minimum()
+             << "sliderMax=" << m_powerLimitSlider->maximum();
+
     m_powerLimitSlider->blockSignals( true );
     m_powerLimitSlider->setValue( std::clamp( valueW, m_powerLimitSlider->minimum(), m_powerLimitSlider->maximum() ) );
     m_powerLimitSlider->blockSignals( false );
     m_powerLimitValue->setText( QString::number( m_powerLimitSlider->value() ) + " W" );
-  }
-  // Backward compat with older GPU profiles
-  else if ( obj.contains( "powerLimitW" ) && m_powerLimitSlider )
-  {
-    m_powerLimitSlider->blockSignals( true );
-    m_powerLimitSlider->setValue( static_cast< int >( obj["powerLimitW"].toDouble() ) );
-    m_powerLimitSlider->blockSignals( false );
-    m_powerLimitValue->setText( QString::number( obj["powerLimitW"].toDouble(), 'f', 0 ) + " W" );
+
+    qDebug() << "[GPU-CTGP] loadProfile applied sliderW=" << m_powerLimitSlider->value();
   }
 }
 

@@ -1,7 +1,7 @@
 %global _hardened_build 1
 
 Name:           ucc
-Version:        0.1.2
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Uniwill Control Center - System control application suite
 License:        GPL-3.0-or-later
@@ -132,8 +132,6 @@ systemctl daemon-reload > /dev/null 2>&1 || true
 %{_datadir}/icons/hicolor/48x48/apps/ucc-tray.png
 %{_datadir}/icons/hicolor/64x64/apps/ucc-tray.png
 %{_datadir}/icons/hicolor/128x128/apps/ucc-tray.png
-%{_datadir}/pixmaps/ucc-gui.svg
-%{_datadir}/pixmaps/ucc-tray.svg
 %{_mandir}/man1/ucc-cli.1*
 %{_datadir}/bash-completion/completions/ucc-cli
 # GNOME Shell extension

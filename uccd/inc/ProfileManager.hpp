@@ -22,8 +22,6 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-#include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <optional>
 #include <algorithm>
@@ -75,9 +73,9 @@ public:
         return it->second;
     }
 
-    // Fallback to legacy profiles only for unknown/undetected devices
-    result = legacyProfiles;
-    syslog( LOG_INFO, "Device not found. Loading %zu legacy default profiles", result.size() );
+    // Fallback to the current generic default profile set for unknown/undetected devices.
+    result = { maxEnergySave, silent, office, highPerformance };
+    syslog( LOG_INFO, "Device not found. Loading %zu generic default profiles", result.size() );
     return result;
   }
 
@@ -165,7 +163,7 @@ public:
    * For better security and maintainability, this should be refactored to use
    * nlohmann::json instead. The library is already a project dependency and
    * provides automatic escaping, proper error handling, and type safety.
-   * Refactoring should preserve backward compatibility with existing profile JSON.
+  * Refactoring should preserve support for the current profile JSON schema.
    */
   [[nodiscard]] static UccProfile parseProfileJSON( const std::string &json )
   {
@@ -282,15 +280,6 @@ public:
       profile.odmPowerLimits.tdpValues = extractIntArray( odmPowerJson, "tdpValues" );
     }
 
-    // Parse NVIDIA power control
-    std::string nvidiaJson = extractObject( json, "nvidiaPowerCTRLProfile" );
-    if ( !nvidiaJson.empty() )
-    {
-      TccNVIDIAPowerCTRLProfile nvidiaProfile;
-      nvidiaProfile.cTGPOffset = extractInt( nvidiaJson, "cTGPOffset", 0 );
-      profile.nvidiaPowerCTRLProfile = nvidiaProfile;
-    }
-
     // Parse keyboard settings
     std::string keyboardJson = extractObject( json, "keyboard" );
     if ( !keyboardJson.empty() )
@@ -304,10 +293,11 @@ public:
     if ( !topLevelKeyboardProfile.empty() )
     {
       profile.keyboard.keyboardProfileId = topLevelKeyboardProfile;
-      // Fallback: use it as the name too if the embedded keyboard JSON didn't have one
-      if ( profile.keyboard.keyboardProfileName.empty() )
-        profile.keyboard.keyboardProfileName = topLevelKeyboardProfile;
     }
+
+    // Parse GPU profile reference and embedded GPU OC data
+    profile.gpuProfileId = extractString( json, "gpuProfileId", "" );
+    profile.gpuOCProfileData = extractObject( json, "gpuOCProfileData" );
 
     // Parse charging profile (firmware-level charging mode stored per-profile)
     profile.chargingProfile = extractString( json, "chargingProfile", "" );
@@ -675,10 +665,17 @@ public:
       oss << profile.odmPowerLimits.tdpValues[ i ];
     }
 
-    oss << "]},"
-        << "\"nvidiaPowerCTRLProfile\":{"
-        << "\"cTGPOffset\":" << ( profile.nvidiaPowerCTRLProfile.has_value() ? profile.nvidiaPowerCTRLProfile->cTGPOffset : 0 )
-        << "}";
+    oss << "]}";
+
+    // GPU OC profile reference and embedded data
+    if ( !profile.gpuProfileId.empty() )
+    {
+      oss << ",\"gpuProfileId\":\"" << jsonEscape( profile.gpuProfileId ) << "\"";
+    }
+    if ( !profile.gpuOCProfileData.empty() && profile.gpuOCProfileData != "{}" )
+    {
+      oss << ",\"gpuOCProfileData\":" << profile.gpuOCProfileData;
+    }
 
     // Keyboard section
     if ( !profile.keyboard.keyboardProfileData.empty() && profile.keyboard.keyboardProfileData != "{}" )
@@ -690,13 +687,9 @@ public:
       oss << ",\"keyboard\":{}";
     }
 
-    // Prefer UUID over display name for selectedKeyboardProfile; the tray/GUI use
-    // the ID for combo-box indexing.  Fall back to the human-readable name for
-    // backward compatibility with profiles that predate UUID support.
+    // selectedKeyboardProfile always stores the keyboard profile UUID.
     {
-      const std::string &kbRef = !profile.keyboard.keyboardProfileId.empty()
-                                ? profile.keyboard.keyboardProfileId
-                                : profile.keyboard.keyboardProfileName;
+      const std::string &kbRef = profile.keyboard.keyboardProfileId;
       if ( !kbRef.empty() )
         oss << ",\"selectedKeyboardProfile\":\"" << jsonEscape( kbRef ) << "\"";
     }

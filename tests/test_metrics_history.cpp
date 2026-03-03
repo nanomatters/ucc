@@ -4,6 +4,8 @@
  */
 
 #include <QTest>
+#include <cstring>
+#include <string>
 #include "MetricsHistoryStore.hpp"
 
 // C++20 helper — std::string::contains() is C++23

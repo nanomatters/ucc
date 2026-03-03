@@ -20,10 +20,7 @@
 #include <fstream>
 #include <sstream>
 #include <regex>
-#include <set>
 #include <filesystem>
-#include <cstdio>
-#include <cmath>
 #include <thread>
 #include <chrono>
 #include <syslog.h>

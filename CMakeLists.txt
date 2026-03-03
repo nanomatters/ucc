@@ -3,7 +3,7 @@
 cmake_minimum_required( VERSION 3.20 )
 
 project( ucc
-  VERSION 0.1.2
+  VERSION 0.2.0
   DESCRIPTION "Uniwill Control Center - Qt/KDE application suite"
   LANGUAGES CXX
 )
@@ -126,10 +126,6 @@ if( BUILD_TESTS )
   enable_testing()
   add_subdirectory( tests )
 endif()
-
-# Install SVG icons to /usr/share/pixmaps for legacy compatibility
-install(FILES icons/ucc-gui.svg DESTINATION share/pixmaps)
-install(FILES icons/ucc-tray.svg DESTINATION share/pixmaps)
 
 # Install GNOME Shell extension
 if( BUILD_GNOME )

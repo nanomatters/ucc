@@ -360,13 +360,6 @@ void MainWindow::onKeyboardProfileChanged(const QString& profileId)
   }
 
   // Update brightness slider and visualizer
-  if ( brightness < 0 && !statesArray.isEmpty() && statesArray[0].isObject() )
-  {
-    // Fallback: extract brightness from first state (old format)
-    QJsonObject firstState = statesArray[0].toObject();
-    brightness = firstState["brightness"].toInt( 128 );
-  }
-
   if ( brightness >= 0 )
   {
     qDebug() << "[KBD PROFILE] applying brightness:" << brightness
@@ -513,14 +506,6 @@ void MainWindow::onRemoveKeyboardProfileClicked()
       QString ref = obj["selectedKeyboardProfile"].toString();
       if ( ref == currentId || ref == currentName )
         referencingProfiles << name;
-      // Also check legacy format
-      if ( obj.contains( "keyboard" ) && obj["keyboard"].isObject() )
-      {
-        QString legacyRef = obj["keyboard"].toObject()["profile"].toString();
-        if ( legacyRef == currentId || legacyRef == currentName )
-          if ( !referencingProfiles.contains( name ) )
-            referencingProfiles << name;
-      }
     }
   };
   checkProfiles( m_profileManager->defaultProfilesData() );

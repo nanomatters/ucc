@@ -31,7 +31,6 @@
 #include <mutex>
 #include <optional>
 #include "CommonTypes.hpp"
-#include "PolkitAuthority.hpp"
 #include "workers/DaemonWorker.hpp"
 #include "workers/HardwareMonitorWorker.hpp"
 #include "workers/DisplayWorker.hpp"
@@ -294,7 +293,6 @@ public slots:
   QString GetActiveProfileJSON();
   QString GetPowerState();
   bool SetTempProfile( const QString &profileName );
-  bool SetTempProfileById( const QString &id );
   bool SetActiveProfile( const QString &id );
   bool ApplyProfile( const QString &profileJSON );
   QString GetProfilesJSON();
@@ -612,6 +610,7 @@ private:
   void serializeProfilesJSON();
   void applyProfileForCurrentState();
   void applyFanAndPumpSettings( const UccProfile &profile );
+  void applyGpuOCFromProfile( const UccProfile &profile );
   void fillDeviceSpecificDefaults( std::vector< UccProfile > &profiles );
   void snapProfileFrequencies( UccProfile &profile );
   std::optional< UniwillDeviceID > identifyDevice();

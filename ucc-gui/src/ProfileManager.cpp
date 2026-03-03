@@ -648,7 +648,6 @@ void ProfileManager::loadCustomProfilesFromSettings()
 {
   m_customProfilesData = QJsonArray();
   m_customProfiles.clear();
-  bool migratedLegacyCtgpField = false;
 
   QString profilesJson = m_settings->value( "customProfiles", "{}" ).toString();
   QJsonDocument doc = QJsonDocument::fromJson( profilesJson.toUtf8() );
@@ -662,16 +661,6 @@ void ProfileManager::loadCustomProfilesFromSettings()
       if ( value.isObject() )
       {
         QJsonObject obj = value.toObject();
-
-        // Migration: cTGP is now managed from GPU OC profiles/tab, so remove
-        // stale legacy system-profile field from persisted custom profiles.
-        if ( obj.contains( "nvidiaPowerCTRLProfile" ) )
-        {
-          obj.remove( "nvidiaPowerCTRLProfile" );
-          m_customProfilesData[i] = obj;
-          migratedLegacyCtgpField = true;
-        }
-
         QString name = obj.value( "name" ).toString();
         if ( !name.isEmpty() )
           m_customProfiles.append( name );
@@ -691,9 +680,6 @@ void ProfileManager::loadCustomProfilesFromSettings()
     qWarning() << "Failed to parse stateMap JSON, using empty map";
     m_stateMap = QJsonObject();
   }
-
-  if ( migratedLegacyCtgpField )
-    saveCustomProfilesToSettings();
 }
 
 void ProfileManager::saveCustomProfilesToSettings()
@@ -739,23 +725,6 @@ void ProfileManager::loadBuiltinFanProfiles()
 // Custom fan profiles (local storage, by ID)
 // ---------------------------------------------------------------------------
 
-void ProfileManager::migrateFanProfileIds( QJsonArray &arr )
-{
-  // Ensure every entry has an "id" field; generate UUIDs for legacy entries
-  for ( int i = 0; i < arr.size(); ++i )
-  {
-    if ( arr[i].isObject() )
-    {
-      QJsonObject o = arr[i].toObject();
-      if ( o.value( "id" ).toString().isEmpty() )
-      {
-        o["id"] = QUuid::createUuid().toString( QUuid::WithoutBraces );
-        arr[i] = o;
-      }
-    }
-  }
-}
-
 void ProfileManager::loadCustomFanProfilesFromSettings()
 {
   m_customFanProfilesData = QJsonArray();
@@ -767,7 +736,6 @@ void ProfileManager::loadCustomFanProfilesFromSettings()
   if ( doc.isArray() )
   {
     m_customFanProfilesData = doc.array();
-    migrateFanProfileIds( m_customFanProfilesData );
     for ( const auto &val : m_customFanProfilesData )
     {
       if ( val.isObject() )
@@ -777,8 +745,6 @@ void ProfileManager::loadCustomFanProfilesFromSettings()
           m_customFanProfiles.append( name );
       }
     }
-    // Persist any migration changes (new IDs)
-    saveCustomFanProfilesToSettings();
   }
 }
 
@@ -910,22 +876,6 @@ bool ProfileManager::renameFanProfile( const QString &fanProfileId, const QStrin
 // Custom keyboard profiles (local storage, by ID)
 // ---------------------------------------------------------------------------
 
-void ProfileManager::migrateKeyboardProfileIds( QJsonArray &arr )
-{
-  for ( int i = 0; i < arr.size(); ++i )
-  {
-    if ( arr[i].isObject() )
-    {
-      QJsonObject o = arr[i].toObject();
-      if ( o.value( "id" ).toString().isEmpty() )
-      {
-        o["id"] = QUuid::createUuid().toString( QUuid::WithoutBraces );
-        arr[i] = o;
-      }
-    }
-  }
-}
-
 void ProfileManager::loadCustomKeyboardProfilesFromSettings()
 {
   m_customKeyboardProfilesData = QJsonArray();
@@ -937,7 +887,6 @@ void ProfileManager::loadCustomKeyboardProfilesFromSettings()
   if ( doc.isArray() )
   {
     m_customKeyboardProfilesData = doc.array();
-    migrateKeyboardProfileIds( m_customKeyboardProfilesData );
     for ( const auto &val : m_customKeyboardProfilesData )
     {
       if ( val.isObject() )
@@ -947,8 +896,6 @@ void ProfileManager::loadCustomKeyboardProfilesFromSettings()
           m_customKeyboardProfiles.append( name );
       }
     }
-    // Persist any migration changes (new IDs)
-    saveCustomKeyboardProfilesToSettings();
   }
 }
 
@@ -1073,22 +1020,6 @@ bool ProfileManager::renameKeyboardProfile( const QString &keyboardProfileId, co
 // Custom GPU OC profiles (local storage, by ID)
 // ---------------------------------------------------------------------------
 
-void ProfileManager::migrateGpuProfileIds( QJsonArray &arr )
-{
-  for ( int i = 0; i < arr.size(); ++i )
-  {
-    if ( arr[i].isObject() )
-    {
-      QJsonObject o = arr[i].toObject();
-      if ( o.value( "id" ).toString().isEmpty() )
-      {
-        o["id"] = QUuid::createUuid().toString( QUuid::WithoutBraces );
-        arr[i] = o;
-      }
-    }
-  }
-}
-
 void ProfileManager::loadBuiltinGpuProfiles()
 {
   m_builtinGpuProfilesData = QJsonArray();
@@ -1120,7 +1051,6 @@ void ProfileManager::loadCustomGpuProfilesFromSettings()
   if ( doc.isArray() )
   {
     m_customGpuProfilesData = doc.array();
-    migrateGpuProfileIds( m_customGpuProfilesData );
     for ( const auto &val : m_customGpuProfilesData )
     {
       if ( val.isObject() )
@@ -1130,7 +1060,6 @@ void ProfileManager::loadCustomGpuProfilesFromSettings()
           m_customGpuProfiles.append( name );
       }
     }
-    saveCustomGpuProfilesToSettings();
   }
 }
 

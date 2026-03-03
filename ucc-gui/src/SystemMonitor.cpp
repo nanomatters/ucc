@@ -20,8 +20,6 @@
 #include <QJsonObject>
 #include <QJsonArray>
 
-#include <iostream>
-
 namespace ucc
 {
 

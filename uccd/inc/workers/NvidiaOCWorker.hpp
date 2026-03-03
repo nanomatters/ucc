@@ -19,7 +19,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <optional>
 
 /**
  * @brief NvidiaOCWorker — daemon-side GPU overclocking controller.

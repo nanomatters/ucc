@@ -16,23 +16,15 @@
 #pragma once
 
 #include "../profiles/UccProfile.hpp"
-#include "../PowerSupplyController.hpp"
 #include "SysfsNode.hpp"
 #include "../TccSettings.hpp"
 #include "../NvmlWrapper.hpp"
 
-#include <algorithm>
-#include <array>
 #include <atomic>
-#include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iostream>
-#include <ranges>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <syslog.h>
 #include <vector>
@@ -112,10 +104,6 @@ public:
     logLine( "ProfileSettingsWorker: reapplyProfile() called" );
     applyODMPowerLimits();
     applyODMProfile();
-
-    // Always re-apply NVIDIA cTGP offset on any profile change (matches TCC behaviour)
-    if ( m_nvidiaPowerCTRLAvailable )
-      applyNVIDIACTGPOffset();
   }
 
   // =====================================================================
@@ -139,15 +127,10 @@ public:
   // =====================================================================
 
   /**
-   * @brief Called when the active profile changes to apply the new cTGP offset.
+   * @brief Apply cTGP offset explicitly (GPU-profile path only).
+   * @return true if successfully applied and verified.
    */
-  void onNVIDIAPowerProfileChanged()
-  {
-    if ( !m_nvidiaPowerCTRLAvailable )
-      return;
-
-    applyNVIDIACTGPOffset();
-  }
+  bool applyNVIDIAPowerOffset( int32_t offset );
 
   /**
    * @brief Periodic validation — checks if an external process changed the cTGP offset
@@ -291,8 +274,7 @@ private:
   // ----- NVIDIA Power Control private methods -----
 
   void initNVIDIAPowerCTRL();
-  int32_t getNVIDIAProfileOffset() const;
-  void applyNVIDIACTGPOffset();
+  bool applyNVIDIACTGPOffset( int32_t offset );
   void queryNVIDIAPowerLimits();
 
   bool checkNVIDIAAvailability() const

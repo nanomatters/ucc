@@ -153,9 +153,6 @@ private:
   void loadCustomGpuProfilesFromSettings();
   void loadBuiltinGpuProfiles();
   void saveCustomGpuProfilesToSettings();
-  void migrateFanProfileIds( QJsonArray &arr );
-  void migrateKeyboardProfileIds( QJsonArray &arr );
-  void migrateGpuProfileIds( QJsonArray &arr );
 
   std::unique_ptr< UccdClient > m_client;
   std::unique_ptr< QSettings > m_settings;

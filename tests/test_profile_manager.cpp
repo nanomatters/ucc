@@ -47,7 +47,6 @@ private:
       },
       "odmProfile": { "name": "enthusiast" },
       "odmPowerLimits": { "tdpValues": [45, 80] },
-      "nvidiaPowerCTRLProfile": { "cTGPOffset": 15 },
       "keyboard": { "keyboardProfileName": "Rainbow" },
       "selectedKeyboardProfile": "kb-uuid-001",
       "chargingProfile": "balanced",
@@ -126,8 +125,7 @@ private slots:
     QCOMPARE( *p.odmProfile.name, std::string( "enthusiast" ) );
     QCOMPARE( static_cast< int >( p.odmPowerLimits.tdpValues.size() ), 2 );
     QCOMPARE( p.odmPowerLimits.tdpValues[0], 45 );
-    QVERIFY( p.nvidiaPowerCTRLProfile.has_value() );
-    QCOMPARE( p.nvidiaPowerCTRLProfile->cTGPOffset, 15 );
+    // nvidiaPowerCTRLProfile removed from general profile — lives only in GPU profile
   }
 
   void parseProfile_keyboard()

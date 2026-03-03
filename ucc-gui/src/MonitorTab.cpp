@@ -814,8 +814,6 @@ void MonitorTab::handleSeriesClick( QLineSeries *ls, const QPointF &point )
   const qint64 clickTs = static_cast< qint64 >( point.x() );
 
   if ( static_cast< int >( m_stickyMarks.size() ) >= MAX_STICKY_MARKS )
-
-  if ( static_cast< int >( m_stickyMarks.size() ) >= MAX_STICKY_MARKS )
     return;
 
   // Snap to the nearest actual data point in the raw buffer

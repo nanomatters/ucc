@@ -15,8 +15,6 @@
 
 #include <random>
 #include <chrono>
-#include <sstream>
-#include <iomanip>
 
 #include "profiles/UccProfile.hpp"
 
@@ -57,9 +55,6 @@ std::string generateProfileId()
 
 const std::map< std::string, std::string > profileImageMap =
 {
-  { LegacyDefaultProfileIDs::Default, "icon_profile_performance.svg" },
-  { LegacyDefaultProfileIDs::CoolAndBreezy, "icon_profile_breezy.svg" },
-  { LegacyDefaultProfileIDs::PowersaveExtreme, "icon_profile_energysaver.svg" },
   { "custom", "icon_profile_custom.svg" },
   { DefaultProfileIDs::MaxEnergySave, "icon_profile_energysaver.svg" },
   { DefaultProfileIDs::Quiet, "icon_profile_quiet4.svg" },

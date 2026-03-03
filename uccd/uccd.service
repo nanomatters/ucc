@@ -25,11 +25,11 @@ ReadWritePaths=/etc/ucc /run
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-MemoryDenyWriteExecute=yes
 RestrictNamespaces=yes
 LockPersonality=yes
-CapabilityBoundingSet=CAP_SYS_RAWIO CAP_NET_ADMIN
-AmbientCapabilities=CAP_SYS_RAWIO CAP_NET_ADMIN
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=CAP_SYS_RAWIO CAP_NET_ADMIN CAP_SYS_ADMIN
+AmbientCapabilities=CAP_SYS_RAWIO CAP_NET_ADMIN CAP_SYS_ADMIN
 
 [Install]
 WantedBy=multi-user.target

@@ -43,7 +43,6 @@
 #include <map>
 #include <vector>
 #include <functional>
-#include <cstdint>
 
 namespace ucc
 {

@@ -16,7 +16,6 @@
 #pragma once
 
 #include "UccProfile.hpp"
-#include <string>
 #include <vector>
 #include <map>
 
@@ -76,12 +75,6 @@ extern const UccProfile silent;
 extern const UccProfile office;
 extern const UccProfile highPerformance;
 extern const UccProfile highPerformance25WcTGP;
-
-// legacy profiles (for unknown devices)
-extern const UccProfile legacyDefault;
-extern const UccProfile legacyCoolAndBreezy;
-extern const UccProfile legacyPowersaveExtreme;
-extern const std::vector< UccProfile > legacyProfiles;
 
 // default custom profiles
 extern const UccProfile defaultCustomProfile;

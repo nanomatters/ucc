@@ -34,7 +34,6 @@
 #include <QStackedWidget>
 #include <QtWidgets/QTableWidget>
 #include <memory>
-#include <map>
 #include "ProfileManager.hpp"
 #include "SystemMonitor.hpp"
 #include "../libucc-dbus/UccdClient.hpp"
