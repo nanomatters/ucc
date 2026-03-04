@@ -202,12 +202,40 @@ export class UccdClient {
     getDisplayBrightness()  { return this._call('GetDisplayBrightness') ?? 50; }
 
     getAvailableODMProfiles() { return this._call('ODMProfilesAvailable') ?? []; }
+    getODMPerformanceProfile() { return this._call('GetODMPerformanceProfile') ?? ''; }
     getWaterCoolerSupported() { return this._call('GetWaterCoolerSupported') ?? false; }
     isWaterCoolerEnabled()    { return this._call('IsWaterCoolerEnabled') ?? false; }
     isDeviceSupported()       { return this._call('IsDeviceSupported') ?? false; }
     getSystemInfoJSON()       { return this._call('GetSystemInfoJSON'); }
 
     getFanProfile(name) { return this._call('GetFanProfile', [name], 's'); }
+    getGpuProfile(id)   { return this._call('GetGpuProfile', [id], 's'); }
+    getGpuProfilesJSON() { return this._call('GetGpuProfileNames'); }
+    getCTGPAdjustmentSupported() { return this._call('GetCTGPAdjustmentSupported') ?? false; }
+
+    // -----------------------------------------------------------------------
+    // Extended NVIDIA dGPU metrics (all from GetDGpuInfoValuesJSON)
+    // -----------------------------------------------------------------------
+
+    /** Parse the dGPU JSON blob and return the full object, cached per poll. */
+    _getDGpuInfo() {
+        const raw = this._call('GetDGpuInfoValuesJSON');
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch { return null; }
+    }
+
+    getDGpuComputeUtilPct()   { return this._getDGpuInfo()?.computeUtilPct   ?? -1; }
+    getDGpuMemoryUtilPct()    { return this._getDGpuInfo()?.memoryUtilPct    ?? -1; }
+    getDGpuVramUsedMiB()      { return this._getDGpuInfo()?.vramUsedMiB      ?? -1; }
+    getDGpuVramTotalMiB()     { return this._getDGpuInfo()?.vramTotalMiB     ?? -1; }
+    getDGpuPerfLimitReason()  { return this._getDGpuInfo()?.perfLimitReason  ?? ''; }
+    getDGpuEncoderUtilPct()   { return this._getDGpuInfo()?.encoderUtilPct   ?? -1; }
+    getDGpuDecoderUtilPct()   { return this._getDGpuInfo()?.decoderUtilPct   ?? -1; }
+    getDGpuCurrentPstate()    { return this._getDGpuInfo()?.currentPstate    ?? -1; }
+    getDGpuGrClockOffsetMHz() { const v = this._getDGpuInfo()?.grClockOffsetMHz; return (v !== undefined && v !== -999) ? v : -999; }
+    getDGpuMemClockOffsetMHz(){ const v = this._getDGpuInfo()?.memClockOffsetMHz; return (v !== undefined && v !== -999) ? v : -999; }
+    getDGpuVramFreqMHz()      { return this._getDGpuInfo()?.vramFrequency    ?? -1; }
+    getDGpuCoreVoltageMv()    { return this._getDGpuInfo()?.coreVoltageMv    ?? -1; }
 
     // -----------------------------------------------------------------------
     // Setters
@@ -223,6 +251,18 @@ export class UccdClient {
 
     setKeyboardBacklight(json) {
         return this._callVoid('SetKeyboardBacklightStatesJSON', [json], 's');
+    }
+
+    setODMPerformanceProfile(profile) {
+        return this._callVoid('SetODMPerformanceProfile', [profile], 's');
+    }
+
+    setNVIDIAPowerOffset(offset) {
+        return this._callVoid('SetNVIDIAPowerOffset', [offset], 'i');
+    }
+
+    applyNvidiaGpuOCProfile(profileJSON, deviceIndex = 0) {
+        return this._call('ApplyNvidiaGpuOCProfile', [profileJSON, deviceIndex], 'si') ?? false;
     }
 
     setWebcamEnabled(v) {

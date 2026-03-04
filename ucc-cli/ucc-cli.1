@@ -1,129 +1,448 @@
 .\" ucc-cli.1 — man page for ucc-cli
 .\" SPDX-License-Identifier: GPL-3.0-or-later
-.TH UCC-CLI 1 "February 2026" "ucc-cli 0.2.0" "Uniwill Control Center"
+.TH UCC-CLI 1 "March 2026" "ucc-cli 0.2.0" "Uniwill Control Center"
 .SH NAME
 ucc-cli \- command-line interface for Uniwill Control Center
 .SH SYNOPSIS
 .B ucc-cli
 .I command
+.RI [ sub-command ]
 .RI [ options ]
 .SH DESCRIPTION
 .B ucc-cli
 is a command-line client for the Uniwill Control Center daemon
 .RB ( uccd ).
-It communicates over D-Bus to query and control CPU/GPU performance profiles,
-fan curves, keyboard backlighting, display brightness, webcam, Fn Lock,
-water cooler hardware, and battery charging settings on Uniwill laptops.
+It communicates over the D-Bus system bus
+.RB ( com.uniwill.uccd )
+to query and control hardware on Uniwill/Clevo/Tong Fang laptops:
+.IP \(bu 2
+CPU/GPU performance profiles (built-in and user-created)
+.IP \(bu 2
+GPU overclocking (NVIDIA clock offsets, locked clocks, power limits)
+.IP \(bu 2
+cTGP (configurable Total Graphics Power) offset
+.IP \(bu 2
+ODM performance modes (firmware-level power profiles)
+.IP \(bu 2
+Fan curve management (CPU, GPU, pump, water cooler fans)
+.IP \(bu 2
+Per-zone keyboard backlight control (colours, modes, brightness)
+.IP \(bu 2
+Display brightness, webcam toggle, Fn Lock
+.IP \(bu 2
+Water cooler hardware (fan, pump, LED)
+.IP \(bu 2
+Battery charging profiles, priorities, and charge thresholds
+.SS Architecture
+.B uccd
+is a system daemon that mediates all hardware access.
+.B ucc-cli
+sends D-Bus method calls to
+.B uccd
+and prints the results.
+No root privileges are required for
+.BR ucc-cli ;
+the daemon applies the requested changes via its own elevated permissions.
+.PP
+User settings (custom profiles, fan curves, keyboard profiles, GPU OC profiles,
+and the power-state\[->]profile map) are stored in
+.IR ~/.config/uccrc ,
+an INI file shared with
+.B ucc-gui
+and
+.BR ucc-tray .
+.B ucc-cli
+reads this file to resolve custom profiles that may not be registered
+with the daemon.
+.SS Profile Hierarchy
+A
+.I profile
+bundles the following settings into a single named configuration that can be
+activated atomically:
+.RS 4
+.IP \(bu 2
+CPU: governor, EPP, core count, turbo, frequency limits
+.IP \(bu 2
+Fan: which fan curve profile to use, lock fans together, water cooler
+.IP \(bu 2
+Display: brightness, refresh rate
+.IP \(bu 2
+Webcam: enable/disable
+.IP \(bu 2
+ODM power limits: PL1 (sustained), PL2 (boost), PL4 (peak) in watts
+.IP \(bu 2
+GPU OC data: embedded overclocking profile with cTGP offset
+.IP \(bu 2
+ODM performance mode (e.g.\& quiet, balanced, performance)
+.IP \(bu 2
+Charging profile
+.IP \(bu 2
+Keyboard profile reference
+.RE
+.PP
+.B Built-in profiles
+ship with the daemon and cannot be modified.
+.B Custom profiles
+are created by the user in the GUI or by saving via
+.BR "ucc-cli profile save" .
+Both types are identified by a UUID.
+.PP
+The
+.B state map
+assigns a profile UUID to each power state
+.RB ( power_ac , " power_bat" , " power_wc" ),
+enabling automatic profile switching when the laptop is plugged in,
+on battery, or docked to a water cooler.
+.PP
+.B Fan profiles
+and
+.B keyboard profiles
+are separate entities referenced from within a main profile.
+.B GPU OC profiles
+define overclocking parameters (clock offsets, locked clocks, power limits,
+cTGP offset) and can be applied independently of main profiles.
 .PP
 The daemon must be running for any command to succeed.
 Check with
 .BR "systemctl status uccd" .
+.\" ===================================================================
 .SH COMMANDS
+Most top-level commands accept short aliases shown in parentheses.
+Sub-commands also accept common aliases:
+.B list
+may be written as
+.BR ls ;
+.B get
+as
+.BR show ;
+.B set
+as
+.BR activate ;
+.B delete
+as
+.B del
+or
+.BR rm .
+.\" -------------------------------------------------------------------
 .SS General
 .TP
 .B status
-Print a full system dashboard: active profile, CPU/GPU temperatures,
-frequencies, power draw, fan speeds, hardware toggles, water cooler state,
-and charging information.
+Print a full system dashboard covering every hardware subsystem:
+system model, CPU/GPU model names, active profile, CPU and GPU
+temperatures, frequencies, power draw, fan speeds, extended NVIDIA metrics
+(if a discrete NVIDIA GPU is present), hardware toggles (brightness, webcam,
+Fn Lock), water cooler state (if supported), and charging information.
+.IP
+When NVIDIA extended metrics are available, the GPU section additionally
+shows GPU load, memory load, VRAM usage, P-state, core voltage, and clock
+offsets.
+.IP
 Use
 .B \-\-json
-for machine-readable output.
+for machine-readable output (see
+.B JSON OUTPUT
+below).
 .TP
-.B monitor \fR[\fB\-n\fR \fICOUNT\fR] [\fB\-i\fR \fISECS\fR]
-Continuously print a compact one-line summary of CPU and GPU metrics
-(temperature, frequency, power, fan speed).
-Defaults to running indefinitely at 2-second intervals.
+.BR monitor " (" mon ") " \fR[\fB\-n\fR " " \fICOUNT\fR] " " [\fB\-i\fR " " \fISECS\fR]
+Continuously print a compact one-line summary per sample:
 .RS
+.PP
+.nf
+CPU: 72°C  4800MHz   35.2W  Fan: 55%  |  GPU: 65°C  1950MHz   80.3W  Fan: 60%  Load: 42%  P0
+.fi
+.PP
+Fields: CPU temperature, frequency, power, fan percentage; GPU temperature,
+frequency, power, fan percentage.
+If a discrete NVIDIA GPU is present, GPU compute load (%) and current P-state
+are appended.
 .TP
 .BI \-n " COUNT"
 Stop after
 .I COUNT
-samples (0 = infinite).
+samples.
+A value of 0 (the default) runs indefinitely until interrupted.
 .TP
 .BI \-i " SECS"
 Polling interval in seconds (default: 2).
 .RE
-.SS Profile Management
+.\" -------------------------------------------------------------------
+.SS "Profile Management \fR(profile, prof)"
 .TP
-.B profile list
+.B profile list \fR(\fBls\fR)
 List all built-in and custom profiles with their UUIDs and names.
+Custom profiles that are assigned to a power state in the state map
+are annotated with the state labels (e.g.\& \fB[AC, WC]\fR).
 .TP
-.B profile get
-Print the active profile as indented JSON.
+.B profile get \fR(\fBshow\fR, \fBactive\fR)
+Print the active profile in a human-readable summary.
+The output covers every embedded section: CPU settings (governor, EPP,
+online cores, turbo, frequency limits), fan settings (profile UUID,
+same-speed, water cooler), display (brightness, refresh rate), webcam,
+ODM power limits (PL1/PL2/PL4), cTGP offset, ODM performance mode,
+charging profile, and keyboard profile.
 .TP
-.B profile set \fIPROFILE_ID\fR
+.B profile set \fIPROFILE_ID\fR \fR(\fBactivate\fR)
 Activate the profile identified by
 .IR PROFILE_ID .
+The daemon applies the profile's CPU, fan, display, keyboard, and hardware
+settings atomically.
 .TP
-.B profile defaults
-Print the built-in profiles as JSON.
+.B profile defaults \fR(\fBdefault\fR)
+Print all built-in profiles with detailed per-section summaries.
 .TP
-.B profile customs
-Print the custom profiles as JSON.
+.B profile customs \fR(\fBcustom\fR)
+Print all custom profiles with detailed per-section summaries.
 .TP
 .B profile apply \fIJSON\fR
-Apply a complete profile from a JSON string.
+Apply a complete profile from a JSON string without saving it.
+Useful for testing profile configurations.
 .TP
 .B profile save \fIJSON\fR
 Save a custom profile (creates or updates).
+The JSON must be a complete profile object with an
+.B id
+field (UUID).
 .TP
-.B profile delete \fIPROFILE_ID\fR
-Delete a custom profile.
-.SS State Map
+.B profile delete \fIPROFILE_ID\fR \fR(\fBdel\fR, \fBrm\fR)
+Delete a custom profile by its UUID.
+.\" -------------------------------------------------------------------
+.SS "State Map \fR(statemap, state-map)"
 The state map controls automatic profile switching when the power source
-changes (AC, battery, or water cooler).
+changes.
 .TP
-.B statemap get
-Print the current settings / state map as JSON.
+.B statemap get \fR(\fBshow\fR)
+Print the current state map (power state \[->] profile UUID mapping) and
+feature toggles (CPU settings, fan control, keyboard backlight, temperature
+unit, charging profile/priority).
 .TP
 .B statemap set \fISTATE\fR \fIPROFILE_ID\fR
 Assign a profile to a power state.
-Valid states:
-.BR power_ac ,
-.BR power_bat ,
-.BR power_wc .
-.SS Fan Control
+.I STATE
+must be one of:
+.RS
+.TP 12
+.B power_ac
+Mains / AC adapter
 .TP
-.B fan list
-List available fan profiles (built-in and custom) with their UUIDs.
+.B power_bat
+Battery
 .TP
-.B fan get \fIFAN_PROFILE_ID\fR
-Print the fan profile's curve data as JSON (keys:
-.BR tableCPU ,
-.BR tableGPU ,
-.BR tablePump ,
-.BR tableWaterCoolerFan ).
+.B power_wc
+AC with water cooler connected
+.RE
+.\" -------------------------------------------------------------------
+.SS "Fan Control \fR(fan)"
+Fan profiles define temperature\[->]duty-percent curves for each fan channel.
+A fan profile is a JSON object with curve arrays; each curve is a list of
+.B {"temp": \fIn\fR, "speed": \fIn\fR}
+points (temperature in °C, speed in %).
 .TP
-.B fan set \fIFAN_PROFILE_ID\fR
+.B fan list \fR(\fBls\fR)
+List available fan profiles with their UUIDs and fan profile names.
+Both daemon built-in profiles and custom fan profiles from
+.I ~/.config/uccrc
+are shown.
+Custom profiles assigned to a power state are annotated with state labels.
+.TP
+.B fan get \fIFAN_PROFILE_ID\fR \fR(\fBshow\fR)
+Print the fan profile's curve data as a formatted table for each channel
+(CPU, GPU, Pump, Water cooler fan).
+Works with both built-in and custom fan profiles; custom profiles are
+resolved from
+.IR ~/.config/uccrc .
+.TP
+.B fan set \fIFAN_PROFILE_ID\fR \fR(\fBactivate\fR)
 Activate a fan profile by its UUID.
-The profile's curve keys are remapped and applied to the daemon.
+The stored curve keys
+.RB ( tableCPU ", " tableGPU ", " tablePump ", " tableWaterCoolerFan )
+are remapped to the daemon's apply format
+.RB ( cpu ", " gpu ", " pump ", " waterCoolerFan )
+and sent to the daemon.
 Works with both built-in and custom fan profiles.
 .TP
 .B fan apply \fIJSON\fR
-Apply fan curves directly.
-The JSON must contain keys:
-.BR cpu ,
-.BR gpu ,
-.BR pump ,
-.BR waterCoolerFan
-(each an array of temperature\[->]duty-percent points).
+Apply fan curves directly from a JSON string.
+The JSON must contain one or more of the keys:
+.RS
+.PP
+.nf
+{
+  "cpu":            [ {"temp": 40, "speed": 20}, {"temp": 80, "speed": 100} ],
+  "gpu":            [ {"temp": 40, "speed": 20}, {"temp": 80, "speed": 100} ],
+  "pump":           [ {"temp": 40, "speed": 30}, {"temp": 80, "speed": 100} ],
+  "waterCoolerFan": [ {"temp": 40, "speed": 20}, {"temp": 80, "speed": 100} ]
+}
+.fi
+.RE
 .TP
 .B fan revert
-Revert fan curves to the profile stored in the daemon.
-.SS Keyboard Backlight
+Revert fan curves to the profile stored in the daemon (undo manual
+.B fan apply
+or
+.B fan set
+changes).
+.\" -------------------------------------------------------------------
+.SS "GPU Info & Overclocking \fR(gpu)"
 .TP
-.B keyboard info
-Print keyboard backlight capabilities (zone count, max brightness, max RGB values).
+.B gpu \fR(\fBgpu info\fR)
+Show comprehensive GPU information in several sections:
+.RS
+.PP
+.B Sensors\fR:
+temperature, core frequency, power draw, fan speed (% and RPM).
+.PP
+.B NVIDIA Extended Metrics
+(shown only when a discrete NVIDIA GPU is detected):
+GPU compute load (%), memory controller load (%), VRAM usage
+(used/total MiB), VRAM frequency, current P-state (P0\-P15), core voltage
+(mV), graphics clock offset (MHz), memory clock offset (MHz),
+NVENC utilization (%), NVDEC utilization (%), performance limit reason.
+.PP
+.B NVIDIA Power Control\fR:
+cTGP available (yes/no), maximum power limit (W), default power limit (W),
+current cTGP offset (W).
+.PP
+.B NVIDIA OC State
+(shown only when overclocking is available):
+organized OC capability and limits summary for device 0: GPU name,
+offset/locked-clock support, GPU clock range, power limit range/default/current,
+and active P-state clock offsets.
+.PP
+.B iGPU\fR:
+integrated GPU temperature, frequency, and power.
+.RE
 .TP
-.B keyboard get
-Print the current per-zone backlight state as a JSON array.
+.B gpu profile list \fR(\fBls\fR)
+List all GPU OC profiles.
+Built-in profiles are fetched from the daemon; custom profiles are read
+from the
+.B customGpuProfiles
+key in
+.IR ~/.config/uccrc .
+Each entry shows its UUID and display name.
+.TP
+.B gpu profile get \fIGPU_PROFILE_ID\fR \fR(\fBshow\fR)
+Display the contents of a GPU OC profile:
+.RS
+.IP \(bu 2
+.B cTGP offset
+(W) \(em additional power headroom for the GPU
+.IP \(bu 2
+.B Core clock offset
+(MHz) \(em added to the base graphics clock
+.IP \(bu 2
+.B Memory clock offset
+(MHz) \(em added to the base memory clock
+.IP \(bu 2
+.B GPU locked clocks
+(min\-max MHz) \(em clamp GPU frequency to a fixed range
+.IP \(bu 2
+.B VRAM locked clocks
+(min\-max MHz) \(em clamp VRAM frequency to a fixed range
+.IP \(bu 2
+.B Power limit
+(W) \(em maximum board power for the GPU
+.PP
+The full raw JSON of the profile is also printed.
+.RE
+.TP
+.B gpu profile set \fIGPU_PROFILE_ID\fR \fR(\fBactivate\fR, \fBapply\fR)
+Apply a GPU OC profile.
+The apply sequence:
+.RS
+.IP 1. 4
+Resolve the profile JSON: tries daemon first; falls back to
+.B customGpuProfiles
+in
+.IR ~/.config/uccrc .
+.IP 2.
+If the profile contains a
+.B cTGPOffset
+value and the hardware reports cTGP adjustment as supported,
+.B setNVIDIAPowerOffset()
+is called first to raise or lower the power envelope.
+.IP 3.
+The profile UUID is injected into the JSON as
+.BR gpuProfileId .
+.IP 4.
+The complete profile is sent to the daemon via
+.B ApplyNvidiaGpuOCProfile
+(device index 0), which applies clock offsets, locked clocks, and
+power limits atomically.
+.RE
+.TP
+.B gpu profile reset \fR(\fBclear\fR)
+Reset all NVIDIA GPU overclocking to factory defaults:
+all clock offsets are zeroed, locked clocks are removed, and the power limit
+is restored to the default value.
+.TP
+.B gpu oc-state \fR(\fBocstate\fR)
+Print the current NVIDIA OC state for device 0 as pretty-printed JSON.
+Returns the live clock offset values, locked-clock ranges, and power limit
+as reported by the driver.
+Only available when
+.B getNvidiaOCAvailable()
+returns true.
+.\" -------------------------------------------------------------------
+.SS "ODM Performance Profile \fR(odm)"
+ODM performance profiles are firmware-level power modes that affect the
+overall thermal and power behaviour of the laptop (e.g.\& quiet, balanced,
+performance, enthusiast).
+Not all hardware supports ODM profiles; commands will report
+\(lqnot available\(rq when unsupported.
+.TP
+.B odm list \fR(\fBls\fR)
+List all available ODM performance profiles and indicate the currently
+active one.
+If invoked without sub-command, behaves as
+.BR "odm list" .
+.TP
+.B odm get \fR(\fBshow\fR)
+Print the name of the currently active ODM performance profile.
+.TP
+.B odm set \fIPROFILE\fR
+Set the ODM performance profile to
+.IR PROFILE .
+The value must match one of the profile names returned by
+.BR "odm list" .
+.\" -------------------------------------------------------------------
+.SS "Keyboard Backlight \fR(keyboard, kb)"
+.TP
+.B keyboard info \fR(\fBcaps\fR)
+Print keyboard backlight capabilities: zone count, maximum brightness,
+maximum per-channel RGB values, and available lighting modes.
+.TP
+.B keyboard get \fR(\fBshow\fR)
+Print the current per-zone backlight state.
+If all zones share the same settings, a single uniform summary is shown;
+otherwise a per-zone table is printed.
 .TP
 .B keyboard set \fIJSON\fR
 Set per-zone backlight states from a JSON array.
-Each element:
+Each element describes one zone:
+.RS
+.PP
 .nf
-  { "mode": 0, "brightness": N, "red": R, "green": G, "blue": B }
+[
+  { "mode": 0, "brightness": 128, "red": 255, "green": 0, "blue": 0 },
+  ...
+]
 .fi
+.PP
+.B mode
+values:
+.TS
+tab(|);
+c c
+n l.
+Value|Mode
+_
+0|static \(em solid colour
+1|breathe \(em fade in/out
+2|colorful \(em cycle through colours
+3|breathe-color \(em breathing colour cycle
+.TE
+.RE
 .TP
 .B keyboard color \fIR\fR \fIG\fR \fIB\fR [\fIBRIGHTNESS\fR]
 Set a uniform colour across all keyboard zones.
@@ -133,43 +452,65 @@ Set a uniform colour across all keyboard zones.
 are 0\-255.
 .I BRIGHTNESS
 defaults to 128.
+The mode is set to
+.B static
+(0).
 .TP
-.B keyboard profiles
-List custom keyboard profiles (from local settings) with their UUIDs and names.
+.B keyboard profiles \fR(\fBprofile-list\fR, \fBls\fR)
+List custom keyboard profiles from
+.I ~/.config/uccrc
+with their UUIDs and names.
+Profiles assigned to a power state are annotated with state labels.
 .TP
-.B keyboard activate \fIPROFILE_ID\fR
+.B keyboard activate \fIPROFILE_ID\fR \fR(\fBuse\fR)
 Activate a custom keyboard profile by its UUID.
-The profile's backlight data is sent to the daemon.
-.SS Hardware Controls
+The profile's stored backlight JSON is sent to the daemon.
+.\" -------------------------------------------------------------------
+.SS "Hardware Controls"
 .TP
-.B brightness get
+.B brightness get \fR(\fIalias:\fR \fBbr get\fR)
 Print the current display brightness (0\-100).
 .TP
 .B brightness set \fIVALUE\fR
 Set display brightness (0\-100).
 .TP
 .B webcam get
-Print webcam status (\fBenabled\fR or \fBdisabled\fR).
+Print webcam status:
+.B enabled
+or
+.BR disabled .
 .TP
 .B webcam set \fIon\fR|\fIoff\fR
 Enable or disable the webcam.
+Accepted values:
+.BR on ", " true ", " 1 ", " yes ", " enable ", " enabled
+or
+.BR off ", " false ", " 0 ", " no ", " disable ", " disabled .
 .TP
-.B fnlock get
-Print Fn Lock status (\fBon\fR or \fBoff\fR).
+.B fnlock get \fR(\fIalias:\fR \fBfn-lock\fR)
+Print Fn Lock status:
+.B on
+or
+.BR off .
 .TP
 .B fnlock set \fIon\fR|\fIoff\fR
-Enable or disable Fn Lock.
-.SS Water Cooler
-These commands control the Uniwill LCT water cooling system (if supported).
+Enable or disable Fn Lock (same boolean values as
+.BR "webcam set" ).
+.\" -------------------------------------------------------------------
+.SS "Water Cooler \fR(watercooler, wc)"
+These commands control the Uniwill LCT water cooling system.
+When the hardware does not support a water cooler, commands report
+\(lqnot supported.\(rq
 .TP
 .B watercooler status
-Print water cooler state: supported, enabled, fan speed and pump level
-(only shown when the cooler is enabled and connected).
+Print water cooler state: supported, enabled, fan speed and pump level.
+Fan speed and pump level are only shown when the cooler is enabled and
+the BLE connection is active.
 .TP
-.B watercooler enable
-Enable the water cooler (starts BLE scanning).
+.B watercooler enable \fR(\fBon\fR)
+Enable the water cooler (starts BLE scanning for the cooling unit).
 .TP
-.B watercooler disable
+.B watercooler disable \fR(\fBoff\fR)
 Disable the water cooler.
 .TP
 .B watercooler fan \fIPERCENT\fR
@@ -177,8 +518,22 @@ Set the water cooler fan duty cycle (0\-100%).
 .TP
 .B watercooler pump \fICODE\fR
 Set the pump voltage.
-.IR CODE :
-0 = 11 V, 1 = 12 V, 2 = 7 V, 3 = 8 V, 4 = off.
+.I CODE
+values:
+.RS
+.TS
+tab(|);
+c c
+n l.
+Code|Voltage
+_
+0|11 V
+1|12 V
+2|7 V
+3|8 V
+4|off
+.TE
+.RE
 .TP
 .B watercooler led \fIR\fR \fIG\fR \fIB\fR \fIMODE\fR
 Set the water cooler LED colour and mode.
@@ -186,36 +541,46 @@ Set the water cooler LED colour and mode.
 .IR G ,
 .I B
 are 0\-255.
-.IR MODE :
-0 = static, 1 = breathe, 2 = colorful, 3 = breathe-color.
+.I MODE
+values:
+0\ =\ static, 1\ =\ breathe, 2\ =\ colorful, 3\ =\ breathe-color.
 .TP
 .B watercooler led-off
 Turn off the water cooler LED.
-.SS Charging
+.\" -------------------------------------------------------------------
+.SS "Charging \fR(charging, charge)"
 .TP
 .B charging status
-Print charging profile, priority, type, and charge thresholds.
-Only shown if the hardware supports charging control.
+Print charging profile, priority, charge type, and charge thresholds.
+Only shown if the hardware supports firmware-level charging control.
 .TP
 .B charging set-profile \fIDESCRIPTOR\fR
 Set the firmware-level charging profile.
+Available profiles depend on hardware (query with
+.BR "charging status" ).
 .TP
 .B charging set-priority \fIDESCRIPTOR\fR
-Set the USB-C PD charging priority.
+Set the USB-C PD charging priority (e.g.\&
+.BR high_capacity ", " balanced ", " stationary ).
 .TP
 .B charging set-thresholds \fISTART\fR \fIEND\fR
 Set the battery charge start and end thresholds (percent).
-.SS System Information
+The battery will not begin charging until it drops below
+.I START
+and will stop at
+.IR END .
+.\" -------------------------------------------------------------------
+.SS "System Information"
 .TP
 .B cpu
-Show CPU info: core count, temperature, frequency, power, available
-governors and energy-performance preferences.
-.TP
-.B gpu
-Show GPU info, NVIDIA power control details, and cTGP offset.
+Show CPU information: core count, live temperature, frequency, power draw,
+available scaling governors, available energy-performance preferences (EPPs),
+and min/max frequency limits.
 .TP
 .B power-limits
-Show ODM power limits.
+Show ODM power limits as TDP values:
+PL1 (sustained), PL2 (boost), PL4 (peak) in watts.
+.\" ===================================================================
 .SH GLOBAL OPTIONS
 .TP
 .B \-\-json
@@ -223,22 +588,97 @@ Output machine-readable JSON instead of human-readable text.
 Currently applies to the
 .B status
 command.
+See
+.B JSON OUTPUT
+for the schema.
 .TP
 .BR \-\-help ", " \-h
 Print usage information and exit.
 .TP
 .BR \-\-version ", " \-v
 Print version and exit.
+.\" ===================================================================
+.SH JSON OUTPUT
+The
+.B "status \-\-json"
+command outputs a single JSON object.
+Fields that are unavailable on the current hardware are omitted.
+Extended NVIDIA GPU metrics (marked with \(dg) are included only when
+the value is valid (>= 0 or non-empty).
+.PP
+.nf
+{
+  "connected":      bool,
+  "powerState":     "power_ac" | "power_bat" | "power_wc",
+  "activeProfile":  { \fI...full profile object...\fR },
+  "cpu": {
+    "temperature":  int,     // °C
+    "frequency":    int,     // MHz
+    "power":        double,  // W
+    "fanPercent":   int,     // 0\-100
+    "fanRPM":       int
+  },
+  "gpu": {
+    "temperature":      int,
+    "frequency":        int,     // MHz
+    "power":            double,  // W
+    "fanPercent":       int,
+    "fanRPM":           int,
+    "computeUtilPct":   int,     // \(dg GPU compute load 0\-100
+    "memoryUtilPct":    int,     // \(dg memory controller load
+    "vramUsedMiB":      int,     // \(dg
+    "vramTotalMiB":     int,     // \(dg
+    "perfLimitReason":  string,  // \(dg throttle reason
+    "encoderUtilPct":   int,     // \(dg NVENC
+    "decoderUtilPct":   int,     // \(dg NVDEC
+    "currentPstate":    int,     // \(dg 0\-15
+    "grClockOffsetMHz": int,     // \(dg if non-zero
+    "memClockOffsetMHz":int,     // \(dg if non-zero
+    "vramFrequencyMHz": int,     // \(dg
+    "coreVoltageMv":    int      // \(dg
+  },
+  "igpu": {
+    "temperature":  int,
+    "frequency":    int,
+    "power":        double
+  },
+  "hardware": {
+    "displayBrightness": int,
+    "webcamEnabled":     bool,
+    "fnLock":            bool
+  },
+  "waterCooler": {               // only if supported
+    "supported":  true,
+    "enabled":    bool,
+    "fanSpeed":   int,           // only if enabled
+    "pumpLevel":  int
+  },
+  "charging": {                  // only if hardware supports it
+    "profile":        string,
+    "priority":       string,
+    "type":           string,    // omitted if "Unknown" or "N/A"
+    "startThreshold": int,       // only if thresholds available
+    "endThreshold":   int
+  }
+}
+.fi
+.\" ===================================================================
 .SH EXIT STATUS
 .TP
 .B 0
 Success.
 .TP
 .B 1
-Command error (bad arguments, D-Bus method failure).
+Command error: invalid arguments, unknown sub-command, or a D-Bus method
+call returned failure.
 .TP
 .B 2
-Cannot connect to the uccd daemon.
+Cannot connect to the
+.B uccd
+daemon.
+Ensure the daemon is running:
+.BR "systemctl start uccd" .
+.\" ===================================================================
 .SH ENVIRONMENT
 .B ucc-cli
 communicates with the
@@ -252,21 +692,57 @@ systemctl start uccd
 systemctl enable uccd
 .fi
 .RE
+.PP
+No environment variables are read.
+The D-Bus service name, object path, and interface are compiled in as
+.BR com.uniwill.uccd " / " /com/uniwill/uccd .
+.\" ===================================================================
 .SH FILES
 .TP
 .I ~/.config/uccrc
-Local user configuration (custom profiles, fan profiles, keyboard profiles,
-state map).
-Shared with
+INI-format user configuration file.
+Stores:
+.RS
+.IP \(bu 2
+.B stateMap
+\(em JSON object mapping power states to profile UUIDs
+.IP \(bu 2
+.B customProfiles
+\(em JSON array of user-created main profiles
+.IP \(bu 2
+.B customFanProfiles
+\(em JSON array of user-created fan curves
+.IP \(bu 2
+.B customKeyboardProfiles
+\(em JSON array of user-created keyboard presets
+.IP \(bu 2
+.B customGpuProfiles
+\(em JSON array of user-created GPU OC profiles
+.RE
+.IP
+This file is shared with
 .B ucc-gui
 and
 .BR ucc-tray .
+Edits made in one tool are visible to the others.
+.\" ===================================================================
 .SH EXAMPLES
-Show a live monitoring dashboard:
+.SS Dashboard & Monitoring
+Show a full system dashboard:
 .PP
 .RS
 .nf
 ucc-cli status
+.fi
+.RE
+.PP
+Get full status as JSON (for scripting):
+.PP
+.RS
+.nf
+ucc-cli status --json
+ucc-cli status --json | jq .gpu.computeUtilPct
+ucc-cli status --json | jq '.gpu | {temp: .temperature, load: .computeUtilPct, vram: .vramUsedMiB}'
 .fi
 .RE
 .PP
@@ -278,6 +754,14 @@ ucc-cli monitor -i 1 -n 10
 .fi
 .RE
 .PP
+Continuous monitoring at default 2-second interval:
+.PP
+.RS
+.nf
+ucc-cli mon
+.fi
+.RE
+.SS Profiles & State Map
 List and activate a profile:
 .PP
 .RS
@@ -287,6 +771,93 @@ ucc-cli profile set 01234567-abcd-ef01-2345-6789abcdef01
 .fi
 .RE
 .PP
+View the active profile's full settings:
+.PP
+.RS
+.nf
+ucc-cli profile get
+.fi
+.RE
+.PP
+Assign profiles to power states for automatic switching:
+.PP
+.RS
+.nf
+ucc-cli statemap set power_ac  <performance-profile-uuid>
+ucc-cli statemap set power_bat <powersave-profile-uuid>
+ucc-cli statemap get
+.fi
+.RE
+.SS Fan Control
+.PP
+.RS
+.nf
+ucc-cli fan list
+ucc-cli fan get <fan-profile-uuid>
+ucc-cli fan set <fan-profile-uuid>
+.fi
+.RE
+.PP
+Apply custom fan curves directly:
+.PP
+.RS
+.nf
+ucc-cli fan apply '{"cpu":[{"temp":30,"speed":20},{"temp":70,"speed":80},\
+{"temp":90,"speed":100}],"gpu":[{"temp":30,"speed":20},{"temp":75,\
+"speed":90},{"temp":90,"speed":100}]}'
+.fi
+.RE
+.PP
+Revert to daemon-stored curves:
+.PP
+.RS
+.nf
+ucc-cli fan revert
+.fi
+.RE
+.SS GPU Overclocking
+Show extended GPU info including NVIDIA metrics:
+.PP
+.RS
+.nf
+ucc-cli gpu
+.fi
+.RE
+.PP
+List, inspect, and apply GPU OC profiles:
+.PP
+.RS
+.nf
+ucc-cli gpu profile list
+ucc-cli gpu profile get <gpu-profile-uuid>
+ucc-cli gpu profile set <gpu-profile-uuid>
+.fi
+.RE
+.PP
+Reset all GPU OC to factory defaults:
+.PP
+.RS
+.nf
+ucc-cli gpu profile reset
+.fi
+.RE
+.PP
+Query live OC state:
+.PP
+.RS
+.nf
+ucc-cli gpu oc-state
+.fi
+.RE
+.SS ODM Performance Mode
+.PP
+.RS
+.nf
+ucc-cli odm list
+ucc-cli odm set performance
+.fi
+.RE
+.SS Keyboard
 Set keyboard to solid red at full brightness:
 .PP
 .RS
@@ -295,47 +866,46 @@ ucc-cli keyboard color 255 0 0 255
 .fi
 .RE
 .PP
-Get full status as JSON (for scripting):
+Set per-zone colours (e.g.\& 4-zone keyboard):
 .PP
 .RS
 .nf
-ucc-cli status --json | jq .cpu.temperature
+ucc-cli keyboard set '[{"mode":0,"brightness":200,"red":255,"green":0,\
+"blue":0},{"mode":0,"brightness":200,"red":0,"green":255,"blue":0},\
+{"mode":0,"brightness":200,"red":0,"green":0,"blue":255},{"mode":0,\
+"brightness":200,"red":255,"green":255,"blue":0}]'
 .fi
 .RE
 .PP
-Set charge thresholds to start at 40% and stop at 80%:
+List and activate a stored keyboard profile:
 .PP
 .RS
 .nf
+ucc-cli kb profiles
+ucc-cli kb activate <keyboard-profile-uuid>
+.fi
+.RE
+.SS Charging
+.PP
+.RS
+.nf
+ucc-cli charging status
 ucc-cli charging set-thresholds 40 80
+ucc-cli charging set-profile balanced
 .fi
 .RE
-.PP
-Control water cooler LED (green, breathe mode):
+.SS Water Cooler
 .PP
 .RS
 .nf
-ucc-cli watercooler led 0 255 0 1
+ucc-cli wc status
+ucc-cli wc enable
+ucc-cli wc fan 70
+ucc-cli wc led 0 255 0 1   # green, breathe mode
+ucc-cli wc led-off
 .fi
 .RE
-.PP
-Activate a fan profile:
-.PP
-.RS
-.nf
-ucc-cli fan list
-ucc-cli fan set 01234567-abcd-ef01-2345-6789abcdef01
-.fi
-.RE
-.PP
-List and activate a keyboard profile:
-.PP
-.RS
-.nf
-ucc-cli keyboard profiles
-ucc-cli keyboard activate 01234567-abcd-ef01-2345-6789abcdef01
-.fi
-.RE
+.\" ===================================================================
 .SH SEE ALSO
 .BR uccd (8),
 .BR ucc-gui (1),

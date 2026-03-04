@@ -98,6 +98,19 @@ struct nvmlMemory_t
   unsigned long long used;
 };
 
+/// Device memory information returned by nvmlDeviceGetMemoryInfo_v2
+struct nvmlMemory_v2_t
+{
+  unsigned int version;
+  unsigned long long total;
+  unsigned long long reserved;
+  unsigned long long free;
+  unsigned long long used;
+};
+
+#define NVML_MEMORY_V2_VER \
+  ( static_cast< unsigned int >( sizeof( nvml::nvmlMemory_v2_t ) ) | ( 2U << 24 ) )
+
 using nvmlClocksThrottleReasons_t = unsigned long long;
 
 static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_GPU_IDLE = 0x0000000000000001ULL;
@@ -366,6 +379,7 @@ private:
   using DeviceGetEnforcedPowerLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
   using DeviceGetUtilizationRatesFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlUtilization_t* );
   using DeviceGetMemoryInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlMemory_t* );
+  using DeviceGetMemoryInfoV2Fn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlMemory_v2_t* );
   using DeviceGetCurrentClocksThrottleReasonsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClocksThrottleReasons_t* );
   using DeviceGetEncoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
   using DeviceGetDecoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
@@ -403,6 +417,7 @@ private:
   DeviceGetMaxClockInfoFn m_getMaxClockInfo = nullptr;
   DeviceGetEnforcedPowerLimitFn m_getEnforcedPowerLimit = nullptr;
   DeviceGetUtilizationRatesFn m_getUtilizationRates = nullptr;
+  DeviceGetMemoryInfoV2Fn m_getMemoryInfoV2 = nullptr;
   DeviceGetMemoryInfoFn m_getMemoryInfo = nullptr;
   DeviceGetCurrentClocksThrottleReasonsFn m_getCurrentClocksThrottleReasons = nullptr;
   DeviceGetEncoderUtilizationFn m_getEncoderUtilization = nullptr;

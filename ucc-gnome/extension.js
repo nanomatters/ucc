@@ -117,6 +117,14 @@ class UccIndicator extends PanelMenu.Button {
             cpuFanPct: -1, gpuFanPct: -1,
             wcFanSpeed: -1, wcPumpLevel: -1,
             wcConnected: false,
+            // Extended NVIDIA dGPU metrics
+            gpuComputeUtilPct: -1, gpuMemoryUtilPct: -1,
+            gpuVramUsedMiB: -1, gpuVramTotalMiB: -1,
+            gpuPerfLimitReason: '',
+            gpuEncoderUtilPct: -1, gpuDecoderUtilPct: -1,
+            gpuCurrentPstate: -1,
+            gpuGrClockOffsetMHz: -999, gpuMemClockOffsetMHz: -999,
+            gpuVramFreqMHz: -1, gpuCoreVoltageMv: -1,
             // System info
             laptopModel: '', cpuModel: '', gpuModel: '',
             // Profiles
@@ -127,7 +135,11 @@ class UccIndicator extends PanelMenu.Button {
             keyboardProfileNames: [], keyboardProfileIds: [],
             keyboardProfilesData: [],
             activeKeyboardProfileId: '',
+            gpuProfileNames: [], gpuProfileIds: [],
+            activeProfileGpuId: '',
             powerState: '',
+            // ODM
+            availableODMProfiles: [], odmPerformanceProfile: '',
             // Hardware
             webcamEnabled: false, fnLock: false,
             displayBrightness: 50,
@@ -303,6 +315,22 @@ class UccIndicator extends PanelMenu.Button {
         this._lGpuFreq  = labelRow('Freq');   gpuGrid.add_child(this._lGpuFreq.box);
         this._lGpuPower = labelRow('Power');  gpuGrid.add_child(this._lGpuPower.box);
         this._lGpuFan   = labelRow('Fan');    gpuGrid.add_child(this._lGpuFan.box);
+        // Extended NVIDIA metrics (hidden when data unavailable)
+        this._lGpuLoad       = labelRow('GPU Load');      gpuGrid.add_child(this._lGpuLoad.box);
+        this._lVramLoad      = labelRow('VRAM Load');     gpuGrid.add_child(this._lVramLoad.box);
+        this._lPstate        = labelRow('P-State');       gpuGrid.add_child(this._lPstate.box);
+        this._lVramFreq      = labelRow('VRAM Freq');     gpuGrid.add_child(this._lVramFreq.box);
+        this._lCoreVoltage   = labelRow('Core Voltage');  gpuGrid.add_child(this._lCoreVoltage.box);
+        this._lClockOffsets  = labelRow('Clock Offsets'); gpuGrid.add_child(this._lClockOffsets.box);
+        this._lVram          = labelRow('VRAM');          gpuGrid.add_child(this._lVram.box);
+        this._lPerfLimit     = labelRow('Perf Limit');    gpuGrid.add_child(this._lPerfLimit.box);
+        this._lNvencDec      = labelRow('NVENC/DEC');     gpuGrid.add_child(this._lNvencDec.box);
+        // Initially hide all extended rows
+        for (const r of [this._lGpuLoad, this._lVramLoad, this._lPstate, this._lVramFreq,
+                         this._lCoreVoltage, this._lClockOffsets, this._lVram,
+                         this._lPerfLimit, this._lNvencDec]) {
+            r.box.visible = false;
+        }
         box.add_child(gpuGrid);
 
         // Water cooler metrics (hidden until supported)
@@ -365,6 +393,26 @@ class UccIndicator extends PanelMenu.Button {
             x_expand: true,
         });
         box.add_child(this._kbProfileListBox);
+
+        // ── GPU OC Profile ──
+        this._gpuProfileHeader = new St.Label({ text: 'GPU OC Profile', style_class: 'ucc-section-title' });
+        box.add_child(this._gpuProfileHeader);
+        this._gpuProfileListBox = new St.BoxLayout({
+            vertical: true,
+            style_class: 'ucc-chooser-list',
+            x_expand: true,
+        });
+        box.add_child(this._gpuProfileListBox);
+
+        // ── ODM Performance Mode ──
+        this._odmHeader = new St.Label({ text: 'ODM Performance Mode', style_class: 'ucc-section-title' });
+        box.add_child(this._odmHeader);
+        this._odmListBox = new St.BoxLayout({
+            vertical: true,
+            style_class: 'ucc-chooser-list',
+            x_expand: true,
+        });
+        box.add_child(this._odmListBox);
 
         this._tabs['profile'] = scroll;
     }
@@ -693,6 +741,84 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
+    _rebuildGpuProfileButtons() {
+        this._gpuProfileListBox.destroy_all_children();
+
+        const s = this._state;
+        this._gpuProfileHeader.visible = s.gpuProfileIds.length > 0;
+        this._gpuProfileListBox.visible = s.gpuProfileIds.length > 0;
+
+        for (let i = 0; i < s.gpuProfileIds.length; i++) {
+            const id = s.gpuProfileIds[i];
+            const name = s.gpuProfileNames[i] ?? id;
+            const isActive = id === s.activeProfileGpuId;
+            const row = this._makeChooserRow(name, isActive, () => {
+                this._applyGpuProfile(id);
+                s.activeProfileGpuId = id;
+                this._rebuildGpuProfileButtons();
+            });
+            this._gpuProfileListBox.add_child(row);
+        }
+    }
+
+    _applyGpuProfile(gpuProfileId) {
+        // Try daemon built-in profile first
+        let profileJson = this._client.getGpuProfile(gpuProfileId);
+
+        // Fall back to custom profile from uccrc
+        if (!profileJson || profileJson === '{}') {
+            try {
+                const uccrc = GLib.build_filenamev([GLib.get_home_dir(), '.config', 'uccrc']);
+                const kf = new GLib.KeyFile();
+                kf.load_from_file(uccrc, GLib.KeyFileFlags.NONE);
+                const raw = unwrapQByteArray(kf.get_value('General', 'customGpuProfiles'));
+                if (raw) {
+                    for (const p of JSON.parse(raw)) {
+                        if (p.id === gpuProfileId && p.json) {
+                            profileJson = p.json;
+                            break;
+                        }
+                    }
+                }
+            } catch { /* ignore */ }
+        }
+
+        if (!profileJson || profileJson === '{}') return;
+
+        try {
+            const obj = JSON.parse(profileJson);
+
+            // Apply cTGP offset if present
+            if (obj.nvidiaPowerCTRLProfile?.cTGPOffset !== undefined) {
+                if (this._client.getCTGPAdjustmentSupported()) {
+                    this._client.setNVIDIAPowerOffset(obj.nvidiaPowerCTRLProfile.cTGPOffset);
+                }
+            }
+
+            // Stamp the gpuProfileId and send to daemon
+            obj.gpuProfileId = gpuProfileId;
+            this._client.applyNvidiaGpuOCProfile(JSON.stringify(obj));
+        } catch { /* ignore parse errors */ }
+    }
+
+    _rebuildODMProfileButtons() {
+        this._odmListBox.destroy_all_children();
+
+        const s = this._state;
+        this._odmHeader.visible = s.availableODMProfiles.length > 0;
+        this._odmListBox.visible = s.availableODMProfiles.length > 0;
+
+        for (const profile of s.availableODMProfiles) {
+            const isActive = profile === s.odmPerformanceProfile;
+            const row = this._makeChooserRow(profile, isActive, () => {
+                this._client.setODMPerformanceProfile(profile);
+                s.odmPerformanceProfile = profile;
+                this._rebuildODMProfileButtons();
+            });
+            this._odmListBox.add_child(row);
+        }
+    }
+
     _updatePumpVoltageUI() {
         for (const btn of this._pumpVoltageButtons) {
             btn.checked = (btn._voltageCode === this._state.wcPumpVoltageCode);
@@ -862,9 +988,50 @@ class UccIndicator extends PanelMenu.Button {
             } catch { /* ignore */ }
         }
 
+        // GPU OC profiles — built-in from daemon + custom from uccrc
+        const gpuNames = [], gpuIds = [];
+        const gpuRaw = this._client.getGpuProfilesJSON();
+        if (gpuRaw) {
+            try {
+                for (const p of JSON.parse(gpuRaw)) {
+                    if (p.id) { gpuIds.push(p.id); gpuNames.push(p.name ?? p.id); }
+                }
+            } catch { /* ignore */ }
+        }
+        if (uccrcKf) {
+            try {
+                const cgp = unwrapQByteArray(uccrcKf.get_value('General', 'customGpuProfiles'));
+                if (cgp) {
+                    for (const p of JSON.parse(cgp)) {
+                        if (p.id && !gpuIds.includes(p.id)) {
+                            gpuIds.push(p.id); gpuNames.push(p.name ?? p.id);
+                        }
+                    }
+                }
+            } catch { /* ignore */ }
+        }
+        s.gpuProfileNames = gpuNames;
+        s.gpuProfileIds = gpuIds;
+
+        // Extract active GPU profile from the active profile JSON
+        if (ap) {
+            try {
+                const obj = JSON.parse(ap);
+                s.activeProfileGpuId = obj.gpuProfileId ?? '';
+            } catch { /* ignore */ }
+        }
+
+        // ODM performance profiles
+        const odmProfiles = this._client.getAvailableODMProfiles();
+        s.availableODMProfiles = Array.isArray(odmProfiles) ? odmProfiles : [];
+        const odmCurrent = this._client.getODMPerformanceProfile();
+        if (odmCurrent) s.odmPerformanceProfile = odmCurrent;
+
         this._rebuildProfileButtons();
         this._rebuildFanProfileButtons();
         this._rebuildKeyboardProfileButtons();
+        this._rebuildGpuProfileButtons();
+        this._rebuildODMProfileButtons();
     }
 
     /** Resolve a keyboard profile reference (UUID or display name) to its canonical UUID. */
@@ -913,6 +1080,25 @@ class UccIndicator extends PanelMenu.Button {
         s.cpuFanPct = this._client.getFanSpeedPercent();
         s.gpuFanPct = this._client.getGpuFanSpeedPercent();
 
+        // Extended NVIDIA dGPU metrics (single D-Bus call, parse once)
+        const dgpuRaw = this._client._call('GetDGpuInfoValuesJSON');
+        let dgpu = null;
+        if (dgpuRaw) { try { dgpu = JSON.parse(dgpuRaw); } catch {} }
+        s.gpuComputeUtilPct   = dgpu?.computeUtilPct   ?? -1;
+        s.gpuMemoryUtilPct    = dgpu?.memoryUtilPct    ?? -1;
+        s.gpuVramUsedMiB      = dgpu?.vramUsedMiB      ?? -1;
+        s.gpuVramTotalMiB     = dgpu?.vramTotalMiB     ?? -1;
+        s.gpuPerfLimitReason  = dgpu?.perfLimitReason  ?? '';
+        s.gpuEncoderUtilPct   = dgpu?.encoderUtilPct   ?? -1;
+        s.gpuDecoderUtilPct   = dgpu?.decoderUtilPct   ?? -1;
+        s.gpuCurrentPstate    = dgpu?.currentPstate    ?? -1;
+        const grOff = dgpu?.grClockOffsetMHz;
+        s.gpuGrClockOffsetMHz = (grOff !== undefined && grOff !== -999) ? grOff : -999;
+        const memOff = dgpu?.memClockOffsetMHz;
+        s.gpuMemClockOffsetMHz= (memOff !== undefined && memOff !== -999) ? memOff : -999;
+        s.gpuVramFreqMHz      = dgpu?.vramFrequency    ?? -1;
+        s.gpuCoreVoltageMv    = dgpu?.coreVoltageMv    ?? -1;
+
         if (s.waterCoolerSupported) {
             s.wcFanSpeed  = this._client.getWaterCoolerFanSpeed();
             s.wcPumpLevel = this._client.getWaterCoolerPumpLevel();
@@ -938,9 +1124,12 @@ class UccIndicator extends PanelMenu.Button {
                     // Extract keyboard profile reference
                     const kbRef = obj.selectedKeyboardProfile ?? '';
                     s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
+                    // Extract GPU profile reference
+                    s.activeProfileGpuId = obj.gpuProfileId ?? '';
                     this._rebuildProfileButtons();
                     this._rebuildFanProfileButtons();
                     this._rebuildKeyboardProfileButtons();
+                    this._rebuildGpuProfileButtons();
                 }
                 const oldAutoControl = s.wcAutoControl;
                 s.wcAutoControl = obj.fan?.autoControlWC ?? true;
@@ -994,6 +1183,15 @@ class UccIndicator extends PanelMenu.Button {
                 this._wcEnableSwitch.label = wcEn ? 'ON' : 'OFF';
             }
         }
+
+        // ODM performance profile
+        if (s.availableODMProfiles.length > 0) {
+            const odmCurrent = this._client.getODMPerformanceProfile();
+            if (odmCurrent && odmCurrent !== s.odmPerformanceProfile) {
+                s.odmPerformanceProfile = odmCurrent;
+                this._rebuildODMProfileButtons();
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1017,6 +1215,23 @@ class UccIndicator extends PanelMenu.Button {
         this._lGpuFan.valueLabel.text    = s.gpuFanRPM >= 0
             ? `${s.gpuFanRPM} RPM (${s.gpuFanPct}%)`
             : '—';
+
+        // Extended NVIDIA metrics — show/hide based on data availability
+        const showIf = (row, cond, text) => { row.box.visible = cond; if (cond) row.valueLabel.text = text; };
+        showIf(this._lGpuLoad,      s.gpuComputeUtilPct >= 0,    `${s.gpuComputeUtilPct} %`);
+        showIf(this._lVramLoad,     s.gpuMemoryUtilPct >= 0,     `${s.gpuMemoryUtilPct} %`);
+        showIf(this._lPstate,       s.gpuCurrentPstate >= 0,     `P${s.gpuCurrentPstate}`);
+        showIf(this._lVramFreq,     s.gpuVramFreqMHz >= 0,       `${s.gpuVramFreqMHz} MHz`);
+        showIf(this._lCoreVoltage,  s.gpuCoreVoltageMv >= 0,     `${s.gpuCoreVoltageMv} mV`);
+        showIf(this._lClockOffsets, s.gpuGrClockOffsetMHz !== -999,
+            `${s.gpuGrClockOffsetMHz >= 0 ? '+' : ''}${s.gpuGrClockOffsetMHz}` +
+            ` / ${s.gpuMemClockOffsetMHz >= 0 ? '+' : ''}${s.gpuMemClockOffsetMHz} MHz`);
+        showIf(this._lVram,         s.gpuVramTotalMiB > 0,
+            `${s.gpuVramUsedMiB} / ${s.gpuVramTotalMiB} MiB`);
+        showIf(this._lPerfLimit,    s.gpuPerfLimitReason.length > 0, s.gpuPerfLimitReason);
+        showIf(this._lNvencDec,
+            s.gpuEncoderUtilPct >= 0 || s.gpuDecoderUtilPct >= 0,
+            `${s.gpuEncoderUtilPct >= 0 ? s.gpuEncoderUtilPct : '--'} / ${s.gpuDecoderUtilPct >= 0 ? s.gpuDecoderUtilPct : '--'} %`);
 
         if (s.waterCoolerSupported) {
             this._lWcFan.valueLabel.text  = fmt(s.wcFanSpeed, '%');

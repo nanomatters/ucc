@@ -307,6 +307,32 @@ static int cmdStatus( ucc::UccdClient &c )
   printVal( "Fan speed:",     c.getGpuFanSpeedPercent(), "%" );
   printVal( "Fan RPM:",       c.getGpuFanSpeedRPM(),     "RPM" );
 
+  // Extended NVIDIA metrics (if available)
+  {
+    auto computeUtil = c.getDGpuComputeUtilPct();
+    auto memUtil     = c.getDGpuMemoryUtilPct();
+    auto vramUsed    = c.getDGpuVramUsedMiB();
+    auto vramTotal   = c.getDGpuVramTotalMiB();
+    auto pstate      = c.getDGpuCurrentPstate();
+    auto coreVoltage = c.getDGpuCoreVoltageMv();
+    auto grOffset    = c.getDGpuGrClockOffsetMHz();
+    auto memOffset   = c.getDGpuMemClockOffsetMHz();
+
+    bool hasExtended = ( computeUtil && *computeUtil >= 0 ) || ( pstate && *pstate >= 0 );
+    if ( hasExtended )
+    {
+      printVal( "GPU load:",          computeUtil, "%" );
+      printVal( "Memory load:",       memUtil, "%" );
+      if ( vramUsed && *vramUsed >= 0 && vramTotal && *vramTotal > 0 )
+        std::printf( "  %-24s %d / %d MiB\n", "VRAM:", *vramUsed, *vramTotal );
+      if ( pstate && *pstate >= 0 )
+        std::printf( "  %-24s P%d\n", "P-State:", *pstate );
+      printVal( "Core voltage:",      coreVoltage, "mV" );
+      printVal( "Core clock offset:", grOffset, "MHz" );
+      printVal( "Mem clock offset:",  memOffset, "MHz" );
+    }
+  }
+
   std::puts( "" );
   std::puts( "--- iGPU ---" );
   printVal( "Temperature:",   c.getIGpuTemperature(), "°C" );
@@ -967,13 +993,23 @@ static int cmdMonitor( ucc::UccdClient &c, int count, int interval )
     auto gpuPow  = c.getGpuPower();
     auto cpuFan  = c.getFanSpeedPercent();
     auto gpuFan  = c.getGpuFanSpeedPercent();
+    auto gpuLoad = c.getDGpuComputeUtilPct();
+    auto pstate  = c.getDGpuCurrentPstate();
 
+    // Base metrics
     std::printf( "CPU: %3d°C  %5dMHz  %5.1fW  Fan:%3d%%  |  "
-                 "GPU: %3d°C  %5dMHz  %5.1fW  Fan:%3d%%\n",
+                 "GPU: %3d°C  %5dMHz  %5.1fW  Fan:%3d%%",
                  cpuTemp.value_or( 0 ), cpuFreq.value_or( 0 ),
                  cpuPow.value_or( 0.0 ), cpuFan.value_or( 0 ),
                  gpuTemp.value_or( 0 ), gpuFreq.value_or( 0 ),
                  gpuPow.value_or( 0.0 ), gpuFan.value_or( 0 ) );
+
+    // Extended NVIDIA metrics if available
+    if ( gpuLoad && *gpuLoad >= 0 )
+      std::printf( "  Load:%3d%%", *gpuLoad );
+    if ( pstate && *pstate >= 0 )
+      std::printf( "  P%d", *pstate );
+    std::puts( "" );
     std::fflush( stdout );
 
     if ( count > 0 )
@@ -1424,14 +1460,68 @@ static int cmdChargingSetThresholds( ucc::UccdClient &c, int start, int end )
 static int cmdGpuInfo( ucc::UccdClient &c )
 {
   std::puts( "=== GPU (dGPU) ===" );
+
+  std::optional< std::string > dGpuName;
+  if ( auto sysInfoJson = c.getSystemInfoJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfoJson ) );
+    if ( doc.isObject() )
+    {
+      const auto name = doc.object().value( "dGpuModel" ).toString().toStdString();
+      if ( !name.empty() )
+        dGpuName = name;
+    }
+  }
+  printVal( "GPU name:", dGpuName );
   std::puts( "" );
 
   // Live sensors
+  std::puts( "--- Sensors ---" );
   printVal( "Temperature:",         c.getGpuTemperature(), "°C" );
   printVal( "Frequency:",           c.getGpuFrequency(), "MHz" );
   printVal( "Power:",               c.getGpuPower(), "W" );
   printVal( "Fan speed:",           c.getGpuFanSpeedPercent(), "%" );
   printVal( "Fan RPM:",             c.getGpuFanSpeedRPM(), "RPM" );
+
+  // Extended NVIDIA metrics
+  auto computeUtil = c.getDGpuComputeUtilPct();
+  auto memUtil     = c.getDGpuMemoryUtilPct();
+  auto vramUsed    = c.getDGpuVramUsedMiB();
+  auto vramTotal   = c.getDGpuVramTotalMiB();
+  auto perfLimit   = c.getDGpuPerfLimitReason();
+  auto encoderUtil = c.getDGpuEncoderUtilPct();
+  auto decoderUtil = c.getDGpuDecoderUtilPct();
+  auto pstate      = c.getDGpuCurrentPstate();
+  auto grOffset    = c.getDGpuGrClockOffsetMHz();
+  auto memOffset   = c.getDGpuMemClockOffsetMHz();
+  auto vramFreq    = c.getDGpuVramFrequencyMHz();
+  auto coreVoltage = c.getDGpuCoreVoltageMv();
+
+  bool hasExtended = ( computeUtil && *computeUtil >= 0 ) || ( pstate && *pstate >= 0 );
+  if ( hasExtended )
+  {
+    std::puts( "\n--- NVIDIA Extended Metrics ---" );
+    printVal( "GPU load:",            computeUtil, "%" );
+    printVal( "Memory load:",         memUtil, "%" );
+    if ( vramUsed && *vramUsed >= 0 && vramTotal && *vramTotal > 0 )
+      std::printf( "  %-24s %d / %d MiB\n", "VRAM usage:", *vramUsed, *vramTotal );
+    else
+    {
+      printVal( "VRAM used:",          vramUsed, "MiB" );
+      printVal( "VRAM total:",         vramTotal, "MiB" );
+    }
+    printVal( "VRAM frequency:",      vramFreq, "MHz" );
+    if ( pstate && *pstate >= 0 )
+      std::printf( "  %-24s P%d\n", "P-State:", *pstate );
+    else
+      std::printf( "  %-24s n/a\n", "P-State:" );
+    printVal( "Core voltage:",        coreVoltage, "mV" );
+    printVal( "Core clock offset:",   grOffset, "MHz" );
+    printVal( "Memory clock offset:", memOffset, "MHz" );
+    printVal( "NVENC utilization:",   encoderUtil, "%" );
+    printVal( "NVDEC utilization:",   decoderUtil, "%" );
+    printVal( "Perf limit reason:",   perfLimit );
+  }
 
   auto ctgpAvail = c.getNVIDIAPowerCTRLAvailable();
   auto ctgpMax   = c.getNVIDIAPowerCTRLMaxPowerLimit();
@@ -1444,12 +1534,393 @@ static int cmdGpuInfo( ucc::UccdClient &c )
   printVal( "Default power limit:", ctgpDef, "W" );
   printVal( "cTGP offset:",         ctgpOff, "W" );
 
+  // NVIDIA OC state
+  auto ocAvail = c.getNvidiaOCAvailable();
+  if ( ocAvail && *ocAvail )
+  {
+    auto ocState = c.getNvidiaOCState( 0 );
+    if ( ocState )
+    {
+      std::puts( "\n--- NVIDIA OC State ---" );
+      QJsonDocument ocDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *ocState ) );
+      if ( !ocDoc.isObject() )
+      {
+        std::printf( "  %-24s unavailable\n", "State details:" );
+      }
+      else
+      {
+        QJsonObject root = ocDoc.object();
+
+        printVal( "Offsets supported:", root.contains( "offsetsSupported" )
+                                       ? std::optional< bool >( root["offsetsSupported"].toBool() )
+                                       : std::nullopt );
+        printVal( "Locked clocks:", root.contains( "lockedClocksSupported" )
+                                    ? std::optional< bool >( root["lockedClocksSupported"].toBool() )
+                                    : std::nullopt );
+
+        if ( root.contains( "gpuClockRange" ) && root["gpuClockRange"].isObject() )
+        {
+          QJsonObject r = root["gpuClockRange"].toObject();
+          std::printf( "  %-24s %d - %d MHz\n", "GPU clock range:",
+                       r["min"].toInt(), r["max"].toInt() );
+        }
+
+        if ( root.contains( "powerMinW" ) || root.contains( "powerMaxW" ) )
+        {
+          std::printf( "  %-24s %d - %d W\n", "Power limit range:",
+                       root["powerMinW"].toInt(), root["powerMaxW"].toInt() );
+        }
+        int defaultPower = root["powerDefaultW"].toInt( 0 );
+        if ( ctgpDef )
+          defaultPower = *ctgpDef;
+        if ( defaultPower > 0 )
+          std::printf( "  %-24s %d W\n", "Default power limit:", defaultPower );
+
+        int minPower = root["powerMinW"].toInt( 0 );
+        int maxPower = root["powerMaxW"].toInt( 0 );
+
+        int currentPower = root["powerLimitW"].toInt( 0 );
+        if ( ctgpDef && ctgpOff )
+          currentPower = *ctgpDef + *ctgpOff;
+        else if ( currentPower <= 0 )
+          currentPower = defaultPower;
+
+        if ( currentPower > 0 )
+        {
+          if ( minPower > 0 && currentPower < minPower )
+            currentPower = minPower;
+          if ( maxPower > 0 && currentPower > maxPower )
+            currentPower = maxPower;
+          std::printf( "  %-24s %d W\n", "Current power limit:", currentPower );
+        }
+        else
+        {
+          std::printf( "  %-24s n/a\n", "Current power limit:" );
+        }
+
+        if ( root.contains( "pstates" ) && root["pstates"].isArray() )
+        {
+          QJsonArray pstates = root["pstates"].toArray();
+          if ( !pstates.isEmpty() )
+          {
+            QJsonObject selected;
+            bool found = false;
+            if ( pstate && *pstate >= 0 )
+            {
+              for ( const QJsonValue &v : pstates )
+              {
+                if ( v.isObject() && v.toObject()["pstate"].toInt( -1 ) == *pstate )
+                {
+                  selected = v.toObject();
+                  found = true;
+                  break;
+                }
+              }
+            }
+            if ( !found )
+            {
+              for ( const QJsonValue &v : pstates )
+              {
+                if ( v.isObject() )
+                {
+                  selected = v.toObject();
+                  found = true;
+                  break;
+                }
+              }
+            }
+
+            if ( found )
+            {
+              int selectedP = selected["pstate"].toInt( -1 );
+              if ( selectedP >= 0 )
+                std::printf( "  %-24s P%d\n", "OC profile state:", selectedP );
+
+              if ( selected.contains( "gpu" ) && selected["gpu"].isObject() )
+              {
+                QJsonObject g = selected["gpu"].toObject();
+                std::printf( "  %-24s %d MHz\n", "Core clock offset:", g["currentOffset"].toInt() );
+                std::printf( "  %-24s %d to %d MHz\n", "Core offset range:",
+                             g["minOffset"].toInt(), g["maxOffset"].toInt() );
+              }
+
+              if ( selected.contains( "vram" ) && selected["vram"].isObject() )
+              {
+                QJsonObject v = selected["vram"].toObject();
+                std::printf( "  %-24s %d MHz\n", "Memory clock offset:", v["currentOffset"].toInt() );
+                std::printf( "  %-24s %d to %d MHz\n", "Memory offset range:",
+                             v["minOffset"].toInt(), v["maxOffset"].toInt() );
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   std::puts( "\n=== iGPU ===" );
   std::puts( "" );
   printVal( "Temperature:",         c.getIGpuTemperature(), "°C" );
   printVal( "Frequency:",           c.getIGpuFrequency(), "MHz" );
   printVal( "Power:",               c.getIGpuPower(), "W" );
 
+  return 0;
+}
+
+// --- GPU OC Profiles ---
+
+static int cmdGpuProfileList( ucc::UccdClient &c )
+{
+  // Daemon built-in GPU profiles
+  auto json = c.getGpuProfilesJSON();
+  if ( json )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+    if ( doc.isArray() && !doc.array().isEmpty() )
+    {
+      std::puts( "GPU OC profiles (built-in):" );
+      for ( const QJsonValue &v : doc.array() )
+      {
+        if ( v.isObject() )
+        {
+          QJsonObject obj = v.toObject();
+          std::printf( "  %-36s  %s\n",
+                       obj["id"].toString().toStdString().c_str(),
+                       obj["name"].toString().toStdString().c_str() );
+        }
+      }
+    }
+  }
+
+  // Custom GPU profiles from local storage
+  QSettings settings = localSettings();
+  QByteArray customGP = settings.value( "customGpuProfiles", "[]" ).toByteArray();
+  if ( !customGP.isEmpty() && customGP != "[]" )
+  {
+    QJsonDocument cdoc = QJsonDocument::fromJson( customGP );
+    if ( cdoc.isArray() && !cdoc.array().isEmpty() )
+    {
+      std::puts( "\nGPU OC profiles (custom):" );
+      for ( const QJsonValue &v : cdoc.array() )
+      {
+        if ( v.isObject() )
+        {
+          QJsonObject obj = v.toObject();
+          std::printf( "  %-36s  %s\n",
+                       obj["id"].toString().toStdString().c_str(),
+                       obj["name"].toString().toStdString().c_str() );
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
+static int cmdGpuProfileGet( ucc::UccdClient &c, const char *gpuProfileId )
+{
+  // Try daemon first
+  auto json = c.getGpuProfile( gpuProfileId );
+  if ( json && *json == "{}" )
+    json = std::nullopt;
+
+  // Fall back to custom GPU profiles from local storage
+  QString customName, customId;
+  if ( !json )
+  {
+    QSettings settings = localSettings();
+    QByteArray customGP = settings.value( "customGpuProfiles", "[]" ).toByteArray();
+    if ( !customGP.isEmpty() && customGP != "[]" )
+    {
+      QJsonDocument cdoc = QJsonDocument::fromJson( customGP );
+      if ( cdoc.isArray() )
+      {
+        for ( const QJsonValue &v : cdoc.array() )
+        {
+          if ( v.isObject() && v.toObject()["id"].toString() == QString::fromUtf8( gpuProfileId ) )
+          {
+            json = v.toObject()["json"].toString().toStdString();
+            customName = v.toObject()["name"].toString();
+            customId = v.toObject()["id"].toString();
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if ( !json )
+  {
+    std::fputs( "Error: GPU OC profile not found\n", stderr );
+    return 1;
+  }
+
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+  if ( !doc.isObject() )
+  {
+    std::puts( json->c_str() );
+    return 0;
+  }
+  QJsonObject obj = doc.object();
+  QString displayName = !customName.isEmpty() ? customName :
+                        ( !obj["name"].toString().isEmpty() ? obj["name"].toString() : QString::fromUtf8( gpuProfileId ) );
+  QString displayId = !customId.isEmpty() ? customId :
+                      ( !obj["id"].toString().isEmpty() ? obj["id"].toString() : QString::fromUtf8( gpuProfileId ) );
+
+  std::printf( "=== GPU OC Profile: %s ===\n", displayName.toStdString().c_str() );
+  std::printf( "  %-24s %s\n", "ID:", displayId.toStdString().c_str() );
+
+  // Show cTGP offset if present
+  if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj["nvidiaPowerCTRLProfile"].isObject() )
+  {
+    int ctgp = obj["nvidiaPowerCTRLProfile"].toObject()["cTGPOffset"].toInt();
+    std::printf( "  %-24s %d W\n", "cTGP offset:", ctgp );
+  }
+
+  // Show clock offsets, locked clocks, power limit from OC data
+  if ( obj.contains( "grClockOffsetMHz" ) )
+    std::printf( "  %-24s %d MHz\n", "Core clock offset:", obj["grClockOffsetMHz"].toInt() );
+  if ( obj.contains( "memClockOffsetMHz" ) )
+    std::printf( "  %-24s %d MHz\n", "Mem clock offset:", obj["memClockOffsetMHz"].toInt() );
+  if ( obj.contains( "gpuLockedClockMinMHz" ) || obj.contains( "gpuLockedClockMaxMHz" ) )
+    std::printf( "  %-24s %d - %d MHz\n", "GPU locked clocks:",
+                 obj["gpuLockedClockMinMHz"].toInt(), obj["gpuLockedClockMaxMHz"].toInt() );
+  if ( obj.contains( "vramLockedClockMinMHz" ) || obj.contains( "vramLockedClockMaxMHz" ) )
+    std::printf( "  %-24s %d - %d MHz\n", "VRAM locked clocks:",
+                 obj["vramLockedClockMinMHz"].toInt(), obj["vramLockedClockMaxMHz"].toInt() );
+  if ( obj.contains( "powerLimitWatts" ) )
+    std::printf( "  %-24s %.1f W\n", "Power limit:", obj["powerLimitWatts"].toDouble() );
+
+  std::puts( "\nRaw JSON:" );
+  printJSON( *json );
+
+  return 0;
+}
+
+static int cmdGpuProfileSet( ucc::UccdClient &c, const char *gpuProfileId )
+{
+  // Resolve profile JSON: try daemon first, then local customs
+  std::optional< std::string > json;
+
+  json = c.getGpuProfile( gpuProfileId );
+  if ( json && *json == "{}" )
+    json = std::nullopt;
+
+  if ( !json )
+  {
+    QSettings settings = localSettings();
+    QByteArray customGP = settings.value( "customGpuProfiles", "[]" ).toByteArray();
+    if ( !customGP.isEmpty() && customGP != "[]" )
+    {
+      QJsonDocument cdoc = QJsonDocument::fromJson( customGP );
+      if ( cdoc.isArray() )
+      {
+        for ( const QJsonValue &v : cdoc.array() )
+        {
+          if ( v.isObject() && v.toObject()["id"].toString() == QString::fromUtf8( gpuProfileId ) )
+          {
+            json = v.toObject()["json"].toString().toStdString();
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if ( !json )
+  {
+    std::fputs( "Error: GPU OC profile not found\n", stderr );
+    return 1;
+  }
+
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+  if ( !doc.isObject() )
+  {
+    std::fputs( "Error: Invalid GPU OC profile JSON\n", stderr );
+    return 1;
+  }
+  QJsonObject obj = doc.object();
+
+  // Apply cTGP offset if present and supported (same logic as TrayBackend)
+  if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj["nvidiaPowerCTRLProfile"].isObject() )
+  {
+    auto ctgpSupported = c.getCTGPAdjustmentSupported();
+    if ( ctgpSupported && *ctgpSupported )
+    {
+      int ctgpOffset = obj["nvidiaPowerCTRLProfile"].toObject()["cTGPOffset"].toInt();
+      c.setNVIDIAPowerOffset( ctgpOffset );
+    }
+  }
+
+  // Inject gpuProfileId into JSON before applying
+  obj["gpuProfileId"] = QString::fromUtf8( gpuProfileId );
+  std::string applyJson = QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString();
+
+  ok( c.applyNvidiaGpuOCProfile( applyJson, 0 ) );
+  return 0;
+}
+
+static int cmdGpuProfileReset( ucc::UccdClient &c )
+{
+  ok( c.resetNvidiaGpuOCAll( 0 ) );
+  return 0;
+}
+
+static int cmdGpuOCState( ucc::UccdClient &c )
+{
+  auto ocAvail = c.getNvidiaOCAvailable();
+  if ( !ocAvail || !*ocAvail )
+  {
+    std::puts( "NVIDIA GPU overclocking: not available" );
+    return 0;
+  }
+  auto state = c.getNvidiaOCState( 0 );
+  if ( !state )
+  {
+    std::fputs( "Error: Could not retrieve NVIDIA OC state\n", stderr );
+    return 1;
+  }
+  std::puts( "=== NVIDIA OC State ===" );
+  printJSON( *state );
+  return 0;
+}
+
+// --- ODM Performance Profile ---
+
+static int cmdODMList( ucc::UccdClient &c )
+{
+  auto profiles = c.getAvailableODMProfiles();
+  if ( !profiles || profiles->empty() )
+  {
+    std::puts( "ODM performance profiles: not available on this hardware" );
+    return 0;
+  }
+  std::puts( "Available ODM performance profiles:" );
+  for ( const auto &p : *profiles )
+    std::printf( "  %s\n", p.c_str() );
+
+  auto current = c.getODMPerformanceProfile();
+  if ( current && !current->empty() )
+    std::printf( "\nActive: %s\n", current->c_str() );
+
+  return 0;
+}
+
+static int cmdODMGet( ucc::UccdClient &c )
+{
+  auto current = c.getODMPerformanceProfile();
+  if ( !current || current->empty() )
+  {
+    std::puts( "ODM performance profile: not available" );
+    return 0;
+  }
+  std::printf( "%s\n", current->c_str() );
+  return 0;
+}
+
+static int cmdODMSet( ucc::UccdClient &c, const char *profile )
+{
+  ok( c.setODMPerformanceProfile( profile ) );
   return 0;
 }
 
@@ -1624,6 +2095,20 @@ static void printUsage()
     "  fan apply <JSON>              Apply fan curves (keys: cpu, gpu, pump, waterCoolerFan)\n"
     "  fan revert                    Revert to saved fan profile\n"
     "\n"
+    "GPU info & overclocking:\n"
+    "  gpu                           Show GPU sensors, NVIDIA metrics & power control\n"
+    "  gpu info                      Same as 'gpu' (explicit form)\n"
+    "  gpu profile list              List GPU OC profiles (built-in + custom)\n"
+    "  gpu profile get <ID>          Show a GPU OC profile's data\n"
+    "  gpu profile set <ID>          Apply a GPU OC profile by ID\n"
+    "  gpu profile reset             Reset all GPU OC (clocks, power limits)\n"
+    "  gpu oc-state                  Show current NVIDIA OC state (JSON)\n"
+    "\n"
+    "ODM performance profile:\n"
+    "  odm list                      List available ODM performance profiles\n"
+    "  odm get                       Show current ODM performance profile\n"
+    "  odm set <PROFILE>             Set ODM performance profile\n"
+    "\n"
     "Keyboard backlight:\n"
     "  keyboard info                 Show keyboard backlight capabilities\n"
     "  keyboard get                  Show current per-zone backlight states\n"
@@ -1661,8 +2146,7 @@ static void printUsage()
     "\n"
     "System info:\n"
     "  cpu                           Show CPU info and capabilities\n"
-    "  gpu                           Show GPU info and NVIDIA power control\n"
-    "  power-limits                  Show ODM power limits\n"
+    "  power-limits                  Show ODM power limits (TDP values)\n"
     "\n"
     "General:\n"
     "  --help, -h                    Show this help\n"
@@ -1732,6 +2216,20 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   auto g3 = c.getGpuPower();            if ( g3 ) gpu["power"]       = *g3;
   auto g4 = c.getGpuFanSpeedPercent();  if ( g4 ) gpu["fanPercent"]  = *g4;
   auto g5 = c.getGpuFanSpeedRPM();      if ( g5 ) gpu["fanRPM"]      = *g5;
+
+  // Extended NVIDIA metrics
+  auto ge1 = c.getDGpuComputeUtilPct();    if ( ge1 && *ge1 >= 0 ) gpu["computeUtilPct"]    = *ge1;
+  auto ge2 = c.getDGpuMemoryUtilPct();     if ( ge2 && *ge2 >= 0 ) gpu["memoryUtilPct"]     = *ge2;
+  auto ge3 = c.getDGpuVramUsedMiB();       if ( ge3 && *ge3 >= 0 ) gpu["vramUsedMiB"]       = *ge3;
+  auto ge4 = c.getDGpuVramTotalMiB();      if ( ge4 && *ge4 >= 0 ) gpu["vramTotalMiB"]      = *ge4;
+  auto ge5 = c.getDGpuPerfLimitReason();   if ( ge5 && !ge5->empty() ) gpu["perfLimitReason"] = QString::fromStdString( *ge5 );
+  auto ge6 = c.getDGpuEncoderUtilPct();    if ( ge6 && *ge6 >= 0 ) gpu["encoderUtilPct"]    = *ge6;
+  auto ge7 = c.getDGpuDecoderUtilPct();    if ( ge7 && *ge7 >= 0 ) gpu["decoderUtilPct"]    = *ge7;
+  auto ge8 = c.getDGpuCurrentPstate();     if ( ge8 && *ge8 >= 0 ) gpu["currentPstate"]     = *ge8;
+  auto ge9 = c.getDGpuGrClockOffsetMHz();  if ( ge9 && *ge9 != 0 ) gpu["grClockOffsetMHz"]  = *ge9;
+  auto ge10 = c.getDGpuMemClockOffsetMHz(); if ( ge10 && *ge10 != 0 ) gpu["memClockOffsetMHz"] = *ge10;
+  auto ge11 = c.getDGpuVramFrequencyMHz(); if ( ge11 && *ge11 >= 0 ) gpu["vramFrequencyMHz"]  = *ge11;
+  auto ge12 = c.getDGpuCoreVoltageMv();    if ( ge12 && *ge12 >= 0 ) gpu["coreVoltageMv"]     = *ge12;
   root["gpu"] = gpu;
 
   // iGPU
@@ -2157,12 +2655,69 @@ int main( int argc, char *argv[] )
   if ( matchArg( cmd, "cpu" ) )
     return cmdCpuInfo( client );
 
-  // gpu
+  // gpu [info | profile <list|get|set|reset> | oc-state]
   if ( matchArg( cmd, "gpu" ) )
-    return cmdGpuInfo( client );
+  {
+    if ( args.size() < 2 )
+      return cmdGpuInfo( client );  // bare "gpu" → info
+
+    const char *sub = args[1];
+    if ( matchArg( sub, "info" ) )
+      return cmdGpuInfo( client );
+    if ( matchArg( sub, "oc-state" ) || matchArg( sub, "ocstate" ) )
+      return cmdGpuOCState( client );
+
+    if ( matchArg( sub, "profile" ) || matchArg( sub, "prof" ) )
+    {
+      if ( args.size() < 3 )
+      {
+        std::fputs( "Usage: ucc-cli gpu profile <list|get|set|reset>\n", stderr );
+        return 1;
+      }
+      const char *sub2 = args[2];
+      if ( matchArg( sub2, "list" ) || matchArg( sub2, "ls" ) )
+        return cmdGpuProfileList( client );
+      if ( matchArg( sub2, "get" ) || matchArg( sub2, "show" ) )
+      {
+        if ( args.size() < 4 ) { std::fputs( "Usage: ucc-cli gpu profile get <GPU_PROFILE_ID>\n", stderr ); return 1; }
+        return cmdGpuProfileGet( client, args[3] );
+      }
+      if ( matchArg( sub2, "set" ) || matchArg( sub2, "activate" ) || matchArg( sub2, "apply" ) )
+      {
+        if ( args.size() < 4 ) { std::fputs( "Usage: ucc-cli gpu profile set <GPU_PROFILE_ID>\n", stderr ); return 1; }
+        return cmdGpuProfileSet( client, args[3] );
+      }
+      if ( matchArg( sub2, "reset" ) || matchArg( sub2, "clear" ) )
+        return cmdGpuProfileReset( client );
+      std::fprintf( stderr, "Unknown gpu profile subcommand: %s\n", sub2 );
+      return 1;
+    }
+    std::fprintf( stderr, "Unknown gpu subcommand: %s\n", sub );
+    return 1;
+  }
+
+  // odm [list | get | set <PROFILE>]
+  if ( matchArg( cmd, "odm" ) )
+  {
+    if ( args.size() < 2 )
+      return cmdODMList( client );  // bare "odm" → list
+
+    const char *sub = args[1];
+    if ( matchArg( sub, "list" ) || matchArg( sub, "ls" ) )
+      return cmdODMList( client );
+    if ( matchArg( sub, "get" ) || matchArg( sub, "show" ) )
+      return cmdODMGet( client );
+    if ( matchArg( sub, "set" ) )
+    {
+      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli odm set <PROFILE>\n", stderr ); return 1; }
+      return cmdODMSet( client, args[2] );
+    }
+    std::fprintf( stderr, "Unknown odm subcommand: %s\n", sub );
+    return 1;
+  }
 
   // power-limits
-  if ( matchArg( cmd, "power-limits" ) || matchArg( cmd, "odm" ) )
+  if ( matchArg( cmd, "power-limits" ) )
     return cmdPowerLimits( client );
 
   std::fprintf( stderr, "Unknown command: %s\nTry: ucc-cli --help\n", cmd );

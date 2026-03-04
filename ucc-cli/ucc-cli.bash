@@ -19,12 +19,15 @@ _ucc_cli()
     local cur prev words cword
     _init_completion || return
 
-    local commands="status monitor cpu gpu power-limits profile statemap fan keyboard brightness webcam fnlock watercooler charging help version"
+    local commands="status monitor cpu gpu power-limits odm profile statemap fan keyboard brightness webcam fnlock watercooler charging help version"
 
     # Sub-commands per top-level command
     local profile_cmds="list get set defaults customs apply save delete"
     local statemap_cmds="get set"
     local fan_cmds="list get set apply revert"
+    local gpu_cmds="info profile oc-state"
+    local gpu_profile_cmds="list get set reset"
+    local odm_cmds="list get set"
     local keyboard_cmds="info get set color profiles activate"
     local brightness_cmds="get set"
     local webcam_cmds="get set"
@@ -36,7 +39,7 @@ _ucc_cli()
     local global_flags="--json --help --version"
 
     # Find the top-level command (skip flags)
-    local cmd="" subcmd="" cmdidx=0
+    local cmd="" subcmd="" sub2cmd="" cmdidx=0
     for (( i=1; i < cword; i++ )); do
         case "${words[i]}" in
             --json|--help|--version|-h|-v) ;;
@@ -46,6 +49,8 @@ _ucc_cli()
                     cmdidx=$i
                 elif [[ -z "$subcmd" ]]; then
                     subcmd="${words[i]}"
+                elif [[ -z "$sub2cmd" ]]; then
+                    sub2cmd="${words[i]}"
                 fi
                 ;;
         esac
@@ -68,6 +73,12 @@ _ucc_cli()
                 return ;;
             fan)
                 COMPREPLY=( $(compgen -W "$fan_cmds" -- "$cur") )
+                return ;;
+            gpu)
+                COMPREPLY=( $(compgen -W "$gpu_cmds" -- "$cur") )
+                return ;;
+            odm)
+                COMPREPLY=( $(compgen -W "$odm_cmds" -- "$cur") )
                 return ;;
             keyboard|kb)
                 COMPREPLY=( $(compgen -W "$keyboard_cmds" -- "$cur") )
@@ -116,6 +127,36 @@ _ucc_cli()
                     mapfile -t ids < <(ucc-cli fan list 2>/dev/null | _ucc_cli_ids)
                     local IFS=$'\n'
                     COMPREPLY=( $(compgen -W "${ids[*]}" -- "$cur") )
+                    return ;;
+            esac
+            ;;
+        gpu)
+            case "$subcmd" in
+                profile|prof)
+                    if [[ -z "$sub2cmd" ]]; then
+                        COMPREPLY=( $(compgen -W "$gpu_profile_cmds" -- "$cur") )
+                        return
+                    fi
+                    case "$sub2cmd" in
+                        get|show|set|activate|apply)
+                            # Complete with GPU OC profile IDs
+                            local -a ids
+                            mapfile -t ids < <(ucc-cli gpu profile list 2>/dev/null | _ucc_cli_ids)
+                            local IFS=$'\n'
+                            COMPREPLY=( $(compgen -W "${ids[*]}" -- "$cur") )
+                            return ;;
+                    esac
+                    ;;
+            esac
+            ;;
+        odm)
+            case "$subcmd" in
+                set)
+                    # Complete with available ODM profile names
+                    local -a profiles
+                    mapfile -t profiles < <(ucc-cli odm list 2>/dev/null | sed -n 's/^  //p')
+                    local IFS=$'\n'
+                    COMPREPLY=( $(compgen -W "${profiles[*]}" -- "$cur") )
                     return ;;
             esac
             ;;

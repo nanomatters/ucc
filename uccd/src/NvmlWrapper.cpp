@@ -67,8 +67,8 @@ NvmlWrapper::NvmlWrapper( bool enableOcFeatures )
   m_getMaxClockInfo = loadSym< DeviceGetMaxClockInfoFn >( "nvmlDeviceGetMaxClockInfo" );
   m_getEnforcedPowerLimit = loadSym< DeviceGetEnforcedPowerLimitFn >( "nvmlDeviceGetEnforcedPowerLimit" );
   m_getUtilizationRates   = loadSym< DeviceGetUtilizationRatesFn >( "nvmlDeviceGetUtilizationRates" );
-  m_getMemoryInfo = loadSym< DeviceGetMemoryInfoFn >( "nvmlDeviceGetMemoryInfo_v2" );
-  if ( !m_getMemoryInfo )
+  m_getMemoryInfoV2 = loadSym< DeviceGetMemoryInfoV2Fn >( "nvmlDeviceGetMemoryInfo_v2" );
+  if ( !m_getMemoryInfoV2 )
     m_getMemoryInfo = loadSym< DeviceGetMemoryInfoFn >( "nvmlDeviceGetMemoryInfo" );
   m_getCurrentClocksThrottleReasons = loadSym< DeviceGetCurrentClocksThrottleReasonsFn >( "nvmlDeviceGetCurrentClocksThrottleReasons" );
   m_getEncoderUtilization = loadSym< DeviceGetEncoderUtilizationFn >( "nvmlDeviceGetEncoderUtilization" );
@@ -807,9 +807,19 @@ std::optional< unsigned int > NvmlWrapper::getMemoryUtilPct( unsigned int device
 
 std::optional< unsigned int > NvmlWrapper::getVramUsedMiB( unsigned int deviceIndex ) const noexcept
 {
-  if ( !m_getMemoryInfo ) return std::nullopt;
   auto devOpt = getDevice( deviceIndex );
   if ( !devOpt ) return std::nullopt;
+
+  // Use total−free (includes driver-reserved memory) to match nvidia-smi reporting.
+  if ( m_getMemoryInfoV2 )
+  {
+    nvml::nvmlMemory_v2_t mem2{};
+    mem2.version = NVML_MEMORY_V2_VER;
+    if ( m_getMemoryInfoV2( *devOpt, &mem2 ) == nvml::NVML_SUCCESS )
+      return static_cast< unsigned int >( ( mem2.total - mem2.free ) / ( 1024ULL * 1024ULL ) );
+  }
+
+  if ( !m_getMemoryInfo ) return std::nullopt;
   nvml::nvmlMemory_t mem{};
   if ( m_getMemoryInfo( *devOpt, &mem ) != nvml::NVML_SUCCESS ) return std::nullopt;
   return static_cast< unsigned int >( mem.used / ( 1024ULL * 1024ULL ) );
@@ -817,9 +827,18 @@ std::optional< unsigned int > NvmlWrapper::getVramUsedMiB( unsigned int deviceIn
 
 std::optional< unsigned int > NvmlWrapper::getVramTotalMiB( unsigned int deviceIndex ) const noexcept
 {
-  if ( !m_getMemoryInfo ) return std::nullopt;
   auto devOpt = getDevice( deviceIndex );
   if ( !devOpt ) return std::nullopt;
+
+  if ( m_getMemoryInfoV2 )
+  {
+    nvml::nvmlMemory_v2_t mem2{};
+    mem2.version = NVML_MEMORY_V2_VER;
+    if ( m_getMemoryInfoV2( *devOpt, &mem2 ) == nvml::NVML_SUCCESS )
+      return static_cast< unsigned int >( mem2.total / ( 1024ULL * 1024ULL ) );
+  }
+
+  if ( !m_getMemoryInfo ) return std::nullopt;
   nvml::nvmlMemory_t mem{};
   if ( m_getMemoryInfo( *devOpt, &mem ) != nvml::NVML_SUCCESS ) return std::nullopt;
   return static_cast< unsigned int >( mem.total / ( 1024ULL * 1024ULL ) );
