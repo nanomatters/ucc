@@ -152,6 +152,36 @@ public:
   }
 
   /**
+   * @brief Parse a fan profile JSON string into a FanProfile struct
+   * @param json JSON string with tableCPU, tableGPU, tablePump, tableWaterCoolerFan arrays
+   * @return FanProfile populated from the JSON
+   */
+  [[nodiscard]] static FanProfile parseFanProfileJSON( const std::string &json )
+  {
+    FanProfile fp;
+    fp.id = extractString( json, "id" );
+    fp.name = extractString( json, "name" );
+
+    std::string tableCPUJson = extractArray( json, "tableCPU" );
+    if ( !tableCPUJson.empty() )
+      fp.tableCPU = parseFanTable( tableCPUJson );
+
+    std::string tableGPUJson = extractArray( json, "tableGPU" );
+    if ( !tableGPUJson.empty() )
+      fp.tableGPU = parseFanTable( tableGPUJson );
+
+    std::string tablePumpJson = extractArray( json, "tablePump" );
+    if ( !tablePumpJson.empty() )
+      fp.tablePump = parseFanTable( tablePumpJson );
+
+    std::string tableWCFanJson = extractArray( json, "tableWaterCoolerFan" );
+    if ( !tableWCFanJson.empty() )
+      fp.tableWaterCoolerFan = parseFanTable( tableWCFanJson );
+
+    return fp;
+  }
+
+  /**
    * @brief Parse a single profile from JSON object
    * @param json JSON object string
    * @return Parsed profile
@@ -234,32 +264,6 @@ public:
       // Debug: log the parsed fan settings
       std::cout << "[ProfileManager] Parsed profile '" << profile.name
                 << "' sameSpeed: " << ( profile.fan.sameSpeed ? "true" : "false" ) << std::endl;
-
-      // Parse embedded fan tables if present (GUI embeds full fan curves in custom profiles)
-      std::string tableCPUJson = extractArray( fanJson, "tableCPU" );
-      if ( !tableCPUJson.empty() )
-        profile.fan.tableCPU = parseFanTable( tableCPUJson );
-
-      std::string tableGPUJson = extractArray( fanJson, "tableGPU" );
-      if ( !tableGPUJson.empty() )
-        profile.fan.tableGPU = parseFanTable( tableGPUJson );
-
-      std::string tablePumpJson = extractArray( fanJson, "tablePump" );
-      if ( !tablePumpJson.empty() )
-        profile.fan.tablePump = parseFanTable( tablePumpJson );
-
-      std::string tableWCFanJson = extractArray( fanJson, "tableWaterCoolerFan" );
-      if ( !tableWCFanJson.empty() )
-        profile.fan.tableWaterCoolerFan = parseFanTable( tableWCFanJson );
-
-      if ( profile.fan.hasEmbeddedTables() )
-      {
-        std::cout << "[ProfileManager] Profile '" << profile.name
-                  << "' has embedded fan tables: CPU=" << profile.fan.tableCPU.size()
-                  << " GPU=" << profile.fan.tableGPU.size()
-                  << " Pump=" << profile.fan.tablePump.size()
-                  << " WCFan=" << profile.fan.tableWaterCoolerFan.size() << std::endl;
-      }
     }
 
     // Parse ODM profile
@@ -280,12 +284,12 @@ public:
       profile.odmPowerLimits.tdpValues = extractIntArray( odmPowerJson, "tdpValues" );
     }
 
-    // Parse keyboard settings
+    // Parse keyboard settings — only the ID reference
     std::string keyboardJson = extractObject( json, "keyboard" );
     if ( !keyboardJson.empty() )
     {
-      profile.keyboard.keyboardProfileData = keyboardJson;
-      profile.keyboard.keyboardProfileName = extractString( keyboardJson, "keyboardProfileName", "" );
+      // Legacy: keyboard profile name may be stored inside the keyboard object
+      // but we only keep the ID now.
     }
 
     // Top-level selectedKeyboardProfile is the UUID written by the GUI
@@ -295,9 +299,8 @@ public:
       profile.keyboard.keyboardProfileId = topLevelKeyboardProfile;
     }
 
-    // Parse GPU profile reference and embedded GPU OC data
+    // Parse GPU profile reference (ID only — embedded data removed)
     profile.gpuProfileId = extractString( json, "gpuProfileId", "" );
-    profile.gpuOCProfileData = extractObject( json, "gpuOCProfileData" );
 
     // Parse charging profile (firmware-level charging mode stored per-profile)
     profile.chargingProfile = extractString( json, "chargingProfile", "" );
@@ -495,28 +498,6 @@ private:
       modified = true;
     }
 
-    // Fill embedded fan tables from default if profile has none
-    if ( profile.fan.tableCPU.empty() and not defaultProfile.fan.tableCPU.empty() )
-    {
-      profile.fan.tableCPU = defaultProfile.fan.tableCPU;
-      modified = true;
-    }
-    if ( profile.fan.tableGPU.empty() and not defaultProfile.fan.tableGPU.empty() )
-    {
-      profile.fan.tableGPU = defaultProfile.fan.tableGPU;
-      modified = true;
-    }
-    if ( profile.fan.tablePump.empty() and not defaultProfile.fan.tablePump.empty() )
-    {
-      profile.fan.tablePump = defaultProfile.fan.tablePump;
-      modified = true;
-    }
-    if ( profile.fan.tableWaterCoolerFan.empty() and not defaultProfile.fan.tableWaterCoolerFan.empty() )
-    {
-      profile.fan.tableWaterCoolerFan = defaultProfile.fan.tableWaterCoolerFan;
-      modified = true;
-    }
-
     // fill ODM profile name
     if ( not profile.odmProfile.name.has_value() and defaultProfile.odmProfile.name.has_value() )
     {
@@ -632,27 +613,8 @@ public:
         << "\"fanProfile\":\"" << jsonEscape( profile.fan.fanProfile ) << "\","
         << "\"sameSpeed\":" << ( profile.fan.sameSpeed ? "true" : "false" ) << ","
         << "\"autoControlWC\":" << ( profile.fan.autoControlWC ? "true" : "false" ) << ","
-        << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" );
-
-    // Embed fan tables if present
-    if ( !profile.fan.tableCPU.empty() )
-    {
-      oss << ",\"tableCPU\":" << fanTableToJSON( profile.fan.tableCPU );
-    }
-    if ( !profile.fan.tableGPU.empty() )
-    {
-      oss << ",\"tableGPU\":" << fanTableToJSON( profile.fan.tableGPU );
-    }
-    if ( !profile.fan.tablePump.empty() )
-    {
-      oss << ",\"tablePump\":" << fanTableToJSON( profile.fan.tablePump );
-    }
-    if ( !profile.fan.tableWaterCoolerFan.empty() )
-    {
-      oss << ",\"tableWaterCoolerFan\":" << fanTableToJSON( profile.fan.tableWaterCoolerFan );
-    }
-
-    oss << "},"
+        << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" )
+        << "},"
         << "\"odmProfile\":{"
         << "\"name\":\"" << jsonEscape( profile.odmProfile.name.value_or( "" ) ) << "\""
         << "},"
@@ -667,27 +629,13 @@ public:
 
     oss << "]}";
 
-    // GPU OC profile reference and embedded data
+    // GPU OC profile — ID reference only
     if ( !profile.gpuProfileId.empty() )
     {
       oss << ",\"gpuProfileId\":\"" << jsonEscape( profile.gpuProfileId ) << "\"";
     }
-    if ( !profile.gpuOCProfileData.empty() && profile.gpuOCProfileData != "{}" )
-    {
-      oss << ",\"gpuOCProfileData\":" << profile.gpuOCProfileData;
-    }
 
-    // Keyboard section
-    if ( !profile.keyboard.keyboardProfileData.empty() && profile.keyboard.keyboardProfileData != "{}" )
-    {
-      oss << ",\"keyboard\":" << profile.keyboard.keyboardProfileData;
-    }
-    else
-    {
-      oss << ",\"keyboard\":{}";
-    }
-
-    // selectedKeyboardProfile always stores the keyboard profile UUID.
+    // Keyboard — ID reference only
     {
       const std::string &kbRef = profile.keyboard.keyboardProfileId;
       if ( !kbRef.empty() )

@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <QTimer>
 #include <QObject>
 #include <QDBusAbstractAdaptor>
 #include <QDBusArgument>
@@ -30,6 +31,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <unordered_set>
 #include "CommonTypes.hpp"
 #include "workers/DaemonWorker.hpp"
 #include "workers/HardwareMonitorWorker.hpp"
@@ -40,6 +42,8 @@
 #include "workers/ProfileSettingsWorker.hpp"
 #include "workers/LCTWaterCoolerWorker.hpp"
 #include "workers/NvidiaOCWorker.hpp"
+#include "workers/AutoOCWorker.hpp"
+#include "workers/AutoUndervoltWorker.hpp"
 #include "FnLockController.hpp"
 #include "profiles/UccProfile.hpp"
 #include "profiles/DefaultProfiles.hpp"
@@ -48,6 +52,7 @@
 #include "AutosaveManager.hpp"
 #include "TccSettings.hpp"
 #include "MetricsHistoryStore.hpp"
+#include "FpsServer.hpp"
 #include "SystemInfo.hpp"
 #include "tuxedo_io_lib/tuxedo_io_api.hh"
 
@@ -128,7 +133,6 @@ public:
   std::string defaultValuesProfileJSON;
   std::string settingsJSON;
   std::vector< std::string > odmProfilesAvailable;
-  std::string odmPowerLimitsJSON;
   std::string keyboardBacklightCapabilitiesJSON;
   std::string keyboardBacklightStatesJSON;
   std::atomic< int32_t > fansMinSpeed;
@@ -184,7 +188,6 @@ public:
       defaultValuesProfileJSON( "{}" ),
       settingsJSON( "{}" ),
       odmProfilesAvailable(),
-      odmPowerLimitsJSON( "[]" ),
       keyboardBacklightCapabilitiesJSON( "{}" ),
       keyboardBacklightStatesJSON( "{}" ),
       fansMinSpeed( 0 ),
@@ -291,29 +294,49 @@ public slots:
 
   // profile methods
   QString GetActiveProfileJSON();
+  QString GetAppliedProfilesJSON();
   QString GetPowerState();
   bool SetTempProfile( const QString &profileName );
   bool SetActiveProfile( const QString &id );
   bool ApplyProfile( const QString &profileJSON );
-  QString GetProfilesJSON();
-  QString GetCustomProfilesJSON();
-  // Fan profile get/set for editable (custom) profiles only
+  QString GetProfilesJSON();                       // All profiles (built-in + custom) with "editable" flag
   bool SetFanProfileCPU( const QString &pointsJSON );
   bool SetFanProfileDGPU( const QString &pointsJSON );
   bool ApplyFanProfiles( const QString &fanProfilesJSON );
   bool RevertFanProfiles();
-  QString GetDefaultProfilesJSON();
   QString GetCpuFrequencyLimitsJSON();
   QString GetDefaultValuesProfileJSON();
-  bool AddCustomProfile( const QString &profileJSON );
-  bool SaveCustomProfile( const QString &profileJSON );
-  bool DeleteCustomProfile( const QString &profileId );
-  bool UpdateCustomProfile( const QString &profileJSON );
-  QString GetFanProfile( const QString &name );
-  QString GetFanProfileNames();
-  QString GetGpuProfile( const QString &id );
-  QString GetGpuProfileNames();
-  bool SetFanProfile( const QString &name, const QString &json );
+  bool SaveProfile( const QString &profileJSON );  // Save/update any editable profile
+  bool DeleteProfile( const QString &profileId );  // Delete an editable profile
+
+  // Sub-profile CRUD — all include built-in (editable=false) + custom (editable=true)
+  QString GetFanProfilesJSON();                    // Replaces GetFanProfileNames
+  QString GetFanProfileJSON( const QString &id );  // Replaces GetFanProfile
+  bool SaveFanProfile( const QString &id, const QString &name, const QString &json );
+  bool DeleteFanProfile( const QString &id );
+
+  QString GetGpuProfilesJSON();                    // Replaces GetGpuProfileNames
+  QString GetGpuProfileJSON( const QString &id );  // Replaces GetGpuProfile
+  bool SaveGpuProfile( const QString &id, const QString &name, const QString &json );
+  bool DeleteGpuProfile( const QString &id );
+
+  QString GetKeyboardProfilesJSON();
+  QString GetKeyboardProfileJSON( const QString &id );
+  bool SaveKeyboardProfile( const QString &id, const QString &name, const QString &json );
+  bool DeleteKeyboardProfile( const QString &id );
+
+  // Backward-compatible aliases — deprecated, use unified methods above
+  QString GetDefaultProfilesJSON();  // Returns same as GetProfilesJSON() filtered to !editable
+  QString GetCustomProfilesJSON();   // Returns same as GetProfilesJSON() filtered to editable
+  bool SaveCustomProfile( const QString &profileJSON );  // Forwards to SaveProfile
+  bool DeleteCustomProfile( const QString &profileId );  // Forwards to DeleteProfile
+  bool AddCustomProfile( const QString &profileJSON );   // Forwards to SaveProfile
+  bool UpdateCustomProfile( const QString &profileJSON );// Forwards to SaveProfile
+  QString GetFanProfile( const QString &name );          // Forwards to GetFanProfileJSON
+  QString GetFanProfileNames();                          // Forwards to GetFanProfilesJSON
+  QString GetGpuProfile( const QString &id );            // Forwards to GetGpuProfileJSON
+  QString GetGpuProfileNames();                          // Forwards to GetGpuProfilesJSON
+  bool SetFanProfile( const QString &name, const QString &json );  // Legacy
 
   // settings methods
   QString GetSettingsJSON();
@@ -363,6 +386,7 @@ public slots:
   int GetNVIDIAPowerCTRLDefaultPowerLimit();
   int GetNVIDIAPowerCTRLMaxPowerLimit();
   bool GetNVIDIAPowerCTRLAvailable();
+  int GetNVIDIAPowerOffset();
   bool SetNVIDIAPowerOffset( int offset );
   QString GetAvailableGovernors();
   QString GetAvailableEPPs();
@@ -381,6 +405,19 @@ public slots:
   bool ResetNvidiaGpuPowerLimit( int deviceIndex );
   bool ApplyNvidiaGpuOCProfile( const QString &profileJSON, int deviceIndex );
   bool ResetNvidiaGpuOCAll( int deviceIndex );
+
+  // NVIDIA Auto-OC methods
+  bool StartAutoOC( const QString &component, int deviceIndex );
+  bool StopAutoOC();
+  bool GetAutoOCRunning();
+  QString GetAutoOCProgress();
+
+  // NVIDIA Auto-Undervolt methods
+  bool StartAutoUndervolt( int deviceIndex );
+  bool StopAutoUndervolt();
+  bool GetAutoUndervoltRunning();
+  QString GetAutoUndervoltProgress();
+  QString GetAutoUndervoltProfiles();
 
   // water cooler methods
   bool GetWaterCoolerAvailable();
@@ -406,15 +443,28 @@ public slots:
   void SetMonitorHistoryHorizon( int seconds );
   int GetMonitorHistoryHorizon();
   int GetCpuFrequencyMHz();
+  QString GetFpsSourcesJSON();
+  QString GetAutoUvAutoApplyStatusJSON();
+  bool SetFpsSourceApp( const QString &appName );
+  QString GetFpsSourceApp();
+  bool SetFpsRequireP0( bool enabled );
+  bool GetFpsRequireP0();
 
 signals:
   void ProfileChanged( const QString &profileId,
                        const QString &keyboardProfileId,
                        const QString &fanProfileId,
                        const QString &gpuProfileId );
+  void ProfilesListChanged();
   void ModeReapplyPendingChanged( bool pending );
   void PowerStateChanged( const QString &state );
   void WaterCoolerStatusChanged( const QString &status );
+  void AutoOCProgressChanged( const QString &progressJSON );
+  void AutoOCFinished( int coreOffsetMHz, int vramOffsetMHz,
+                       bool success, const QString &message );
+  void AutoUndervoltProgressChanged( const QString &progressJSON );
+  void AutoUndervoltFinished( int gpuFreqCapMHz, bool success, const QString &message,
+                              const QString &appName );
 
 public:
   // signal emitters (call these from service code)
@@ -423,6 +473,7 @@ public:
                            const std::string &keyboardProfileId = {},
                            const std::string &fanProfileId = {},
                            const std::string &gpuProfileId = {} );
+  void emitProfilesListChanged();
   void emitPowerStateChanged( const std::string &state );
   void emitWaterCoolerStatusChanged( const std::string &status );
 
@@ -433,6 +484,23 @@ private:
   UccDBusData &m_data;
   UccDBusService *m_service;
   std::chrono::steady_clock::time_point m_lastDataCollectionAccess;
+
+  /// Shared FPS socket server — always active while adaptor exists.
+  FpsServer  m_fpsServer;
+  /// Polls m_fpsServer every second and pushes MetricId::Fps to the metric store.
+  QTimer    *m_fpsPollTimer = nullptr;
+  /// Seen FPS source app names (from SO_PEERCRED process name).
+  std::unordered_set< std::string > m_seenFpsApps;
+  /// Manual FPS source selection; empty or "auto" means automatic source.
+  std::string m_selectedFpsApp;
+  /// If true, FPS samples are accepted only when dGPU is in P0.
+  bool m_requireFpsP0 = true;
+  /// Last FPS client app for which auto-undervolt GPU profile was applied.
+  std::string m_lastAutoAppliedApp;
+  /// Last mapped GPU profile id auto-applied for the tracked app.
+  std::string m_lastAutoAppliedGpuProfileId;
+  /// Last client PID for which auto-apply was attempted.
+  pid_t m_lastAutoAppliedPid = 0;
 
   void resetDataCollectionTimeout();
   QVariantMap exportFanData( const FanData &fanData );
@@ -539,7 +607,8 @@ protected:
   void onExit() override;
 
 private:
-  struct BuiltinGpuProfile
+  // Sub-profile entry: { id, name, json }
+  struct SubProfile
   {
     std::string id;
     std::string name;
@@ -562,7 +631,13 @@ private:
   UccProfile m_activeProfile;
   std::vector< UccProfile > m_defaultProfiles;
   std::vector< UccProfile > m_customProfiles;
-  std::vector< BuiltinGpuProfile > m_builtinGpuProfiles;
+  std::vector< SubProfile > m_builtinGpuProfiles;
+  std::vector< SubProfile > m_builtinKeyboardProfiles;
+
+  // Custom sub-profiles stored daemon-side (persisted in /etc/ucc/settings)
+  std::vector< SubProfile > m_customFanProfiles;
+  std::vector< SubProfile > m_customKeyboardProfiles;
+  std::vector< SubProfile > m_customGpuProfiles;
 
   // state switching
   ProfileState m_currentState;
@@ -597,6 +672,7 @@ private:
 
   void setupGpuDataCallback();
   void rebuildBuiltinGpuProfiles();
+  void rebuildBuiltinKeyboardProfile();
   int readCurrentCTGPOffset() const;
   void readHardwareCapabilities();
   void updateFanData();
@@ -611,6 +687,15 @@ private:
   void applyProfileForCurrentState();
   void applyFanAndPumpSettings( const UccProfile &profile );
   void applyGpuOCFromProfile( const UccProfile &profile );
+  void applyKeyboardFromProfile( const UccProfile &profile );
+
+  /// Resolve a fan profile by ID — checks custom first, then built-in
+  [[nodiscard]] FanProfile resolveFanProfile( const std::string &fanProfileId ) const;
+  /// Resolve a GPU OC profile JSON by ID — checks custom first, then built-in
+  [[nodiscard]] std::string resolveGpuProfileJSON( const std::string &gpuProfileId ) const;
+  /// Resolve a keyboard profile JSON by ID — checks custom profiles
+  [[nodiscard]] std::string resolveKeyboardProfileJSON( const std::string &keyboardProfileId ) const;
+
   void fillDeviceSpecificDefaults( std::vector< UccProfile > &profiles );
   void snapProfileFrequencies( UccProfile &profile );
   std::optional< UniwillDeviceID > identifyDevice();
@@ -627,6 +712,8 @@ private:
   KeyboardBacklightController m_keyboardBacklightController;
   std::unique_ptr< LCTWaterCoolerWorker > m_waterCoolerWorker;
   std::unique_ptr< NvidiaOCWorker > m_nvidiaOCWorker;
+  std::unique_ptr< AutoOCWorker > m_autoOCWorker;
+  std::unique_ptr< AutoUndervoltWorker > m_autoUndervoltWorker;
 
   // Shared NVML instance — created once, used by all workers and readHardwareCapabilities
   std::shared_ptr< NvmlWrapper > m_nvml;

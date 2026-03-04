@@ -399,28 +399,6 @@ void ProfileSettingsWorker::logLine( const std::string &message )
   }
 }
 
-void ProfileSettingsWorker::publishODMPowerLimitsJSON( const std::vector< TDPInfo > &tdpInfo )
-{
-  std::ostringstream jsonStream;
-  jsonStream << "[";
-
-  for ( size_t i = 0; i < tdpInfo.size(); ++i )
-  {
-    if ( i > 0 )
-      jsonStream << ",";
-
-    jsonStream << "{"
-               << "\"current\":" << tdpInfo[ i ].current << ","
-               << "\"min\":" << tdpInfo[ i ].min << ","
-               << "\"max\":" << tdpInfo[ i ].max
-               << "}";
-  }
-
-  jsonStream << "]";
-
-  m_setOdmPowerLimitsJSON( jsonStream.str() );
-}
-
 void ProfileSettingsWorker::applyODMPowerLimits()
 {
   logLine( "ProfileSettingsWorker: applyODMPowerLimits() called" );
@@ -433,7 +411,6 @@ void ProfileSettingsWorker::applyODMPowerLimits()
   if ( tdpInfo.empty() )
   {
     logLine( "ProfileSettingsWorker: No TDP hardware available" );
-    m_setOdmPowerLimitsJSON( "[]" );
     return;
   }
 
@@ -484,7 +461,6 @@ void ProfileSettingsWorker::applyODMPowerLimits()
     logLine( "ProfileSettingsWorker: Failed to write TDP values" );
   }
 
-  publishODMPowerLimitsJSON( tdpInfo );
 }
 
 // =====================================================================

@@ -180,9 +180,15 @@ public:
 
     try
     {
+      // Try extracting "states" array from a wrapper object first
       std::string statesJSON = extractStatesArray( keyboardDataJSON );
       if ( !statesJSON.empty() )
         return applyStatesFromJSON( statesJSON );
+
+      // Fallback: the input might be a bare JSON array (e.g. from direct
+      // color/brightness changes sent by the GUI visualizer).
+      if ( !keyboardDataJSON.empty() && keyboardDataJSON.front() == '[' )
+        return applyStatesFromJSON( keyboardDataJSON );
     }
     catch ( const std::exception &e )
     {

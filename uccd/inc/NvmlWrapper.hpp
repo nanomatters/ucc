@@ -112,6 +112,19 @@ struct nvmlMemory_v2_t
   ( static_cast< unsigned int >( sizeof( nvml::nvmlMemory_v2_t ) ) | ( 2U << 24 ) )
 
 using nvmlClocksThrottleReasons_t = unsigned long long;
+using nvmlClocksEventReasons_t = unsigned long long;
+
+enum nvmlPerfPolicyType_t : unsigned int
+{
+  NVML_PERF_POLICY_POWER = 0,
+  NVML_PERF_POLICY_THERMAL = 1,
+};
+
+struct nvmlViolationTime_t
+{
+  unsigned long long referenceTime; ///< usec
+  unsigned long long violationTime; ///< usec
+};
 
 static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_GPU_IDLE = 0x0000000000000001ULL;
 static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_APPLICATIONS_CLOCKS_SETTING = 0x0000000000000002ULL;
@@ -124,6 +137,23 @@ static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_HW_POWE
 static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_DISPLAY_CLOCK_SETTING = 0x0000000000000100ULL;
 
 } // namespace nvml
+
+/**
+ * Realistic offset caps.
+ *
+ * NVML reports the absolute hardware limits (e.g. core ±1000, VRAM −2000/+6000)
+ * but those extremes would crash any real GPU.  The caps below represent the
+ * widest range a well-cooled laptop GPU can realistically sustain.  All
+ * consumers (GUI sliders, CLI display, tray, GNOME extension) see clamped
+ * values so users cannot accidentally brick a session.
+ */
+struct NvmlOffsetCaps
+{
+  static constexpr int GPU_MIN_OFFSET  = -250;
+  static constexpr int GPU_MAX_OFFSET  =  500;
+  static constexpr int VRAM_MIN_OFFSET = -500;
+  static constexpr int VRAM_MAX_OFFSET = 1000;
+};
 
 /**
  * @brief P-State info for a single clock type at a single P-state.
@@ -308,6 +338,23 @@ public:
   /** @brief Current dominant performance-cap / throttle reason. */
   [[nodiscard]] std::optional< std::string > getPerfLimitReason( unsigned int deviceIndex ) const noexcept;
 
+  /** @brief Raw current clocks throttle-reason mask. */
+  [[nodiscard]] std::optional< unsigned long long >
+  getCurrentClocksThrottleReasonsMask( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Raw current clocks event-reason mask. */
+  [[nodiscard]] std::optional< unsigned long long >
+  getCurrentClocksEventReasonsMask( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Monotonic total energy consumption in mJ (if supported). */
+  [[nodiscard]] std::optional< unsigned long long >
+  getTotalEnergyConsumptionmJ( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Monotonic accumulated power-policy violation time in usec. */
+  [[nodiscard]] std::optional< unsigned long long >
+  getPerfPolicyViolationUsec( unsigned int deviceIndex,
+                              nvml::nvmlPerfPolicyType_t policy ) const noexcept;
+
   /** @brief NVENC utilization in percent (0–100). */
   [[nodiscard]] std::optional< unsigned int > getEncoderUtilPct( unsigned int deviceIndex ) const noexcept;
 
@@ -323,6 +370,18 @@ public:
   /** @brief Current memory-clock offset in MHz at the current P-state. */
   [[nodiscard]] std::optional< int > getMemClockOffsetMHz( unsigned int deviceIndex ) const noexcept;
 
+  /** @brief NvAPI current graphics clock (domain0) in MHz, if available. */
+  [[nodiscard]] std::optional< unsigned int > getNvapiCurrentGraphicsClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief NvAPI current SM clock (domain2) in MHz, if available. */
+  [[nodiscard]] std::optional< unsigned int > getNvapiCurrentSmClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief NvAPI current perf limiter mask from PerfPoliciesGetStatus. */
+  [[nodiscard]] std::optional< unsigned int > getNvapiPerfLimiterMask( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief NvAPI client power budget in watts, if exposed. */
+  [[nodiscard]] std::optional< unsigned int > getNvapiClientPowerBudgetW( unsigned int deviceIndex ) const noexcept;
+
   /** @brief Returns true if the NVML library was loaded and initialized. */
   bool isInitialized() const { return m_initialized; }
 
@@ -334,6 +393,32 @@ private:
     uint32_t padding[8];
     uint32_t valueUv;
     uint32_t padding2[8];
+  };
+
+  struct NvApiClockDomain
+  {
+    uint32_t present;
+    uint32_t freqKHz;
+    uint8_t reserved[24];
+  };
+
+  struct NvApiClockFrequenciesV3
+  {
+    uint32_t version;
+    uint32_t clockType;
+    NvApiClockDomain domain[8];
+  };
+
+  struct NvApiPerfPoliciesStatus
+  {
+    uint32_t version;
+    uint8_t raw[1356];
+  };
+
+  struct NvApiClientPowerTopology
+  {
+    uint32_t version;
+    uint8_t raw[68];
   };
 
   void* m_lib = nullptr;
@@ -381,6 +466,9 @@ private:
   using DeviceGetMemoryInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlMemory_t* );
   using DeviceGetMemoryInfoV2Fn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlMemory_v2_t* );
   using DeviceGetCurrentClocksThrottleReasonsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClocksThrottleReasons_t* );
+  using DeviceGetCurrentClocksEventReasonsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClocksEventReasons_t* );
+  using DeviceGetTotalEnergyConsumptionFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned long long * );
+  using DeviceGetViolationStatusFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPerfPolicyType_t, nvml::nvmlViolationTime_t * );
   using DeviceGetEncoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
   using DeviceGetDecoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
 
@@ -389,6 +477,9 @@ private:
   using NvApiUnloadFn = int32_t ( * )( void );
   using NvApiEnumPhysicalGPUsFn = int32_t ( * )( void *handles[64], uint32_t *count );
   using NvApiGetVoltageFn = int32_t ( * )( void *handle, NvApiVoltage *data );
+  using NvApiGetAllClockFrequenciesFn = int32_t ( * )( void *handle, NvApiClockFrequenciesV3 *data );
+  using NvApiPerfPoliciesGetStatusFn = int32_t ( * )( void *handle, NvApiPerfPoliciesStatus *data );
+  using NvApiClientPowerTopologyGetInfoFn = int32_t ( * )( void *handle, NvApiClientPowerTopology *data );
 
   // Function pointers (loaded via dlsym)
   InitFn m_init = nullptr;
@@ -420,6 +511,9 @@ private:
   DeviceGetMemoryInfoV2Fn m_getMemoryInfoV2 = nullptr;
   DeviceGetMemoryInfoFn m_getMemoryInfo = nullptr;
   DeviceGetCurrentClocksThrottleReasonsFn m_getCurrentClocksThrottleReasons = nullptr;
+  DeviceGetCurrentClocksEventReasonsFn m_getCurrentClocksEventReasons = nullptr;
+  DeviceGetTotalEnergyConsumptionFn m_getTotalEnergyConsumption = nullptr;
+  DeviceGetViolationStatusFn m_getViolationStatus = nullptr;
   DeviceGetEncoderUtilizationFn m_getEncoderUtilization = nullptr;
   DeviceGetDecoderUtilizationFn m_getDecoderUtilization = nullptr;
 
@@ -428,6 +522,9 @@ private:
   NvApiUnloadFn m_nvapiUnload = nullptr;
   NvApiEnumPhysicalGPUsFn m_nvapiEnumPhysicalGpus = nullptr;
   NvApiGetVoltageFn m_nvapiGetVoltage = nullptr;
+  NvApiGetAllClockFrequenciesFn m_nvapiGetAllClockFrequencies = nullptr;
+  NvApiPerfPoliciesGetStatusFn m_nvapiPerfPoliciesGetStatus = nullptr;
+  NvApiClientPowerTopologyGetInfoFn m_nvapiClientPowerTopologyGetInfo = nullptr;
 
   /**
    * @brief Load a function pointer from the NVML library.

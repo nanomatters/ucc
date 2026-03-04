@@ -63,6 +63,9 @@ void UccdClient::subscribeDbusSignals()
                   "ProfileChanged", this,
                   SLOT( onProfileChangedSignal( QString, QString, QString, QString ) ) );
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+                  "ProfilesListChanged", this,
+                  SLOT( onProfilesListChangedSignal() ) );
+  QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "PowerStateChanged", this,
                   SLOT( onPowerStateChangedSignal( QString ) ) );
 
@@ -70,8 +73,41 @@ void UccdClient::subscribeDbusSignals()
                "ProfileChanged", this,
                SLOT( onProfileChangedSignal( QString, QString, QString, QString ) ) );
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+               "ProfilesListChanged", this,
+               SLOT( onProfilesListChangedSignal() ) );
+  QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "PowerStateChanged", this,
                SLOT( onPowerStateChangedSignal( QString ) ) );
+
+  // Auto-OC signals
+  QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+                  "AutoOCProgressChanged", this,
+                  SIGNAL( autoOCProgressChanged( QString ) ) );
+  QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+                  "AutoOCFinished", this,
+                  SIGNAL( autoOCFinished( int, int, bool, QString ) ) );
+
+  QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+               "AutoOCProgressChanged", this,
+               SIGNAL( autoOCProgressChanged( QString ) ) );
+  QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+               "AutoOCFinished", this,
+               SIGNAL( autoOCFinished( int, int, bool, QString ) ) );
+
+  // Auto-Undervolt signals
+  QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+                  "AutoUndervoltProgressChanged", this,
+                  SIGNAL( autoUndervoltProgressChanged( QString ) ) );
+  QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+                  "AutoUndervoltFinished", this,
+                  SIGNAL( autoUndervoltFinished( int, bool, QString, QString ) ) );
+
+  QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+               "AutoUndervoltProgressChanged", this,
+               SIGNAL( autoUndervoltProgressChanged( QString ) ) );
+  QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
+               "AutoUndervoltFinished", this,
+               SIGNAL( autoUndervoltFinished( int, bool, QString, QString ) ) );
 }
 
 void UccdClient::connectToDaemon()
@@ -147,6 +183,11 @@ void UccdClient::onProfileChangedSignal( const QString &profileId,
 void UccdClient::onPowerStateChangedSignal( const QString &state )
 {
   emit powerStateChanged( state );
+}
+
+void UccdClient::onProfilesListChangedSignal()
+{
+  emit profilesListChanged();
 }
 
 // Template implementations
@@ -238,67 +279,70 @@ std::optional< bool > UccdClient::isDeviceSupported()
   return callMethod< bool >( "IsDeviceSupported" );
 }
 
-// Profile Management
+// ---------------------------------------------------------------------------
+// Profile Management — unified API
+// ---------------------------------------------------------------------------
+
+std::optional< std::string > UccdClient::getProfilesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetProfilesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
 std::optional< std::string > UccdClient::getDefaultProfilesJSON()
 {
   if ( auto result = callMethod< QString >( "GetDefaultProfilesJSON" ) )
-  {
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getCpuFrequencyLimitsJSON()
 {
   if ( auto result = callMethod< QString >( "GetCpuFrequencyLimitsJSON" ) )
-  {
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getDefaultValuesProfileJSON()
 {
   if ( auto result = callMethod< QString >( "GetDefaultValuesProfileJSON" ) )
-  {
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getCustomProfilesJSON()
 {
   if ( auto result = callMethod< QString >( "GetCustomProfilesJSON" ) )
-  {
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getActiveProfileJSON()
 {
   if ( auto result = callMethod< QString >( "GetActiveProfileJSON" ) )
-  {
     return result->toStdString();
-  }
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getAppliedProfilesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetAppliedProfilesJSON" ) )
+    return result->toStdString();
   return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getSettingsJSON()
 {
   if ( auto result = callMethod< QString >( "GetSettingsJSON" ) )
-  {
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getPowerState()
 {
   if ( auto result = callMethod< QString >( "GetPowerState" ) )
-  {
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
@@ -320,8 +364,7 @@ bool UccdClient::setBatchStateMap( const std::map< std::string, std::string > &e
 
 bool UccdClient::setActiveProfile( const std::string &profileId )
 {
-  const QString id = QString::fromStdString( profileId );
-  return callVoidMethod( "SetActiveProfile", id );
+  return callVoidMethod( "SetActiveProfile", QString::fromStdString( profileId ) );
 }
 
 bool UccdClient::applyProfile( const std::string &profileJSON )
@@ -329,37 +372,74 @@ bool UccdClient::applyProfile( const std::string &profileJSON )
   return callVoidMethod( "ApplyProfile", QString::fromStdString( profileJSON ) );
 }
 
-bool UccdClient::saveCustomProfile( [[maybe_unused]] [[maybe_unused]] const std::string &profileJSON )
+bool UccdClient::saveProfile( const std::string &profileJSON )
 {
-  return callVoidMethod( "SaveCustomProfile", QString::fromStdString( profileJSON ) );
+  return callVoidMethod( "SaveProfile", QString::fromStdString( profileJSON ) );
 }
 
-bool UccdClient::deleteCustomProfile( [[maybe_unused]] const std::string &profileId )
+bool UccdClient::deleteProfile( const std::string &profileId )
 {
-  return callVoidMethod( "DeleteCustomProfile", QString::fromStdString( profileId ) );
+  return callVoidMethod( "DeleteProfile", QString::fromStdString( profileId ) );
 }
 
-std::optional< std::string > UccdClient::getFanProfile( const std::string &fanProfileId )
-{
-  if ( auto result = callMethod< QString >( "GetFanProfile", QString::fromStdString( fanProfileId ) ) )
-  {
-    return result->toStdString();
-  }
-  return std::nullopt;
-}
+// Backward-compat aliases
+bool UccdClient::saveCustomProfile( const std::string &profileJSON ) { return saveProfile( profileJSON ); }
+bool UccdClient::deleteCustomProfile( const std::string &profileId ) { return deleteProfile( profileId ); }
+
+// ---------------------------------------------------------------------------
+// Fan sub-profiles
+// ---------------------------------------------------------------------------
 
 std::optional< std::string > UccdClient::getFanProfilesJSON()
 {
-  if ( auto result = callMethod< QString >( "GetFanProfileNames" ) )
-  {
+  if ( auto result = callMethod< QString >( "GetFanProfilesJSON" ) )
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getGpuProfile( const std::string &gpuProfileId )
+std::optional< std::string > UccdClient::getFanProfileJSON( const std::string &fanProfileId )
 {
-  if ( auto result = callMethod< QString >( "GetGpuProfile", QString::fromStdString( gpuProfileId ) ) )
+  if ( auto result = callMethod< QString >( "GetFanProfileJSON", QString::fromStdString( fanProfileId ) ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+bool UccdClient::saveFanProfile( const std::string &id, const std::string &name, const std::string &json )
+{
+  return callVoidMethod( "SaveFanProfile", QString::fromStdString( id ),
+                         QString::fromStdString( name ), QString::fromStdString( json ) );
+}
+
+bool UccdClient::deleteFanProfile( const std::string &id )
+{
+  return callVoidMethod( "DeleteFanProfile", QString::fromStdString( id ) );
+}
+
+// Legacy aliases
+std::optional< std::string > UccdClient::getFanProfile( const std::string &fanProfileId )
+{
+  return getFanProfileJSON( fanProfileId );
+}
+
+std::optional< bool > UccdClient::setFanProfile( const std::string &fanProfileId, const std::string &json )
+{
+  return callMethod< bool >( "SetFanProfile", QString::fromStdString( fanProfileId ), QString::fromStdString( json ) );
+}
+
+// ---------------------------------------------------------------------------
+// GPU sub-profiles
+// ---------------------------------------------------------------------------
+
+std::optional< std::string > UccdClient::getGpuProfilesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetGpuProfilesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getGpuProfileJSON( const std::string &gpuProfileId )
+{
+  if ( auto result = callMethod< QString >( "GetGpuProfileJSON", QString::fromStdString( gpuProfileId ) ) )
   {
     if ( const std::string json = result->toStdString(); !json.empty() && json != "{}" )
       return json;
@@ -367,17 +447,51 @@ std::optional< std::string > UccdClient::getGpuProfile( const std::string &gpuPr
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getGpuProfilesJSON()
+bool UccdClient::saveGpuProfile( const std::string &id, const std::string &name, const std::string &json )
 {
-  if ( auto result = callMethod< QString >( "GetGpuProfileNames" ) )
-  {
+  return callVoidMethod( "SaveGpuProfile", QString::fromStdString( id ),
+                         QString::fromStdString( name ), QString::fromStdString( json ) );
+}
+
+bool UccdClient::deleteGpuProfile( const std::string &id )
+{
+  return callVoidMethod( "DeleteGpuProfile", QString::fromStdString( id ) );
+}
+
+// Legacy alias
+std::optional< std::string > UccdClient::getGpuProfile( const std::string &gpuProfileId )
+{
+  return getGpuProfileJSON( gpuProfileId );
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard sub-profiles
+// ---------------------------------------------------------------------------
+
+std::optional< std::string > UccdClient::getKeyboardProfilesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetKeyboardProfilesJSON" ) )
     return result->toStdString();
-  }
   return std::nullopt;
 }
 
-std::optional< bool > UccdClient::setFanProfile( const std::string &fanProfileId, const std::string &json )
-{ return callMethod< bool >( "SetFanProfile", QString::fromStdString( fanProfileId ), QString::fromStdString( json ) ); }
+std::optional< std::string > UccdClient::getKeyboardProfileJSON( const std::string &keyboardProfileId )
+{
+  if ( auto result = callMethod< QString >( "GetKeyboardProfileJSON", QString::fromStdString( keyboardProfileId ) ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+bool UccdClient::saveKeyboardProfile( const std::string &id, const std::string &name, const std::string &json )
+{
+  return callVoidMethod( "SaveKeyboardProfile", QString::fromStdString( id ),
+                         QString::fromStdString( name ), QString::fromStdString( json ) );
+}
+
+bool UccdClient::deleteKeyboardProfile( const std::string &id )
+{
+  return callVoidMethod( "DeleteKeyboardProfile", QString::fromStdString( id ) );
+}
 
 bool UccdClient::setDisplayBrightness( int brightness )
 { return callVoidMethod( "SetDisplayBrightness", brightness ); }
@@ -516,11 +630,6 @@ std::optional< std::vector< std::string > > UccdClient::getAvailableEPPs()
 std::optional< int > UccdClient::getCpuCoreCount()
 {
   return callMethod< int >( "GetCpuCoreCount" );
-}
-
-bool UccdClient::setFanProfile( [[maybe_unused]] [[maybe_unused]] const std::string &profileJSON )
-{
-  return false;
 }
 
 bool UccdClient::setFanProfileCPU( const std::string &pointsJSON )
@@ -695,25 +804,8 @@ bool UccdClient::setNVIDIAPowerOffset( int offset )
 
 std::optional< int > UccdClient::getNVIDIAPowerOffset()
 {
-  // Read the cTGP offset from the currently active profile
-  if ( auto json = getActiveProfileJSON() )
-  {
-    if ( QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() ); doc.isObject() )
-    {
-      QJsonObject obj = doc.object();
-      // cTGP offset lives inside the embedded GPU OC profile data
-      if ( obj.contains( "gpuOCProfileData" ) && obj["gpuOCProfileData"].isObject() )
-      {
-        QJsonObject gpuObj = obj["gpuOCProfileData"].toObject();
-        if ( gpuObj.contains( "nvidiaPowerCTRLProfile" ) && gpuObj["nvidiaPowerCTRLProfile"].isObject() )
-        {
-          if ( QJsonObject nvidiaObj = gpuObj["nvidiaPowerCTRLProfile"].toObject(); nvidiaObj.contains( "cTGPOffset" ) )
-            return nvidiaObj["cTGPOffset"].toInt();
-        }
-      }
-    }
-  }
-  return std::nullopt;
+  // Read the actual hardware-applied cTGP offset from the daemon (sysfs).
+  return callMethod< int >( "GetNVIDIAPowerOffset" );
 }
 
 std::optional< int > UccdClient::getNVIDIAPowerCTRLMaxPowerLimit()
@@ -814,6 +906,106 @@ bool UccdClient::applyNvidiaGpuOCProfile( const std::string &profileJSON, int de
 bool UccdClient::resetNvidiaGpuOCAll( int deviceIndex )
 {
   return callMethod< bool, int >( "ResetNvidiaGpuOCAll", deviceIndex ).value_or( false );
+}
+
+// ---------------------------------------------------------------------------
+// Auto-OC
+// ---------------------------------------------------------------------------
+
+bool UccdClient::startAutoOC( const std::string &component, int deviceIndex )
+{
+  return callMethod< bool, QString, int >( "StartAutoOC",
+      QString::fromStdString( component ), deviceIndex ).value_or( false );
+}
+
+bool UccdClient::stopAutoOC()
+{
+  return callMethod< bool >( "StopAutoOC" ).value_or( false );
+}
+
+std::optional< bool > UccdClient::getAutoOCRunning()
+{
+  return callMethod< bool >( "GetAutoOCRunning" );
+}
+
+std::optional< std::string > UccdClient::getAutoOCProgress()
+{
+  if ( auto result = callMethod< QString >( "GetAutoOCProgress" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+void UccdClient::subscribeAutoOCProgress( AutoOCProgressCallback callback )
+{
+  m_autoOCProgressCallback = std::move( callback );
+  connect( this, &UccdClient::autoOCProgressChanged, this,
+    [this]( const QString &json ) {
+      if ( m_autoOCProgressCallback )
+        m_autoOCProgressCallback( json.toStdString() );
+    } );
+}
+
+void UccdClient::subscribeAutoOCFinished( AutoOCFinishedCallback callback )
+{
+  m_autoOCFinishedCallback = std::move( callback );
+  connect( this, &UccdClient::autoOCFinished, this,
+    [this]( int coreOffset, int vramOffset, bool success, const QString &msg ) {
+      if ( m_autoOCFinishedCallback )
+        m_autoOCFinishedCallback( coreOffset, vramOffset, success, msg.toStdString() );
+    } );
+}
+
+// ---------------------------------------------------------------------------
+// NVIDIA Auto-Undervolt
+// ---------------------------------------------------------------------------
+
+bool UccdClient::startAutoUndervolt( int deviceIndex )
+{
+  return callMethod< bool, int >( "StartAutoUndervolt", deviceIndex ).value_or( false );
+}
+
+bool UccdClient::stopAutoUndervolt()
+{
+  return callMethod< bool >( "StopAutoUndervolt" ).value_or( false );
+}
+
+std::optional< bool > UccdClient::getAutoUndervoltRunning()
+{
+  return callMethod< bool >( "GetAutoUndervoltRunning" );
+}
+
+std::optional< std::string > UccdClient::getAutoUndervoltProgress()
+{
+  if ( auto result = callMethod< QString >( "GetAutoUndervoltProgress" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getAutoUndervoltProfiles()
+{
+  if ( auto result = callMethod< QString >( "GetAutoUndervoltProfiles" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+void UccdClient::subscribeAutoUndervoltProgress( AutoUndervoltProgressCallback callback )
+{
+  m_autoUndervoltProgressCallback = std::move( callback );
+  connect( this, &UccdClient::autoUndervoltProgressChanged, this,
+    [this]( const QString &json ) {
+      if ( m_autoUndervoltProgressCallback )
+        m_autoUndervoltProgressCallback( json.toStdString() );
+    } );
+}
+
+void UccdClient::subscribeAutoUndervoltFinished( AutoUndervoltFinishedCallback callback )
+{
+  m_autoUndervoltFinishedCallback = std::move( callback );
+  connect( this, &UccdClient::autoUndervoltFinished, this,
+    [this]( int gpuFreqCapMHz, bool success, const QString &msg, const QString &appName ) {
+      if ( m_autoUndervoltFinishedCallback )
+        m_autoUndervoltFinishedCallback( gpuFreqCapMHz, success, msg.toStdString(), appName.toStdString() );
+    } );
 }
 
 bool UccdClient::setKeyboardBacklight( const std::string &config )
@@ -1231,6 +1423,42 @@ bool UccdClient::setMonitorHistoryHorizon( int seconds )
 std::optional< int > UccdClient::getMonitorHistoryHorizon()
 {
   return callMethod< int >( "GetMonitorHistoryHorizon" );
+}
+
+std::optional< std::string > UccdClient::getFpsSourcesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetFpsSourcesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getAutoUvAutoApplyStatusJSON()
+{
+  if ( auto result = callMethod< QString >( "GetAutoUvAutoApplyStatusJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+bool UccdClient::setFpsSourceApp( const std::string &appName )
+{
+  return callMethod< bool, QString >( "SetFpsSourceApp", QString::fromStdString( appName ) ).value_or( false );
+}
+
+std::optional< std::string > UccdClient::getFpsSourceApp()
+{
+  if ( auto result = callMethod< QString >( "GetFpsSourceApp" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+bool UccdClient::setFpsRequireP0( bool enabled )
+{
+  return callMethod< bool, bool >( "SetFpsRequireP0", enabled ).value_or( false );
+}
+
+std::optional< bool > UccdClient::getFpsRequireP0()
+{
+  return callMethod< bool >( "GetFpsRequireP0" );
 }
 
 void UccdClient::subscribeProfileChanged( [[maybe_unused]] ProfileChangedCallback callback )

@@ -302,7 +302,7 @@ void MainWindow::connectGpuProfileTab()
   } );
 
   // When custom GPU profiles change in ProfileManager, refresh the combos
-  connect( m_profileManager.get(), &ProfileManager::customGpuProfilesChanged,
+  connect( m_profileManager.get(), &ProfileManager::gpuProfilesChanged,
            this, [this]() {
     if ( m_gpuProfileTab )
       m_gpuProfileTab->reloadGpuProfiles();
@@ -314,18 +314,13 @@ void MainWindow::connectGpuProfileTab()
       m_profileGpuProfileCombo->blockSignals( true );
       m_profileGpuProfileCombo->clear();
       m_profileGpuProfileCombo->addItem( "(None)", QString() );
-      for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
+      for ( const auto &v : m_profileManager->gpuProfilesData() )
       {
         if ( v.isObject() )
         {
           QJsonObject o = v.toObject();
           m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
         }
-      }
-      for ( const auto &v : m_profileManager->customGpuProfilesData() )
-      {
-        QJsonObject o = v.toObject();
-        m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
       }
       // Restore selection
       for ( int i = 0; i < m_profileGpuProfileCombo->count(); ++i )
@@ -370,7 +365,6 @@ void MainWindow::setupProfilesPage()
 
   m_saveButton = new QPushButton( "Save" );
   m_saveButton->setMaximumWidth( 80 );
-  m_saveButton->setEnabled( false );
 
   m_copyProfileButton = new QPushButton( "Copy" );
   m_copyProfileButton->setMaximumWidth( 60 );
@@ -563,7 +557,7 @@ void MainWindow::setupProfilesPage()
   QLabel *keyboardProfileLabel = new QLabel( "Keyboard profile" );
   m_profileKeyboardProfileCombo = new QComboBox();
 
-  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  for ( const auto &v : m_profileManager->keyboardProfilesData() )
   {
     QJsonObject o = v.toObject();
     m_profileKeyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
@@ -606,24 +600,13 @@ void MainWindow::setupProfilesPage()
 
   QLabel *fanProfileLabel = new QLabel( "Fan profile" );
   m_profileFanProfileCombo = new QComboBox();
-  // Add built-in fan profiles from daemon (id + name)
-  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
+  // Add built-in and custom fan profiles from daemon (id + name)
+  for ( const auto &v : m_profileManager->fanProfilesData() )
   {
     if ( v.isObject() )
     {
       QJsonObject o = v.toObject();
       m_profileFanProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
-    }
-  }
-  // Append persisted custom fan profiles loaded from settings
-  for ( const auto &v : m_profileManager->customFanProfilesData() )
-  {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      QString name = o["name"].toString();
-      if ( m_profileFanProfileCombo->findText( name ) == -1 )
-        m_profileFanProfileCombo->addItem( name, o["id"].toString() );
     }
   }
   detailsLayout->addWidget( fanProfileLabel, row, 0 );
@@ -668,15 +651,7 @@ void MainWindow::setupProfilesPage()
   QLabel *gpuProfileLabel = new QLabel( "GPU OC profile" );
   m_profileGpuProfileCombo = new QComboBox();
   m_profileGpuProfileCombo->addItem( "(None)", QString() );
-  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
-  {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
-    }
-  }
-  for ( const auto &v : m_profileManager->customGpuProfilesData() )
+  for ( const auto &v : m_profileManager->gpuProfilesData() )
   {
     if ( v.isObject() )
     {
@@ -866,8 +841,8 @@ void MainWindow::connectSignals()
     loadProfileDetails( m_profileManager->activeProfileId() );
   } );
 
-  connect( m_profileManager.get(), &ProfileManager::customKeyboardProfilesChanged,
-           this, &MainWindow::onCustomKeyboardProfilesChanged );
+  connect( m_profileManager.get(), &ProfileManager::keyboardProfilesChanged,
+           this, &MainWindow::onKeyboardProfilesChanged );
 
   // Sub-profile sync: when a remote client (e.g. tray) changes the
   // keyboard or fan profile, update the combo boxes and editors without
@@ -1048,11 +1023,16 @@ void MainWindow::connectSignals()
   connect( m_profileKeyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this](int index) {
              markChanged();
-             // Keep the keyboard tab combo in sync so it reflects the selection,
-             // but do NOT apply to hardware — that happens when the profile is saved/applied.
+             // Sync the keyboard tab combo and apply to hardware immediately
              m_keyboardProfileCombo->blockSignals(true);
              m_keyboardProfileCombo->setCurrentIndex(index);
              m_keyboardProfileCombo->blockSignals(false);
+
+             // Apply keyb profile to hardware right away so the user
+             // sees the color change without needing to click Apply.
+             QString kbId = m_profileKeyboardProfileCombo->currentData().toString();
+             if ( !kbId.isEmpty() )
+               onKeyboardProfileChanged( kbId );
            } );
 
   if ( m_profileChargingProfileCombo )
@@ -1101,8 +1081,8 @@ void MainWindow::connectSignals()
   connectKeyboardBacklightPageWidgets();
 
   // Sync profile page keyboard combo (profiles may have been added before
-  // the customKeyboardProfilesChanged signal was connected)
-  onCustomKeyboardProfilesChanged();
+  // the keyboardProfilesChanged signal was connected)
+  onKeyboardProfilesChanged();
 
   // Initial load of fan profiles (may be empty if service not yet available)
   reloadFanProfiles();
@@ -1338,7 +1318,7 @@ void MainWindow::onTabChanged( int index )
 }
 
 // Profile page slots
-void MainWindow::onCustomKeyboardProfilesChanged()
+void MainWindow::onKeyboardProfilesChanged()
 {
   // Remember current selection so we can restore it after rebuild
   QString prevId = m_profileKeyboardProfileCombo->currentData().toString();
@@ -1346,7 +1326,7 @@ void MainWindow::onCustomKeyboardProfilesChanged()
   // Repopulate keyboard profile combos with ID userData
   m_profileKeyboardProfileCombo->blockSignals( true );
   m_profileKeyboardProfileCombo->clear();
-  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  for ( const auto &v : m_profileManager->keyboardProfilesData() )
   {
     if ( v.isObject() )
     {
@@ -1378,9 +1358,9 @@ void MainWindow::onProfileIndexChanged( int index )
     qDebug() << "Profile selected:" << profileName << "at index" << index;
     m_selectedProfileIndex = index;
     loadProfileDetails( profileId );
-    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( profileId ) );
+    m_removeProfileButton->setEnabled( m_profileManager->isProfileEditable( profileId ) );
     m_copyProfileButton->setEnabled( true );
-    m_saveButton->setEnabled( true );
+    updateButtonStates();
     statusBar()->showMessage( "Profile selected: " + profileName + " (click Apply to activate)" );
   }
 }
@@ -1392,15 +1372,8 @@ void MainWindow::onAllProfilesChanged()
   m_profileCombo->blockSignals( true );
   m_profileCombo->clear();
   // Populate combo with name + ID userData
-  const QStringList &names = m_profileManager->allProfiles();
-  const QJsonArray &defaultData = m_profileManager->defaultProfilesData();
-  const QJsonArray &customData = m_profileManager->customProfilesData();
-  for ( const auto &p : defaultData )
-  {
-    if ( p.isObject() )
-      m_profileCombo->addItem( p.toObject()["name"].toString(), p.toObject()["id"].toString() );
-  }
-  for ( const auto &p : customData )
+  const QJsonArray &allData = m_profileManager->allProfilesData();
+  for ( const auto &p : allData )
   {
     if ( p.isObject() )
       m_profileCombo->addItem( p.toObject()["name"].toString(), p.toObject()["id"].toString() );
@@ -1441,7 +1414,6 @@ void MainWindow::onAllProfilesChanged()
 
   // Ensure buttons reflect current profile set (remove button availability etc.)
   updateButtonStates();
-  m_saveButton->setEnabled( true );
 }
 
 void MainWindow::updateConnectionStatusLabel()
@@ -1828,24 +1800,9 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   }
 
   // Load ODM Power Limits (TDP) settings (nested in odmPowerLimits object)
-  // First, set slider ranges from hardware limits
-  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  if ( hardwareLimits.size() > 0 )
-  {
-    m_odmPowerLimit1Slider->setMaximum( hardwareLimits[0] );
-  }
-
-  if ( hardwareLimits.size() > 1 )
-  {
-    m_odmPowerLimit2Slider->setMaximum( hardwareLimits[1] );
-  }
-
-  if ( hardwareLimits.size() > 2 )
-  {
-    m_odmPowerLimit3Slider->setMaximum( hardwareLimits[2] );
-  }
-
-  // Then, set slider values from profile
+  int tdp0 = m_odmPowerLimit1Slider->value();
+  int tdp1 = m_odmPowerLimit2Slider->value();
+  int tdp2 = m_odmPowerLimit3Slider->value();
 
   if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
   {
@@ -1860,25 +1817,44 @@ void MainWindow::loadProfileDetails( const QString &profileId )
 
       if ( tdpArray.size() > 0 )
       {
-        int val0 = tdpArray[0].toInt();
-        m_odmPowerLimit1Slider->setValue( val0 );
+        tdp0 = tdpArray[0].toInt();
       }
 
 
       if ( tdpArray.size() > 1 )
       {
-        int val1 = tdpArray[1].toInt();
-        m_odmPowerLimit2Slider->setValue( val1 );
+        tdp1 = tdpArray[1].toInt();
       }
 
 
       if ( tdpArray.size() > 2 )
       {
-        int val2 = tdpArray[2].toInt();
-        m_odmPowerLimit3Slider->setValue( val2 );
+        tdp2 = tdpArray[2].toInt();
       }
     }
   }
+
+  // Prefer live hardware limits from daemon. If unavailable, fallback to
+  // current profile values instead of leaving misleading 250W defaults.
+  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
+  auto setTdpMax = []( QSlider *slider, int maxW ) {
+    if ( !slider )
+      return;
+    slider->setMaximum( std::max( 1, maxW ) );
+  };
+
+  if ( hardwareLimits.size() > 0 ) setTdpMax( m_odmPowerLimit1Slider, hardwareLimits[0] );
+  else setTdpMax( m_odmPowerLimit1Slider, tdp0 );
+
+  if ( hardwareLimits.size() > 1 ) setTdpMax( m_odmPowerLimit2Slider, hardwareLimits[1] );
+  else setTdpMax( m_odmPowerLimit2Slider, tdp1 );
+
+  if ( hardwareLimits.size() > 2 ) setTdpMax( m_odmPowerLimit3Slider, hardwareLimits[2] );
+  else setTdpMax( m_odmPowerLimit3Slider, tdp2 );
+
+  m_odmPowerLimit1Slider->setValue( tdp0 );
+  m_odmPowerLimit2Slider->setValue( tdp1 );
+  m_odmPowerLimit3Slider->setValue( tdp2 );
   // Load GPU OC profile reference
   if ( m_profileGpuProfileCombo )
   {
@@ -2074,7 +2050,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
 
 
   // Enable/disable editing widgets based on whether profile is custom
-  const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileId ) : false;
+  const bool isCustom = m_profileManager ? m_profileManager->isProfileEditable( profileId ) : false;
   updateProfileEditingWidgets( isCustom );
 
   // Warn user if any referenced profiles were not found (deleted after profile creation)
@@ -2100,7 +2076,8 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
   // Enable/disable editing widgets based on whether profile is custom
 
   // Description edit
-  if ( m_descriptionEdit ) {
+  if ( m_descriptionEdit )
+  {
     m_descriptionEdit->setEnabled( isCustom );
     m_descriptionEdit->setReadOnly( !isCustom );
   }
@@ -2133,6 +2110,9 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
   // Keyboard profile
   if ( m_profileKeyboardProfileCombo ) m_profileKeyboardProfileCombo->setEnabled( isCustom );
 
+  // GPU profile
+  if ( m_profileGpuProfileCombo ) m_profileGpuProfileCombo->setEnabled( isCustom );
+
   // ODM Power controls
   if ( m_odmPowerLimit1Slider ) m_odmPowerLimit1Slider->setEnabled( isCustom );
   if ( m_odmPowerLimit2Slider ) m_odmPowerLimit2Slider->setEnabled( isCustom );
@@ -2150,12 +2130,16 @@ void MainWindow::markChanged()
   updateButtonStates();
 }
 
-void MainWindow::updateButtonStates( void)
+void MainWindow::updateButtonStates( void )
 {
   // Update profile page buttons if available
   if ( profileTopWidgetsAvailable() )
   {
-    m_removeProfileButton->setEnabled( m_profileManager->isCustomProfile( m_profileCombo->currentData().toString() ) );
+    const QString profileId = m_profileCombo->currentData().toString();
+    m_removeProfileButton->setEnabled( m_profileManager->isProfileEditable( m_profileCombo->currentData().toString() ) );
+    // Save is always enabled: custom profiles are persisted, built-in profiles
+    // can still be applied and assigned to power states.
+    m_saveButton->setEnabled( !profileId.isEmpty() );
   }
 
   // Delegate fan profile button states to FanControlTab
@@ -2173,28 +2157,19 @@ QString MainWindow::buildProfileJSON() const
   profileObj["name"]        = profileName;
   profileObj["description"] = m_descriptionEdit->toPlainText();
 
+  // Preserve editable flag so the local cache keeps it after save
+  if ( m_profileManager && m_profileManager->isProfileEditable( profileId ) )
+    profileObj["editable"] = true;
+
   // Brightness
   QJsonObject displayObj;
   if ( m_setBrightnessCheckBox->isChecked() )
     displayObj["brightness"] = m_brightnessSlider->value();
   profileObj["display"] = displayObj;
 
-  // Fan — embed complete fan profile tables
+  // Fan — ID reference only, daemon resolves tables at apply time
   QJsonObject fanObj;
   QString fanProfileId  = m_profileFanProfileCombo->currentData().toString();
-  QString fanProfileJSON = m_profileManager->getFanProfile( fanProfileId );
-  if ( !fanProfileJSON.isEmpty() && fanProfileJSON != "{}" )
-  {
-    QJsonDocument fanDoc = QJsonDocument::fromJson( fanProfileJSON.toUtf8() );
-    if ( fanDoc.isObject() )
-    {
-      QJsonObject fp = fanDoc.object();
-      if ( fp.contains( "tableCPU" ) )           fanObj["tableCPU"]           = fp["tableCPU"];
-      if ( fp.contains( "tableGPU" ) )           fanObj["tableGPU"]           = fp["tableGPU"];
-      if ( fp.contains( "tablePump" ) )          fanObj["tablePump"]          = fp["tablePump"];
-      if ( fp.contains( "tableWaterCoolerFan" ) ) fanObj["tableWaterCoolerFan"] = fp["tableWaterCoolerFan"];
-    }
-  }
   fanObj["fanProfile"]       = fanProfileId;
   fanObj["sameSpeed"]        = m_sameFanSpeedCheckBox   ? m_sameFanSpeedCheckBox->isChecked()   : true;
   fanObj["autoControlWC"]    = m_autoWaterControlCheckBox ? m_autoWaterControlCheckBox->isChecked() : true;
@@ -2219,46 +2194,19 @@ QString MainWindow::buildProfileJSON() const
   odmObj["tdpValues"] = tdpArray;
   profileObj["odmPowerLimits"] = odmObj;
 
-  // GPU OC profile — embed complete GPU OC data (like keyboard data)
+  // GPU OC profile — ID reference only, daemon resolves at apply time
   if ( m_profileGpuProfileCombo )
   {
     QString gpuProfileId = m_profileGpuProfileCombo->currentData().toString();
     if ( !gpuProfileId.isEmpty() )
     {
       profileObj["gpuProfileId"] = gpuProfileId;
-
-      // Resolve and embed full GPU OC profile data so the daemon can apply it
-      // at startup / power-state change without needing the GUI.
-      QString gpuProfileJSON = m_profileManager->getGpuProfile( gpuProfileId );
-      if ( !gpuProfileJSON.isEmpty() && gpuProfileJSON != "{}" )
-      {
-        QJsonDocument gpuDoc = QJsonDocument::fromJson( gpuProfileJSON.toUtf8() );
-        if ( gpuDoc.isObject() )
-        {
-          profileObj["gpuOCProfileData"] = gpuDoc.object();
-        }
-      }
     }
   }
 
-  // Keyboard — embed complete keyboard profile data
+  // Keyboard — ID reference only, daemon resolves at apply time
   QJsonObject keyboardObj;
   QString keyboardProfileId  = m_profileKeyboardProfileCombo->currentData().toString();
-  QString keyboardProfileJSON = m_profileManager->getKeyboardProfile( keyboardProfileId );
-  if ( !keyboardProfileJSON.isEmpty() && keyboardProfileJSON != "{}" )
-  {
-    QJsonDocument kbDoc = QJsonDocument::fromJson( keyboardProfileJSON.toUtf8() );
-    if ( kbDoc.isObject() )
-      keyboardObj = kbDoc.object();
-    else if ( kbDoc.isArray() )
-      keyboardObj["states"] = kbDoc.array();
-  }
-  else
-  {
-    if ( auto keyboardStates = m_UccdClient->getKeyboardBacklightStates() )
-      keyboardObj["states"] = QJsonDocument::fromJson( QString::fromStdString( *keyboardStates ).toUtf8() ).array();
-  }
-  keyboardObj["keyboardProfileName"] = m_profileKeyboardProfileCombo->currentText();
   if ( m_keyboardBrightnessSlider )
     keyboardObj["brightness"] = m_keyboardBrightnessSlider->value();
   profileObj["keyboard"]               = keyboardObj;
@@ -2322,11 +2270,21 @@ void MainWindow::onSaveClicked()
 {
   QString profileName = m_profileCombo->currentText();
   QString profileId = m_profileCombo->currentData().toString();
-  const bool isCustom = m_profileManager->isCustomProfile( profileId );
+  const bool isCustom = m_profileManager->isProfileEditable( profileId );
 
   if ( isCustom )
   {
+    // saveProfile sends the JSON to the daemon which persists it.
+    // If the saved profile is the currently active one, the daemon
+    // automatically reapplies it — no separate ApplyProfile call needed.
     m_profileManager->saveProfile( buildProfileJSON() );
+  }
+  else
+  {
+    // Built-in profiles can't be saved, but the user may still want to
+    // apply the current widget state (e.g. keyboard, fan profile combo).
+    QString profileJSON = buildProfileJSON();
+    m_profileManager->getClient()->applyProfile( profileJSON.toStdString() );
   }
 
   // For both custom and built-in profiles, update stateMap based on mains/battery button states
@@ -2407,6 +2365,9 @@ void MainWindow::onCopyProfileClicked()
   // Generate a new unique ID for the copied profile
   obj["id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
+  // Copied profiles are always editable (even when copying a built-in)
+  obj["editable"] = true;
+
   // Generate new name: "New {name}" with optional incrementing number
   QString baseName = QString("New %1").arg(current);
   QString newName = baseName;
@@ -2437,7 +2398,7 @@ void MainWindow::onRemoveProfileClicked()
   QString currentProfileId = m_profileCombo->currentData().toString();
 
   // Check if it's a built-in profile
-  if (!m_profileManager->isCustomProfile(currentProfileId)) {
+  if (!m_profileManager->isProfileEditable(currentProfileId)) {
     QMessageBox::information(this, "Cannot Remove",
                             "Built-in profiles cannot be removed.");
     return;
@@ -2472,7 +2433,7 @@ void MainWindow::onProfileComboRenamed()
     return;
   }
 
-  if ( !m_profileManager->isCustomProfile( m_profileCombo->itemData( idx ).toString() ) ) {
+  if ( !m_profileManager->isProfileEditable( m_profileCombo->itemData( idx ).toString() ) ) {
     // Cannot rename built-in profiles
     m_profileCombo->setEditText( oldName );
     return;
@@ -2522,9 +2483,9 @@ void MainWindow::onKeyboardProfileComboRenamed()
     return;
   }
 
-  // "Default" is built-in
+  // "Default" is built-in — check editable flag
   QString keyboardProfileId = m_keyboardProfileCombo->itemData( idx ).toString();
-  if ( keyboardProfileId.isEmpty() || !m_profileManager->customKeyboardProfiles().contains( oldName ) ) {
+  if ( keyboardProfileId.isEmpty() || !m_profileManager->isProfileEditable( keyboardProfileId, m_profileManager->keyboardProfilesData() ) ) {
     m_keyboardProfileCombo->setEditText( oldName );
     return;
   }
@@ -2544,8 +2505,8 @@ void MainWindow::onRemoveFanProfileClicked()
   QString currentProfile = m_fanControlTab->fanProfileCombo()->currentText();
   QString fanProfileId = m_fanControlTab->fanProfileCombo()->currentData().toString();
 
-  // Check if it's a built-in profile
-  if ( m_fanControlTab->builtinFanProfiles().contains( currentProfile ) ) {
+  // Check if it's a built-in profile (not editable)
+  if ( !m_profileManager->isProfileEditable( fanProfileId, m_profileManager->fanProfilesData() ) ) {
     QMessageBox::information(this, "Cannot Remove",
                             "Built-in fan profiles cannot be removed.");
     return;
@@ -2567,8 +2528,7 @@ void MainWindow::onRemoveFanProfileClicked()
       }
     }
   };
-  checkProfiles( m_profileManager->defaultProfilesData() );
-  checkProfiles( m_profileManager->customProfilesData() );
+  checkProfiles( m_profileManager->allProfilesData() );
 
   // Build confirmation message
   QString confirmMessage;
@@ -2695,8 +2655,8 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
   }
   m_profileFanProfileCombo->blockSignals(false);
 
-  // Set editors editable only for custom profiles (those not in built-ins)
-  bool isEditable = !m_fanControlTab->builtinFanProfiles().contains( fanProfileId );
+  // Set editors editable only for custom profiles (check editable flag)
+  bool isEditable = m_profileManager->isProfileEditable( fanProfileId, m_profileManager->fanProfilesData() );
   m_fanControlTab->setEditorsEditable( isEditable );
 
   // Update button states
@@ -3094,7 +3054,7 @@ void MainWindow::saveFanPoints()
     return;
   }
 
-  if ( m_fanControlTab->builtinFanProfiles().contains( currentId ) ) {
+  if ( !m_profileManager->isProfileEditable( currentId, m_profileManager->fanProfilesData() ) ) {
     QMessageBox::warning(this, "Save Failed", "Cannot overwrite built-in fan profile. Copy it to a custom profile first.");
     return;
   }
@@ -3172,14 +3132,11 @@ void MainWindow::onSaveGpuProfileClicked()
     return;
   }
 
-  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
+  if ( !m_profileManager->isProfileEditable( currentId, m_profileManager->gpuProfilesData() ) )
   {
-    if ( v.isObject() && v.toObject().value( "id" ).toString() == currentId )
-    {
-      QMessageBox::information( this, "Built-in Profile",
-                                "Built-in GPU OC profiles cannot be modified. Copy it to a custom profile first." );
-      return;
-    }
+    QMessageBox::information( this, "Built-in Profile",
+                              "Built-in GPU OC profiles cannot be modified. Copy it to a custom profile first." );
+    return;
   }
 
   QString json = m_gpuProfileTab->buildProfileJSON();
@@ -3241,14 +3198,11 @@ void MainWindow::onRemoveGpuProfileClicked()
   if ( currentId.isEmpty() )
     return;
 
-  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
+  if ( !m_profileManager->isProfileEditable( currentId, m_profileManager->gpuProfilesData() ) )
   {
-    if ( v.isObject() && v.toObject().value( "id" ).toString() == currentId )
-    {
-      QMessageBox::information( this, "Built-in Profile",
-                                "Built-in GPU OC profiles cannot be removed." );
-      return;
-    }
+    QMessageBox::information( this, "Built-in Profile",
+                              "Built-in GPU OC profiles cannot be removed." );
+    return;
   }
 
   QMessageBox::StandardButton reply = QMessageBox::question(

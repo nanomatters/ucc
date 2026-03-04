@@ -17,7 +17,9 @@
 
 #include <QWidget>
 #include <QComboBox>
+#include <QDialog>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QSlider>
 #include <QSpinBox>
 #include <QLabel>
@@ -102,6 +104,8 @@ private:
   bool isOverclockWarningAcknowledged() const;
   void setOverclockWarningAcknowledged( bool acknowledged );
   bool showOverclockWarningDialog();
+  void showAutoOCDialog();
+  void showAutoUndervoltDialog();
 
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;
@@ -163,6 +167,8 @@ private:
   // Action buttons
   QPushButton *m_refreshButton = nullptr;
   QPushButton *m_resetButton = nullptr;
+  QPushButton *m_autoOCButton = nullptr;
+  QPushButton *m_autoUVButton = nullptr;
 
   // Warnings
   QLabel *m_notAvailableLabel = nullptr;

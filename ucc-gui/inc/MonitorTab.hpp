@@ -58,7 +58,8 @@ enum class MetricGroup
   Duty,   ///< Fan duty cycle (%)
   Power,  ///< Power consumption (W)
   Freq,   ///< Clock frequency (MHz)
-  Volt    ///< Core voltage (mV)
+  Volt,   ///< Core voltage (mV)
+  Fps     ///< Frames per second
 };
 
 /**
@@ -94,7 +95,9 @@ private:
   void setupPowerChart();
   void setupFrequencyChart();
   void setupVoltageChart();
+  void setupFpsChart();
   void setupControls();
+  void refreshFpsSourceControls();
   void setupUnifiedChart();
 
   /** Apply a new time window (clears series, re-fetches, updates label). */
@@ -161,24 +164,28 @@ private:
   QChart *m_powerChart    = nullptr;
   QChart *m_freqChart     = nullptr;
   QChart *m_voltChart     = nullptr;
+  QChart *m_fpsChart      = nullptr;
 
   QChartView *m_tempChartView  = nullptr;
   QChartView *m_dutyChartView  = nullptr;
   QChartView *m_powerChartView = nullptr;
   QChartView *m_freqChartView  = nullptr;
   QChartView *m_voltChartView  = nullptr;
+  QChartView *m_fpsChartView   = nullptr;
 
   QDateTimeAxis *m_tempXAxis  = nullptr;
   QDateTimeAxis *m_dutyXAxis  = nullptr;
   QDateTimeAxis *m_powerXAxis = nullptr;
   QDateTimeAxis *m_freqXAxis  = nullptr;
   QDateTimeAxis *m_voltXAxis  = nullptr;
+  QDateTimeAxis *m_fpsXAxis   = nullptr;
 
   QValueAxis *m_tempYAxis  = nullptr;
   QValueAxis *m_dutyYAxis  = nullptr;
   QValueAxis *m_powerYAxis = nullptr;
   QValueAxis *m_freqYAxis  = nullptr;
   QValueAxis *m_voltYAxis  = nullptr;
+  QValueAxis *m_fpsYAxis   = nullptr;
 
   // --- Unified "all-in-one" chart ---
   QChart          *m_unifiedChart     = nullptr;
@@ -187,6 +194,13 @@ private:
   QValueAxis      *m_unifiedYAxis     = nullptr;
   QStackedWidget  *m_chartStack       = nullptr;  ///< index 0 = per-group, 1 = unified
   QWidget         *m_perGroupPage     = nullptr;
+
+  // FPS source controls (daemon-side source selection/policy)
+  QComboBox       *m_fpsSourceCombo   = nullptr;
+  QCheckBox       *m_fpsRequireP0Check = nullptr;
+  QLabel          *m_fpsCurrentAppLabel = nullptr;
+  int              m_fpsSourceRefreshTicks = 0;
+  bool             m_syncingFpsControls = false;
 
   // --- Hover callout ---
   struct Callout

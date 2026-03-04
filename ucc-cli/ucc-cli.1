@@ -383,6 +383,27 @@ as reported by the driver.
 Only available when
 .B getNvidiaOCAvailable()
 returns true.
+.TP
+.B gpu auto-oc \fR[\fBcore\fR|\fBvram\fR|\fBboth\fR]
+Start an automatic overclocking scan using adaptive binary search.
+The algorithm iteratively tests clock offsets from 0 to the configured
+maximum, using GPU temperature, clock droop, and throttle-reason
+monitoring to find the highest stable offset.
+.IP
+A GPU-intensive workload (game, benchmark, gpu_burn, etc.) should be
+running during the scan \(em the algorithm checks GPU utilization and
+warns if it is too low.
+The procedure takes approximately 2\(en5\ minutes per component.
+.IP
+If \fIcomponent\fR is omitted, both core and VRAM are scanned
+sequentially (core first).
+After a successful scan the discovered offsets remain applied.
+.TP
+.B gpu auto-oc stop \fR(\fBcancel\fR)
+Cancel a running auto-OC scan.  The offsets are reset to zero.
+.TP
+.B gpu auto-oc status
+Print whether an auto-OC scan is currently running.
 .\" -------------------------------------------------------------------
 .SS "ODM Performance Profile \fR(odm)"
 ODM performance profiles are firmware-level power modes that affect the
@@ -847,6 +868,16 @@ Query live OC state:
 .RS
 .nf
 ucc-cli gpu oc-state
+.fi
+.RE
+.PP
+Auto-tune GPU overclocking (run a GPU-heavy workload first!):
+.PP
+.RS
+.nf
+ucc-cli gpu auto-oc             # scan core + VRAM
+ucc-cli gpu auto-oc core        # core only
+ucc-cli gpu auto-oc stop        # cancel
 .fi
 .RE
 .SS ODM Performance Mode

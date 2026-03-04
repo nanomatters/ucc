@@ -24,6 +24,7 @@ BuildRequires:  libplasma-devel >= 6.0
 BuildRequires:  systemd-devel
 BuildRequires:  libXrandr-devel
 BuildRequires:  libgudev-devel
+BuildRequires:  vulkan-headers
 
 Requires:       systemd
 Requires:       qt6-qtbase >= 6.0
@@ -61,7 +62,8 @@ CPU power management, and water cooler control for supported systems.
   -DBUILD_GUI=ON \
   -DBUILD_TRAY=ON \
   -DBUILD_GNOME=ON \
-  -DBUILD_CLI=ON
+  -DBUILD_CLI=ON \
+  -DBUILD_FPS_LAYER=ON
 %cmake_build -j
 
 %install
@@ -82,6 +84,28 @@ systemctl daemon-reload > /dev/null 2>&1 || true
 
 %postun
 %systemd_postun_with_restart uccd.service
+
+# ── fps-layer sub-package ────────────────────────────────────────────────────
+
+%package fps-layer
+Summary:        Vulkan/GLX FPS measurement layer for UCC Auto-OC
+Requires:       %{name} = %{version}-%{release}
+# The layer injects itself into Vulkan apps via the implicit layer mechanism;
+# vulkan-loader discovers it through the JSON manifest.
+Recommends:     vulkan-loader
+
+%description fps-layer
+A minimal Vulkan implicit layer (plus an optional GLX LD_PRELOAD hook) that
+counts presented frames and streams rolling FPS data to the uccd daemon over
+a Unix socket.  Required only if you use the Auto-OC FPS measurement feature.
+The layer is completely passive when no Auto-OC scan is running (the socket
+does not exist and the background thread does nothing).
+
+%files fps-layer
+%{_libdir}/libucc_fps_layer.so
+%{_datadir}/vulkan/implicit_layer.d/VkLayer_ucc_fps.json
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 %files
 %license LICENSE

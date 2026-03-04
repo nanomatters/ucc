@@ -213,6 +213,26 @@ private:
         }
       }
 
+      // Parse sub-profile maps (fan, keyboard, GPU)
+      auto parseSubProfileMap = [&j]( const char *key, std::map< std::string, std::string > &out ) {
+        if ( j.contains( key ) && j[key].is_object() )
+          for ( auto &[id, val] : j[key].items() )
+            out[id] = val.dump();
+      };
+      parseSubProfileMap( "fanProfiles", settings.fanProfiles );
+      parseSubProfileMap( "keyboardProfiles", settings.keyboardProfiles );
+      parseSubProfileMap( "gpuProfiles", settings.gpuProfiles );
+
+      // Parse app -> GPU profile binding map used by runtime auto-undervolt.
+      if ( j.contains( "appGpuProfileMap" ) && j["appGpuProfileMap"].is_object() )
+      {
+        for ( auto &[appKey, profileIdVal] : j["appGpuProfileMap"].items() )
+        {
+          if ( profileIdVal.is_string() )
+            settings.appGpuProfileMap[appKey] = profileIdVal.get< std::string >();
+        }
+      }
+
       // Parse boolean settings
       if (j.contains("fahrenheit")) settings.fahrenheit = j["fahrenheit"];
       if (j.contains("cpuSettingsEnabled")) settings.cpuSettingsEnabled = j["cpuSettingsEnabled"];
@@ -294,6 +314,35 @@ private:
       json << "}";
     }
     json << "],\n";
+
+    // Serialize sub-profile maps (fan, keyboard, GPU)
+    auto serializeSubProfileMap = [&json]( const char *key,
+                                           const std::map< std::string, std::string > &map ) {
+      json << "  \"" << key << "\": {";
+      size_t count = 0;
+      for ( const auto &[id, val] : map )
+      {
+        if ( count > 0 ) json << ",";
+        json << "\n    \"" << id << "\": " << val;
+        count++;
+      }
+      if ( count > 0 ) json << "\n  ";
+      json << "},\n";
+    };
+    serializeSubProfileMap( "fanProfiles", settings.fanProfiles );
+    serializeSubProfileMap( "keyboardProfiles", settings.keyboardProfiles );
+    serializeSubProfileMap( "gpuProfiles", settings.gpuProfiles );
+
+    json << "  \"appGpuProfileMap\": {";
+    size_t appMapCount = 0;
+    for ( const auto &[appKey, profileId] : settings.appGpuProfileMap )
+    {
+      if ( appMapCount > 0 ) json << ",";
+      json << "\n    \"" << appKey << "\": \"" << profileId << "\"";
+      appMapCount++;
+    }
+    if ( appMapCount > 0 ) json << "\n  ";
+    json << "},\n";
 
     json << "  \"chargingProfile\": " << ( settings.chargingProfile.has_value() ? "\"" + settings.chargingProfile.value() + "\"" : "null" ) << ",\n";
     json << "  \"chargingPriority\": " << ( settings.chargingPriority.has_value() ? "\"" + settings.chargingPriority.value() + "\"" : "null" ) << ",\n";

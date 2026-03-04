@@ -96,6 +96,7 @@ option( BUILD_CLI "Build the command-line interface" ON )
 option( BUILD_TRAY "Build the system tray applet" ON )
 option( BUILD_GNOME "Install the GNOME Shell extension" ON )
 option( BUILD_TESTS "Build the unit test suite" OFF )
+option( BUILD_FPS_LAYER "Build the Vulkan/GLX FPS measurement layer" ON )
 
 # Conditionally find Qt6::Test if tests are enabled
 if( BUILD_TESTS )
@@ -125,6 +126,10 @@ endif()
 if( BUILD_TESTS )
   enable_testing()
   add_subdirectory( tests )
+endif()
+
+if( BUILD_FPS_LAYER )
+  add_subdirectory( ucc-fps-layer )
 endif()
 
 # Install GNOME Shell extension
@@ -190,6 +195,7 @@ message(STATUS "    CLI Tool:       ${BUILD_CLI}")
 message(STATUS "    Tray Applet:    ${BUILD_TRAY}")
 message(STATUS "    GNOME Ext:      ${BUILD_GNOME}")
 message(STATUS "    Unit Tests:     ${BUILD_TESTS}")
+message(STATUS "    FPS Layer:      ${BUILD_FPS_LAYER}")
 message(STATUS "")
 message(STATUS "  Install prefix:   ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "===================================================")

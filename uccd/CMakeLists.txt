@@ -29,6 +29,9 @@ add_executable(uccd
   src/NvmlWrapper.cpp
   src/workers/ProfileSettingsWorker.cpp
   src/workers/NvidiaOCWorker.cpp
+  src/workers/AutoOCWorker.cpp
+  src/workers/AutoUndervoltWorker.cpp
+  src/FpsServer.cpp
   src/workers/LCTWaterCoolerWorker.cpp
   src/workers/DisplayWorker.cpp
   src/workers/HardwareMonitorWorker.cpp
@@ -36,6 +39,8 @@ add_executable(uccd
   inc/workers/LCTWaterCoolerWorker.hpp
   inc/workers/DaemonWorker.hpp
   inc/workers/NvidiaOCWorker.hpp
+  inc/workers/AutoOCWorker.hpp
+  inc/workers/AutoUndervoltWorker.hpp
   src/profiles/FanProfiles.cpp
   src/profiles/UccProfile.cpp
   src/profiles/DefaultProfiles.cpp

@@ -29,9 +29,11 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QDebug>
 #include <QMessageBox>
+#include <QProgressBar>
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -174,11 +176,19 @@ void GpuProfileTab::setupUI()
   m_pstatesLayout = new QVBoxLayout();
   m_pstatesLayout->setSpacing( 8 );
 
-  // === cTGP (same semantics as Profiles page) ===
-  QGroupBox *powerGroup = new QGroupBox( "Configurable graphics power (TGP)" );
-  powerGroup->setVisible( m_ocAvailable );
-  QHBoxLayout *powerLayout = new QHBoxLayout( powerGroup );
-  powerLayout->addWidget( new QLabel( "TGP:" ) );
+  // === cTGP slider + Auto OC button (inline row) ===
+  QWidget *powerRow = new QWidget();
+  powerRow->setVisible( m_ocAvailable );
+  QHBoxLayout *powerLayout = new QHBoxLayout( powerRow );
+  powerLayout->setContentsMargins( 0, 0, 0, 0 );
+  powerLayout->setSpacing( 8 );
+
+  QLabel *ctgpLabel = new QLabel( "cTGP" );
+  QFont ctgpFont = ctgpLabel->font();
+  ctgpFont.setBold( true );
+  ctgpLabel->setFont( ctgpFont );
+  powerLayout->addWidget( ctgpLabel );
+
   m_powerLimitSlider = new QSlider( Qt::Horizontal );
   m_powerLimitSlider->setMinimum( 40 );
   m_powerLimitSlider->setMaximum( 175 );
@@ -186,7 +196,18 @@ void GpuProfileTab::setupUI()
   m_powerLimitValue->setMinimumWidth( 60 );
   powerLayout->addWidget( m_powerLimitSlider, 1 );
   powerLayout->addWidget( m_powerLimitValue );
-  contentLayout->addWidget( powerGroup );
+
+  m_autoOCButton = new QPushButton( "Auto Overclock" );
+  m_autoOCButton->setMinimumWidth( 120 );
+  m_autoOCButton->setToolTip( "Automatically find the maximum stable GPU/VRAM clock offsets" );
+  powerLayout->addWidget( m_autoOCButton );
+
+  m_autoUVButton = new QPushButton( "Auto Undervolt" );
+  m_autoUVButton->setMinimumWidth( 120 );
+  m_autoUVButton->setToolTip( "Automatically find the lowest GPU frequency cap that sustains FPS for the running app" );
+  powerLayout->addWidget( m_autoUVButton );
+
+  contentLayout->addWidget( powerRow );
 
   // === GPU LOCKED CLOCKS ===
   m_gpuLockedGroup = new QGroupBox( "GPU Core Locked Clocks" );
@@ -279,6 +300,16 @@ void GpuProfileTab::connectSignals()
   connect( m_refreshButton, &QPushButton::clicked, this, &GpuProfileTab::onRefreshClicked );
   connect( m_resetButton, &QPushButton::clicked, this, &GpuProfileTab::onResetClicked );
 
+  if ( m_autoOCButton )
+  {
+    connect( m_autoOCButton, &QPushButton::clicked, this, &GpuProfileTab::showAutoOCDialog );
+  }
+
+  if ( m_autoUVButton )
+  {
+    connect( m_autoUVButton, &QPushButton::clicked, this, &GpuProfileTab::showAutoUndervoltDialog );
+  }
+
   connect( m_gpuLockedGroup, &QGroupBox::toggled, this, [this]( bool ) { emit changed(); } );
   connect( m_vramLockedGroup, &QGroupBox::toggled, this, [this]( bool ) { emit changed(); } );
 
@@ -328,21 +359,13 @@ void GpuProfileTab::reloadGpuProfiles()
   if ( m_gpuProfileCombo )
     m_gpuProfileCombo->clear();
 
-  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
+  for ( const auto &v : m_profileManager->gpuProfilesData() )
   {
     QJsonObject o = v.toObject();
     QString id = o["id"].toString();
     QString name = o["name"].toString();
     if ( !id.isEmpty() )
       m_gpuProfileCombo->addItem( name, id );
-  }
-
-  for ( const auto &v : m_profileManager->customGpuProfilesData() )
-  {
-    QJsonObject o = v.toObject();
-    QString id = o["id"].toString();
-    QString name = o["name"].toString();
-    m_gpuProfileCombo->addItem( name, id );
   }
 
   if ( !prevId.isEmpty() )
@@ -364,15 +387,8 @@ void GpuProfileTab::updateButtonStates( bool uccdConnected )
 {
   const QString id = m_gpuProfileCombo ? m_gpuProfileCombo->currentData().toString() : QString();
   const bool hasSelection = !id.isEmpty();
-  bool isBuiltin = false;
-  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
-  {
-    if ( v.isObject() && v.toObject().value( "id" ).toString() == id )
-    {
-      isBuiltin = true;
-      break;
-    }
-  }
+  const bool isBuiltin = hasSelection
+                         && !m_profileManager->isProfileEditable( id, m_profileManager->gpuProfilesData() );
 
   if ( m_applyButton )   m_applyButton->setEnabled( uccdConnected && m_ocAvailable );
   if ( m_saveButton )    m_saveButton->setEnabled( hasSelection && !isBuiltin );
@@ -457,10 +473,13 @@ void GpuProfileTab::refreshOCState()
   {
     int currentPower = defaultPower;
 
-    if ( haveOffset )
-      currentPower = defaultPower + currentOffset;
-    else if ( currentPowerFromState > 0 )
+    // Prefer the NVML-reported actual power limit (reflects real hardware
+    // state including any cTGP offset that was just applied temporarily).
+    // Fall back to profile-based offset only when NVML reports nothing.
+    if ( currentPowerFromState > 0 )
       currentPower = currentPowerFromState;
+    else if ( haveOffset )
+      currentPower = defaultPower + currentOffset;
 
     currentPower = std::clamp( currentPower, defaultPower, maxPower );
 
@@ -666,7 +685,10 @@ void GpuProfileTab::populatePStates( const QJsonArray &pstates )
 
       QVBoxLayout *col = new QVBoxLayout();
       col->setSpacing( 2 );
-      QLabel *label = new QLabel( QString( "GPU Core (%1–%2 MHz)" ).arg( minMHz ).arg( maxMHz ) );
+      QLabel *label = new QLabel(
+          minMHz == maxMHz
+              ? QString( "GPU Core (%1 MHz)" ).arg( minMHz )
+              : QString( "GPU Core (%1–%2 MHz)" ).arg( minMHz ).arg( maxMHz ) );
 
       QHBoxLayout *ctrlRow = new QHBoxLayout();
       QSlider *slider = new QSlider( Qt::Horizontal );
@@ -703,7 +725,10 @@ void GpuProfileTab::populatePStates( const QJsonArray &pstates )
 
       QVBoxLayout *col = new QVBoxLayout();
       col->setSpacing( 2 );
-      QLabel *label = new QLabel( QString( "VRAM (%1–%2 MHz)" ).arg( minMHz ).arg( maxMHz ) );
+      QLabel *label = new QLabel(
+          minMHz == maxMHz
+              ? QString( "VRAM (%1 MHz)" ).arg( minMHz )
+              : QString( "VRAM (%1–%2 MHz)" ).arg( minMHz ).arg( maxMHz ) );
 
       QHBoxLayout *ctrlRow = new QHBoxLayout();
       QSlider *slider = new QSlider( Qt::Horizontal );
@@ -1022,6 +1047,500 @@ void GpuProfileTab::onResetClicked()
   }
 }
 
+void GpuProfileTab::showAutoOCDialog()
+{
+  if ( !ensureOverclockWarningAcknowledged() )
+    return;
+
+  // Check if already running
+  if ( auto running = m_uccdClient->getAutoOCRunning(); running && *running )
+  {
+    QMessageBox::information( this, "Auto Overclock",
+      "An auto overclock scan is already in progress." );
+    return;
+  }
+
+  QDialog *dlg = new QDialog( this );
+  dlg->setWindowTitle( "Auto Overclock" );
+  dlg->setMinimumWidth( 480 );
+  dlg->setAttribute( Qt::WA_DeleteOnClose );
+
+  QVBoxLayout *layout = new QVBoxLayout( dlg );
+  layout->setSpacing( 12 );
+
+  // ── Component selector row ──
+  QHBoxLayout *selectRow = new QHBoxLayout();
+  selectRow->addWidget( new QLabel( "Scan:" ) );
+  QComboBox *componentCombo = new QComboBox();
+  componentCombo->addItem( "Core + VRAM", "both" );
+  componentCombo->addItem( "Core only", "core" );
+  componentCombo->addItem( "VRAM only", "vram" );
+  selectRow->addWidget( componentCombo, 1 );
+  layout->addLayout( selectRow );
+
+  // ── Info label ──
+  QLabel *infoLabel = new QLabel(
+    "<b>Note:</b> Run a GPU-intensive workload (game, benchmark, compute) "
+    "during the scan for accurate results." );
+  infoLabel->setWordWrap( true );
+  layout->addWidget( infoLabel );
+
+  // ── Progress section ──
+  QProgressBar *progressBar = new QProgressBar();
+  progressBar->setRange( 0, 100 );
+  progressBar->setValue( 0 );
+  progressBar->setTextVisible( true );
+  progressBar->setFormat( "Idle" );
+  layout->addWidget( progressBar );
+
+  // ── Metrics grid ──
+  QGridLayout *metricsGrid = new QGridLayout();
+  metricsGrid->setHorizontalSpacing( 16 );
+  metricsGrid->setVerticalSpacing( 4 );
+
+  QLabel *phaseValueLabel = new QLabel( "—" );
+  QLabel *coreValueLabel = new QLabel( "—" );
+  QLabel *vramValueLabel = new QLabel( "—" );
+  QLabel *tempValueLabel = new QLabel( "—" );
+  QLabel *clockValueLabel = new QLabel( "—" );
+  QLabel *vramClockValueLabel = new QLabel( "—" );
+  QLabel *utilValueLabel = new QLabel( "—" );
+  QLabel *fpsValueLabel = new QLabel( "—" );
+
+  QFont boldFont = phaseValueLabel->font();
+  boldFont.setBold( true );
+  phaseValueLabel->setFont( boldFont );
+  coreValueLabel->setFont( boldFont );
+  vramValueLabel->setFont( boldFont );
+
+  metricsGrid->addWidget( new QLabel( "Phase:" ), 0, 0 );
+  metricsGrid->addWidget( phaseValueLabel, 0, 1 );
+  metricsGrid->addWidget( new QLabel( "Temp:" ), 0, 2 );
+  metricsGrid->addWidget( tempValueLabel, 0, 3 );
+  metricsGrid->addWidget( new QLabel( "Core offset:" ), 1, 0 );
+  metricsGrid->addWidget( coreValueLabel, 1, 1 );
+  metricsGrid->addWidget( new QLabel( "GPU clock:" ), 1, 2 );
+  metricsGrid->addWidget( clockValueLabel, 1, 3 );
+  metricsGrid->addWidget( new QLabel( "VRAM offset:" ), 2, 0 );
+  metricsGrid->addWidget( vramValueLabel, 2, 1 );
+  metricsGrid->addWidget( new QLabel( "VRAM clock:" ), 2, 2 );
+  metricsGrid->addWidget( vramClockValueLabel, 2, 3 );
+  metricsGrid->addWidget( new QLabel( "GPU util:" ), 3, 0 );
+  metricsGrid->addWidget( utilValueLabel, 3, 1 );
+  metricsGrid->addWidget( new QLabel( "FPS:" ), 3, 2 );
+  metricsGrid->addWidget( fpsValueLabel, 3, 3 );
+  layout->addLayout( metricsGrid );
+
+  // ── Status label ──
+  QLabel *statusLabel = new QLabel( "Ready to start." );
+  statusLabel->setWordWrap( true );
+  layout->addWidget( statusLabel );
+
+  // ── Buttons ──
+  QHBoxLayout *btnRow = new QHBoxLayout();
+  QPushButton *startBtn = new QPushButton( "Start" );
+  QPushButton *stopBtn = new QPushButton( "Stop" );
+  QPushButton *closeBtn = new QPushButton( "Close" );
+  stopBtn->setEnabled( false );
+  btnRow->addStretch();
+  btnRow->addWidget( startBtn );
+  btnRow->addWidget( stopBtn );
+  btnRow->addWidget( closeBtn );
+  layout->addLayout( btnRow );
+
+  // ── D-Bus signal connections (cleaned up on dialog close) ──
+  QMetaObject::Connection progressConn = connect(
+    m_uccdClient, &UccdClient::autoOCProgressChanged,
+    dlg, [=]( const QString &json )
+    {
+      QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
+      if ( !doc.isObject() )
+        return;
+      QJsonObject obj = doc.object();
+
+      // Phase name (daemon sends string: "idle","baseline","searching","validating","done")
+      QString phaseStr = obj["phase"].toString( "idle" );
+      int phase = 0; // idle
+      if ( phaseStr == "baseline" )        phase = 1;
+      else if ( phaseStr == "searching" )  phase = 2;
+      else if ( phaseStr == "validating" ) phase = 3;
+      else if ( phaseStr == "done" )       phase = 4;
+
+      static const char *phaseNames[] = { "Idle", "Baseline", "Searching", "Validating", "Done" };
+      if ( phase >= 0 && phase <= 4 )
+        phaseValueLabel->setText( phaseNames[phase] );
+
+      // Component (daemon sends string: "core" or "vram")
+      QString compStr = obj["component"].toString( "core" );
+      bool isVram = ( compStr == "vram" );
+      QString compName = isVram ? "VRAM" : "Core";
+
+      // Offsets (daemon keys: "currentOffset", "bestStable")
+      int currentOff = obj["currentOffset"].toInt( 0 );
+      int bestStable = obj["bestStable"].toInt( 0 );
+
+      if ( isVram )
+      {
+        vramValueLabel->setText( QString( "+%1 MHz (best: +%2)" )
+          .arg( currentOff ).arg( bestStable ) );
+      }
+      else
+      {
+        coreValueLabel->setText( QString( "+%1 MHz (best: +%2)" )
+          .arg( currentOff ).arg( bestStable ) );
+      }
+
+      // Live metrics (daemon keys: "temp", "gpuClock", "vramClock", "gpuUtil", "fps")
+      int tempC = obj["temp"].toInt( 0 );
+      int gpuClk = obj["gpuClock"].toInt( 0 );
+      int vramClk = obj["vramClock"].toInt( 0 );
+      int gpuUtil = obj["gpuUtil"].toInt( 0 );
+      double fps = obj["fps"].toDouble( -1.0 );
+
+      tempValueLabel->setText( tempC > 0 ? QString( "%1 °C" ).arg( tempC ) : "—" );
+      clockValueLabel->setText( gpuClk > 0 ? QString( "%1 MHz" ).arg( gpuClk ) : "—" );
+      vramClockValueLabel->setText( vramClk > 0 ? QString( "%1 MHz" ).arg( vramClk ) : "—" );
+      utilValueLabel->setText( gpuUtil >= 0 ? QString( "%1%" ).arg( gpuUtil ) : "—" );
+      fpsValueLabel->setText( fps >= 0.0 ? QString( "%1 fps" ).arg( fps, 0, 'f', 1 ) : "—" );
+
+      // Progress bar
+      int iter = obj["iteration"].toInt( 0 );
+      int maxIter = obj["maxIterations"].toInt( 1 );
+      if ( phase == 1 ) // Baseline
+      {
+        progressBar->setRange( 0, 0 ); // indeterminate
+        progressBar->setFormat( "Baseline..." );
+      }
+      else if ( phase == 2 ) // Searching
+      {
+        progressBar->setRange( 0, maxIter );
+        progressBar->setValue( iter );
+        progressBar->setFormat( compName + " — step %v/%m" );
+      }
+      else if ( phase == 3 ) // Validating
+      {
+        progressBar->setRange( 0, 100 );
+        progressBar->setValue( 100 );
+        progressBar->setFormat( "Validating " + compName + "..." );
+      }
+
+      // Status message
+      QString msg = obj["message"].toString();
+      if ( !msg.isEmpty() )
+        statusLabel->setText( msg );
+    } );
+
+  QMetaObject::Connection finishedConn = connect(
+    m_uccdClient, &UccdClient::autoOCFinished,
+    dlg, [this, startBtn, stopBtn, componentCombo, progressBar, coreValueLabel, vramValueLabel, statusLabel, dlg]( int coreOff, int vramOff, bool success, const QString &message )
+    {
+      startBtn->setEnabled( true );
+      stopBtn->setEnabled( false );
+      componentCombo->setEnabled( true );
+
+      progressBar->setRange( 0, 100 );
+      progressBar->setValue( success ? 100 : 0 );
+      progressBar->setFormat( success ? "Complete" : "Failed" );
+
+      if ( coreOff > 0 )
+        coreValueLabel->setText( QString( "+%1 MHz" ).arg( coreOff ) );
+      if ( vramOff > 0 )
+        vramValueLabel->setText( QString( "+%1 MHz" ).arg( vramOff ) );
+
+      statusLabel->setText( message );
+
+      if ( success )
+      {
+        QString summary = QString( "Auto overclock complete!\n\n"
+                                   "Core offset: +%1 MHz\n"
+                                   "VRAM offset: +%2 MHz" )
+                            .arg( coreOff ).arg( vramOff );
+        summary += "\n\nSettings have been applied. Use Save to persist them.";
+
+        QMessageBox::information( dlg, "Auto Overclock", summary );
+
+        // Refresh tab to show new offsets
+        refreshOCState();
+      }
+    } );
+
+  // Disconnect D-Bus signals when dialog closes
+  connect( dlg, &QDialog::destroyed, this, [=]() {
+    disconnect( progressConn );
+    disconnect( finishedConn );
+  } );
+
+  // ── Button handlers ──
+  connect( startBtn, &QPushButton::clicked, dlg, [this, componentCombo, startBtn, stopBtn, statusLabel, coreValueLabel, vramValueLabel, progressBar]() {
+    QString comp = componentCombo->currentData().toString();
+    bool ok = m_uccdClient->startAutoOC( comp.toStdString(), 0 );
+    if ( ok )
+    {
+      startBtn->setEnabled( false );
+      stopBtn->setEnabled( true );
+      componentCombo->setEnabled( false );
+      statusLabel->setText( "Starting auto overclock scan..." );
+      coreValueLabel->setText( "—" );
+      vramValueLabel->setText( "—" );
+      progressBar->setRange( 0, 0 );
+      progressBar->setFormat( "Starting..." );
+    }
+    else
+    {
+      statusLabel->setText( "Failed to start auto overclock. "
+                            "Check that the daemon is running and NVML is available." );
+    }
+  } );
+
+  connect( stopBtn, &QPushButton::clicked, dlg, [this, stopBtn, statusLabel]() {
+    m_uccdClient->stopAutoOC();
+    stopBtn->setEnabled( false );
+    statusLabel->setText( "Stop requested..." );
+  } );
+
+  connect( closeBtn, &QPushButton::clicked, dlg, &QDialog::close );
+
+  dlg->show();
+}
+
+void GpuProfileTab::showAutoUndervoltDialog()
+{
+  // Check if already running
+  if ( auto running = m_uccdClient->getAutoUndervoltRunning(); running && *running )
+  {
+    QMessageBox::information( this, "Auto Undervolt",
+      "An auto undervolt scan is already in progress." );
+    return;
+  }
+
+  QDialog *dlg = new QDialog( this );
+  dlg->setWindowTitle( "Auto Undervolt (Per-App)" );
+  dlg->setMinimumWidth( 500 );
+  dlg->setAttribute( Qt::WA_DeleteOnClose );
+
+  QVBoxLayout *layout = new QVBoxLayout( dlg );
+  layout->setSpacing( 12 );
+
+  // ── Info label ──
+  QLabel *infoLabel = new QLabel(
+    "<b>Auto Undervolt</b> finds the lowest GPU frequency cap that maintains "
+    "your current FPS. This reduces power consumption and heat while keeping "
+    "performance.<br><br>"
+    "<b>Requirements:</b> A Vulkan/OpenGL game or benchmark must be running "
+    "with the ucc-fps-layer active (FPS data must be streaming).<br><br>"
+    "The result is stored per-application based on the process name." );
+  infoLabel->setWordWrap( true );
+  layout->addWidget( infoLabel );
+
+  // ── Progress section ──
+  QProgressBar *progressBar = new QProgressBar();
+  progressBar->setRange( 0, 100 );
+  progressBar->setValue( 0 );
+  progressBar->setTextVisible( true );
+  progressBar->setFormat( "Idle" );
+  layout->addWidget( progressBar );
+
+  // ── Metrics grid ──
+  QGridLayout *metricsGrid = new QGridLayout();
+  metricsGrid->setHorizontalSpacing( 16 );
+  metricsGrid->setVerticalSpacing( 4 );
+
+  QLabel *phaseValueLabel = new QLabel( "—" );
+  QLabel *appValueLabel = new QLabel( "—" );
+  QLabel *capValueLabel = new QLabel( "—" );
+  QLabel *fpsValueLabel = new QLabel( "—" );
+  QLabel *baselineFpsLabel = new QLabel( "—" );
+  QLabel *tempValueLabel = new QLabel( "—" );
+  QLabel *clockValueLabel = new QLabel( "—" );
+  QLabel *powerValueLabel = new QLabel( "—" );
+  QLabel *utilValueLabel = new QLabel( "—" );
+
+  QFont boldFont = phaseValueLabel->font();
+  boldFont.setBold( true );
+  phaseValueLabel->setFont( boldFont );
+  capValueLabel->setFont( boldFont );
+  appValueLabel->setFont( boldFont );
+
+  int row = 0;
+  metricsGrid->addWidget( new QLabel( "Phase:" ), row, 0 );
+  metricsGrid->addWidget( phaseValueLabel, row, 1 );
+  metricsGrid->addWidget( new QLabel( "App:" ), row, 2 );
+  metricsGrid->addWidget( appValueLabel, row, 3 );
+  ++row;
+  metricsGrid->addWidget( new QLabel( "Freq cap:" ), row, 0 );
+  metricsGrid->addWidget( capValueLabel, row, 1 );
+  metricsGrid->addWidget( new QLabel( "GPU clock:" ), row, 2 );
+  metricsGrid->addWidget( clockValueLabel, row, 3 );
+  ++row;
+  metricsGrid->addWidget( new QLabel( "FPS:" ), row, 0 );
+  metricsGrid->addWidget( fpsValueLabel, row, 1 );
+  metricsGrid->addWidget( new QLabel( "Baseline FPS:" ), row, 2 );
+  metricsGrid->addWidget( baselineFpsLabel, row, 3 );
+  ++row;
+  metricsGrid->addWidget( new QLabel( "Temp:" ), row, 0 );
+  metricsGrid->addWidget( tempValueLabel, row, 1 );
+  metricsGrid->addWidget( new QLabel( "Power:" ), row, 2 );
+  metricsGrid->addWidget( powerValueLabel, row, 3 );
+  ++row;
+  metricsGrid->addWidget( new QLabel( "GPU util:" ), row, 0 );
+  metricsGrid->addWidget( utilValueLabel, row, 1 );
+  layout->addLayout( metricsGrid );
+
+  // ── Status label ──
+  QLabel *statusLabel = new QLabel( "Ready — start a GPU workload and click Start." );
+  statusLabel->setWordWrap( true );
+  layout->addWidget( statusLabel );
+
+  // ── Buttons ──
+  QHBoxLayout *btnRow = new QHBoxLayout();
+  QPushButton *startBtn = new QPushButton( "Start" );
+  QPushButton *stopBtn = new QPushButton( "Stop" );
+  QPushButton *closeBtn = new QPushButton( "Close" );
+  stopBtn->setEnabled( false );
+  btnRow->addStretch();
+  btnRow->addWidget( startBtn );
+  btnRow->addWidget( stopBtn );
+  btnRow->addWidget( closeBtn );
+  layout->addLayout( btnRow );
+
+  // ── D-Bus signal connections ──
+  QMetaObject::Connection progressConn = connect(
+    m_uccdClient, &UccdClient::autoUndervoltProgressChanged,
+    dlg, [=]( const QString &json )
+    {
+      QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
+      if ( !doc.isObject() )
+        return;
+      QJsonObject obj = doc.object();
+
+      QString phaseStr = obj["phase"].toString( "idle" );
+      int phase = 0;
+      if ( phaseStr == "baseline" )        phase = 1;
+      else if ( phaseStr == "searching" )  phase = 2;
+      else if ( phaseStr == "validating" ) phase = 3;
+      else if ( phaseStr == "done" )       phase = 4;
+
+      static const char *phaseNames[] = { "Idle", "Baseline", "Searching", "Validating", "Done" };
+      if ( phase >= 0 && phase <= 4 )
+        phaseValueLabel->setText( phaseNames[phase] );
+
+      QString app = obj["app"].toString();
+      if ( !app.isEmpty() )
+        appValueLabel->setText( app );
+
+      int currentCap = obj["currentCapMHz"].toInt( 0 );
+      int bestCap = obj["bestCapMHz"].toInt( 0 );
+      if ( currentCap > 0 )
+        capValueLabel->setText( QString( "%1 MHz (best: %2)" ).arg( currentCap ).arg( bestCap ) );
+
+      int tempC = obj["temp"].toInt( 0 );
+      int gpuClk = obj["gpuClock"].toInt( 0 );
+      int powerW = obj["powerDraw"].toInt( 0 );
+      int gpuUtil = obj["gpuUtil"].toInt( 0 );
+      double fps = obj["fps"].toDouble( -1.0 );
+      double blFps = obj["baselineFps"].toDouble( -1.0 );
+
+      tempValueLabel->setText( tempC > 0 ? QString( "%1 °C" ).arg( tempC ) : "—" );
+      clockValueLabel->setText( gpuClk > 0 ? QString( "%1 MHz" ).arg( gpuClk ) : "—" );
+      powerValueLabel->setText( powerW > 0 ? QString( "%1 W" ).arg( powerW ) : "—" );
+      utilValueLabel->setText( gpuUtil >= 0 ? QString( "%1%" ).arg( gpuUtil ) : "—" );
+      fpsValueLabel->setText( fps >= 0.0 ? QString( "%1" ).arg( fps, 0, 'f', 1 ) : "—" );
+      baselineFpsLabel->setText( blFps >= 0.0 ? QString( "%1" ).arg( blFps, 0, 'f', 1 ) : "—" );
+
+      int iter = obj["iteration"].toInt( 0 );
+      int maxIter = obj["maxIterations"].toInt( 1 );
+      if ( phase == 1 )
+      {
+        progressBar->setRange( 0, 0 );
+        progressBar->setFormat( "Baseline..." );
+      }
+      else if ( phase == 2 )
+      {
+        progressBar->setRange( 0, maxIter );
+        progressBar->setValue( iter );
+        progressBar->setFormat( "Searching — step %v/%m" );
+      }
+      else if ( phase == 3 )
+      {
+        progressBar->setRange( 0, 100 );
+        progressBar->setValue( 100 );
+        progressBar->setFormat( "Validating..." );
+      }
+
+      QString msg = obj["message"].toString();
+      if ( !msg.isEmpty() )
+        statusLabel->setText( msg );
+    } );
+
+  QMetaObject::Connection finishedConn = connect(
+    m_uccdClient, &UccdClient::autoUndervoltFinished,
+    dlg, [this, startBtn, stopBtn, progressBar, capValueLabel, statusLabel, dlg](
+      int gpuFreqCapMHz, bool success, const QString &message, const QString &appName )
+    {
+      startBtn->setEnabled( true );
+      stopBtn->setEnabled( false );
+
+      progressBar->setRange( 0, 100 );
+      progressBar->setValue( success ? 100 : 0 );
+      progressBar->setFormat( success ? "Complete" : "Failed" );
+
+      if ( success && gpuFreqCapMHz > 0 )
+        capValueLabel->setText( QString( "%1 MHz (applied)" ).arg( gpuFreqCapMHz ) );
+
+      statusLabel->setText( message );
+
+      if ( success )
+      {
+        QString summary = QString(
+          "Auto undervolt complete for '%1'!\n\n"
+          "GPU frequency cap: %2 MHz\n\n"
+          "The GPU will now run at a lower power point while maintaining FPS.\n"
+          "This profile is saved and will be auto-applied when '%1' runs again." )
+          .arg( appName ).arg( gpuFreqCapMHz );
+
+        QMessageBox::information( dlg, "Auto Undervolt", summary );
+        refreshOCState();
+      }
+    } );
+
+  connect( dlg, &QDialog::destroyed, this, [=]() {
+    disconnect( progressConn );
+    disconnect( finishedConn );
+  } );
+
+  // ── Button handlers ──
+  connect( startBtn, &QPushButton::clicked, dlg,
+    [this, startBtn, stopBtn, statusLabel, capValueLabel, progressBar]()
+    {
+      bool ok = m_uccdClient->startAutoUndervolt( 0 );
+      if ( ok )
+      {
+        startBtn->setEnabled( false );
+        stopBtn->setEnabled( true );
+        statusLabel->setText( "Starting auto undervolt scan..." );
+        capValueLabel->setText( "—" );
+        progressBar->setRange( 0, 0 );
+        progressBar->setFormat( "Starting..." );
+      }
+      else
+      {
+        statusLabel->setText(
+          "Failed to start. Ensure a game is running with the FPS layer active "
+          "and the daemon is connected." );
+      }
+    } );
+
+  connect( stopBtn, &QPushButton::clicked, dlg, [this, stopBtn, statusLabel]() {
+    m_uccdClient->stopAutoUndervolt();
+    stopBtn->setEnabled( false );
+    statusLabel->setText( "Stop requested..." );
+  } );
+
+  connect( closeBtn, &QPushButton::clicked, dlg, &QDialog::close );
+
+  dlg->show();
+}
+
 bool GpuProfileTab::ensureOverclockWarningAcknowledged()
 {
   if ( !m_ocAvailable )
@@ -1036,13 +1555,37 @@ bool GpuProfileTab::ensureOverclockWarningAcknowledged()
 bool GpuProfileTab::isOverclockWarningAcknowledged() const
 {
   QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-  return settings.value( "gpu/ocWarningAcknowledged", false ).toBool();
+  // Canonical key + migration cleanup for legacy lowercase variant.
+  const QVariant canonical = settings.value( "gpu/ocWarningAcknowledged", QVariant() );
+  const QVariant legacy = settings.value( "gpu/ocwarningacknowledged", QVariant() );
+
+  if ( canonical.isValid() )
+  {
+    if ( legacy.isValid() )
+    {
+      settings.remove( "gpu/ocwarningacknowledged" );
+      settings.sync();
+    }
+    return canonical.toBool();
+  }
+
+  if ( legacy.isValid() )
+  {
+    const bool migrated = legacy.toBool();
+    settings.setValue( "gpu/ocWarningAcknowledged", migrated );
+    settings.remove( "gpu/ocwarningacknowledged" );
+    settings.sync();
+    return migrated;
+  }
+
+  return false;
 }
 
 void GpuProfileTab::setOverclockWarningAcknowledged( bool acknowledged )
 {
   QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
   settings.setValue( "gpu/ocWarningAcknowledged", acknowledged );
+  settings.remove( "gpu/ocwarningacknowledged" );
   settings.sync();
 }
 

@@ -25,8 +25,9 @@ _ucc_cli()
     local profile_cmds="list get set defaults customs apply save delete"
     local statemap_cmds="get set"
     local fan_cmds="list get set apply revert"
-    local gpu_cmds="info profile oc-state"
+    local gpu_cmds="info profile oc-state auto-oc"
     local gpu_profile_cmds="list get set reset"
+    local gpu_autooc_cmds="core vram both stop status"
     local odm_cmds="list get set"
     local keyboard_cmds="info get set color profiles activate"
     local brightness_cmds="get set"
@@ -146,6 +147,12 @@ _ucc_cli()
                             COMPREPLY=( $(compgen -W "${ids[*]}" -- "$cur") )
                             return ;;
                     esac
+                    ;;
+                auto-oc|autooc|auto_oc)
+                    if [[ -z "$sub2cmd" ]]; then
+                        COMPREPLY=( $(compgen -W "$gpu_autooc_cmds" -- "$cur") )
+                        return
+                    fi
                     ;;
             esac
             ;;

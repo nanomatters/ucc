@@ -57,7 +57,6 @@ public:
 
   // ── Accessors used by MainWindow ──
   QComboBox *fanProfileCombo() const { return m_fanProfileCombo; }
-  const QStringList &builtinFanProfiles() const { return m_builtinFanProfiles; }
 
   FanCurveEditorWidget *cpuEditor()  const { return m_cpuFanCurveEditor; }
   FanCurveEditorWidget *gpuEditor()  const { return m_gpuFanCurveEditor; }
@@ -135,7 +134,6 @@ private:
   QPushButton *m_revertFanProfilesButton = nullptr;
   QPushButton *m_copyFanProfileButton = nullptr;
   QPushButton *m_removeFanProfileButton = nullptr;
-  QStringList m_builtinFanProfiles;
   QString m_currentFanProfile;
 
   // Fan curve editors

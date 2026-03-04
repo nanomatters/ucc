@@ -50,6 +50,10 @@ struct TccSettings
   bool fahrenheit = false;
   std::map< std::string, std::string > stateMap;  // Maps "power_ac" and "power_bat" to profile IDs
   std::map< std::string, std::string > profiles;  // Maps profile IDs to full profile JSON
+  std::map< std::string, std::string > fanProfiles;       // Custom fan profiles: id → JSON
+  std::map< std::string, std::string > keyboardProfiles;  // Custom keyboard profiles: id → JSON
+  std::map< std::string, std::string > gpuProfiles;       // Custom GPU OC profiles: id → JSON
+  std::map< std::string, std::string > appGpuProfileMap;  // Runtime app key → GPU profile ID
   std::optional< std::string > shutdownTime;  // null in TypeScript
   bool cpuSettingsEnabled = true;
   bool fanControlEnabled = true;

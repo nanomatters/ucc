@@ -19,6 +19,7 @@ Build-Depends: cmake (>= 3.20),
                libsystemd-dev,
                libxrandr-dev,
                libudev-dev,
+               libvulkan-dev,
                pkgconf
 Standards-Version: 4.6.1
 Homepage: https://github.com/tuxedocomputers/uniwill-control-center
@@ -46,3 +47,17 @@ Description: Uniwill Control Center
   - Water cooler monitoring and control
   - System monitoring
   - KDE Plasma applet for system tray integration
+
+Package: ucc-fps-layer
+Architecture: any
+Section: libs
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: ucc (= ${binary:Version})
+Description: Vulkan/GLX FPS measurement layer for UCC Auto-OC
+ A minimal Vulkan implicit layer (plus a GLX LD_PRELOAD hook) that counts
+ presented frames and streams rolling FPS to the uccd daemon over a Unix
+ socket. Required only if you use the Auto-OC FPS measurement feature.
+ .
+ The layer is completely passive when no Auto-OC scan is running (the socket
+ does not exist and the background thread does nothing). Install alongside ucc
+ and the Vulkan loader will pick it up automatically as an implicit layer.

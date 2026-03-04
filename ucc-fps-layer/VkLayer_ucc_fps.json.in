@@ -1,0 +1,19 @@
+{
+    "file_format_version": "1.0.0",
+    "layer": {
+        "name": "VK_LAYER_UCC_FPS",
+        "type": "GLOBAL",
+        "library_path": "@UCC_FPS_LAYER_LIBDIR@/libucc_fps_layer.so",
+        "api_version": "1.3.0",
+        "implementation_version": "1",
+        "description": "UCC FPS measurement layer for GPU Auto-OC",
+        "functions": {
+            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion",
+            "vkGetInstanceProcAddr": "VK_LAYER_UCC_FPS_GetInstanceProcAddr",
+            "vkGetDeviceProcAddr":   "VK_LAYER_UCC_FPS_GetDeviceProcAddr"
+        },
+        "disable_environment": {
+            "UCC_FPS_DISABLE": "1"
+        }
+    }
+}

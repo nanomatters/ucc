@@ -52,24 +52,46 @@ public:
   std::optional< std::string > getSystemInfoJSON();
   std::optional< bool > isDeviceSupported();
 
-  // Profile Management
-  std::optional< std::string > getDefaultProfilesJSON();
+  // Profile Management — unified API (profiles have "editable" flag)
+  std::optional< std::string > getProfilesJSON();       // All profiles with editable flag
+  std::optional< std::string > getDefaultProfilesJSON(); // Backward-compat: built-in only
   std::optional< std::string > getCpuFrequencyLimitsJSON();
   std::optional< std::string > getDefaultValuesProfileJSON();
-  std::optional< std::string > getCustomProfilesJSON();
+  std::optional< std::string > getCustomProfilesJSON();  // Backward-compat: custom only
   std::optional< std::string > getActiveProfileJSON();
+  std::optional< std::string > getAppliedProfilesJSON();
   std::optional< std::string > getSettingsJSON();
   std::optional< std::string > getPowerState();
   bool setStateMap( const std::string &state, const std::string &profileId );
   bool setBatchStateMap( const std::map< std::string, std::string > &entries );
   bool setActiveProfile( const std::string &profileId );
   bool applyProfile( const std::string &profileJSON );
-  bool saveCustomProfile( const std::string &profileJSON );
-  bool deleteCustomProfile( const std::string &profileId );
-  std::optional< std::string > getFanProfile( const std::string &fanProfileId );
+  bool saveProfile( const std::string &profileJSON );         // Unified save
+  bool deleteProfile( const std::string &profileId );         // Unified delete
+  bool saveCustomProfile( const std::string &profileJSON );   // Backward-compat → saveProfile
+  bool deleteCustomProfile( const std::string &profileId );   // Backward-compat → deleteProfile
+
+  // Fan sub-profiles (built-in + custom, with editable flag)
   std::optional< std::string > getFanProfilesJSON();
-  std::optional< std::string > getGpuProfile( const std::string &gpuProfileId );
+  std::optional< std::string > getFanProfileJSON( const std::string &fanProfileId );
+  bool saveFanProfile( const std::string &id, const std::string &name, const std::string &json );
+  bool deleteFanProfile( const std::string &id );
+
+  // GPU sub-profiles (built-in + custom, with editable flag)
   std::optional< std::string > getGpuProfilesJSON();
+  std::optional< std::string > getGpuProfileJSON( const std::string &gpuProfileId );
+  bool saveGpuProfile( const std::string &id, const std::string &name, const std::string &json );
+  bool deleteGpuProfile( const std::string &id );
+
+  // Keyboard sub-profiles (custom only, all editable)
+  std::optional< std::string > getKeyboardProfilesJSON();
+  std::optional< std::string > getKeyboardProfileJSON( const std::string &keyboardProfileId );
+  bool saveKeyboardProfile( const std::string &id, const std::string &name, const std::string &json );
+  bool deleteKeyboardProfile( const std::string &id );
+
+  // Legacy aliases (deprecated)
+  std::optional< std::string > getFanProfile( const std::string &fanProfileId );
+  std::optional< std::string > getGpuProfile( const std::string &gpuProfileId );
   std::optional< bool > setFanProfile( const std::string &fanProfileId, const std::string &json );
 
   // Display Control
@@ -89,7 +111,6 @@ public:
   std::optional< int > getCpuCoreCount();
 
   // Fan Control
-  bool setFanProfile( const std::string &profileJSON );
   bool setFanProfileCPU( const std::string &pointsJSON );
   bool setFanProfileDGPU( const std::string &pointsJSON );
   bool applyFanProfiles( const std::string &fanProfilesJSON );
@@ -146,6 +167,19 @@ public:
   bool resetNvidiaGpuPowerLimit( int deviceIndex );
   bool applyNvidiaGpuOCProfile( const std::string &profileJSON, int deviceIndex = 0 );
   bool resetNvidiaGpuOCAll( int deviceIndex = 0 );
+
+  // NVIDIA Auto-OC
+  bool startAutoOC( const std::string &component = "both", int deviceIndex = 0 );
+  bool stopAutoOC();
+  std::optional< bool > getAutoOCRunning();
+  std::optional< std::string > getAutoOCProgress();
+
+  // NVIDIA Auto-Undervolt
+  bool startAutoUndervolt( int deviceIndex = 0 );
+  bool stopAutoUndervolt();
+  std::optional< bool > getAutoUndervoltRunning();
+  std::optional< std::string > getAutoUndervoltProgress();
+  std::optional< std::string > getAutoUndervoltProfiles();
 
   // Device Capability Queries
   std::optional< bool > getWaterCoolerSupported();
@@ -210,6 +244,12 @@ public:
   std::optional< QByteArray > getMonitorDataSince( qint64 sinceTimestampMs );
   bool setMonitorHistoryHorizon( int seconds );
   std::optional< int > getMonitorHistoryHorizon();
+  std::optional< std::string > getFpsSourcesJSON();
+  std::optional< std::string > getAutoUvAutoApplyStatusJSON();
+  bool setFpsSourceApp( const std::string &appName );
+  std::optional< std::string > getFpsSourceApp();
+  bool setFpsRequireP0( bool enabled );
+  std::optional< bool > getFpsRequireP0();
 
   // Signal Subscription
   using ProfileChangedCallback = std::function< void( const std::string &profileId ) >;
@@ -217,6 +257,20 @@ public:
 
   void subscribeProfileChanged( ProfileChangedCallback callback );
   void subscribePowerStateChanged( PowerStateChangedCallback callback );
+
+  // Auto-OC signal subscription
+  using AutoOCProgressCallback = std::function< void( const std::string &progressJSON ) >;
+  using AutoOCFinishedCallback = std::function< void( int coreOffset, int vramOffset, bool success, const std::string &msg ) >;
+
+  void subscribeAutoOCProgress( AutoOCProgressCallback callback );
+  void subscribeAutoOCFinished( AutoOCFinishedCallback callback );
+
+  // Auto-Undervolt signal subscription
+  using AutoUndervoltProgressCallback = std::function< void( const std::string &progressJSON ) >;
+  using AutoUndervoltFinishedCallback = std::function< void( int gpuFreqCapMHz, bool success, const std::string &msg, const std::string &appName ) >;
+
+  void subscribeAutoUndervoltProgress( AutoUndervoltProgressCallback callback );
+  void subscribeAutoUndervoltFinished( AutoUndervoltFinishedCallback callback );
 
   // Connection status
   bool isConnected() const;
@@ -226,14 +280,22 @@ signals:
                        const QString &keyboardProfileId,
                        const QString &fanProfileId,
                        const QString &gpuProfileId );
+  void profilesListChanged();
   void powerStateChanged( const QString &state );
   void connectionStatusChanged( bool connected );
+  void autoOCProgressChanged( const QString &progressJSON );
+  void autoOCFinished( int coreOffsetMHz, int vramOffsetMHz,
+                       bool success, const QString &message );
+  void autoUndervoltProgressChanged( const QString &progressJSON );
+  void autoUndervoltFinished( int gpuFreqCapMHz, bool success,
+                              const QString &message, const QString &appName );
 
 private slots:
   void onProfileChangedSignal( const QString &profileId,
                                const QString &keyboardProfileId,
                                const QString &fanProfileId,
                                const QString &gpuProfileId );
+  void onProfilesListChangedSignal();
   void onPowerStateChangedSignal( const QString &state );
   void onServiceRegistered( const QString &service );
   void onServiceUnregistered( const QString &service );
@@ -261,6 +323,11 @@ private:
 
   template< typename... Args >
   bool callVoidMethod( const QString &method, const Args &...args ) const;
+
+  AutoOCProgressCallback m_autoOCProgressCallback;
+  AutoOCFinishedCallback m_autoOCFinishedCallback;
+  AutoUndervoltProgressCallback m_autoUndervoltProgressCallback;
+  AutoUndervoltFinishedCallback m_autoUndervoltFinishedCallback;
 };
 
 } // namespace ucc

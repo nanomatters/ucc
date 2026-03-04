@@ -21,7 +21,6 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QSettings>
 #include <memory>
 #include <map>
 #include "UccdClient.hpp"
@@ -33,13 +32,12 @@ namespace ucc
  * @brief Profile management for QML interface
  *
  * Provides profile operations with Qt signals/slots integration.
- * All profile references use IDs; names are used only for display.
+ * All profile data is fetched from / saved to the uccd daemon — no local
+ * persistence of profiles in ~/.config/uccrc anymore.
  */
 class ProfileManager : public QObject
 {
   Q_OBJECT
-  Q_PROPERTY( QStringList defaultProfiles READ defaultProfiles NOTIFY defaultProfilesChanged )
-  Q_PROPERTY( QStringList customProfiles READ customProfiles NOTIFY customProfilesChanged )
   Q_PROPERTY( QStringList allProfiles READ allProfiles NOTIFY allProfilesChanged )
   Q_PROPERTY( QString activeProfile READ activeProfileName NOTIFY activeProfileChanged )
   Q_PROPERTY( QString powerState READ powerState NOTIFY powerStateChanged )
@@ -50,9 +48,6 @@ public:
   explicit ProfileManager( QObject *parent = nullptr );
   ~ProfileManager() override = default;
 
-  // Name lists for display (parallel to ID lists)
-  QStringList defaultProfiles() const { return m_defaultProfiles; }
-  QStringList customProfiles() const { return m_customProfiles; }
   QStringList allProfiles() const { return m_allProfiles; }
 
   // Active profile
@@ -66,16 +61,13 @@ public:
   bool isConnected() const { return m_connected; }
   UccdClient* getClient() const { return m_client.get(); }
 
-  // Data accessors for combos (id + name)
-  const QJsonArray& defaultProfilesData() const { return m_defaultProfilesData; }
-  const QJsonArray& customProfilesData() const { return m_customProfilesData; }
+  /// All system profiles (built-in + custom) with editable flag
+  const QJsonArray& allProfilesData() const { return m_allProfilesData; }
 
-  // Fan profile data (built-in + custom, each with id + name)
-  const QJsonArray& builtinFanProfilesData() const { return m_builtinFanProfilesData; }
-  const QJsonArray& customFanProfilesData() const { return m_customFanProfilesData; }
-  const QJsonArray& customKeyboardProfilesData() const { return m_customKeyboardProfilesData; }
-  const QJsonArray& customGpuProfilesData() const { return m_customGpuProfilesData; }
-  const QJsonArray& builtinGpuProfilesData() const { return m_builtinGpuProfilesData; }
+  // Sub-profile data: built-in + custom combined, each with editable flag
+  const QJsonArray& fanProfilesData() const { return m_fanProfilesData; }
+  const QJsonArray& gpuProfilesData() const { return m_gpuProfilesData; }
+  const QJsonArray& keyboardProfilesData() const { return m_keyboardProfilesData; }
 
 public slots:
   void refresh();
@@ -86,40 +78,38 @@ public slots:
   QString getProfileDetails( const QString &profileId );
   QString createProfileFromDefault( const QString &name );
   std::vector< int > getHardwarePowerLimits();
-  bool isCustomProfile( const QString &profileId ) const;
-
   // ID-based lookups
   QString profileNameById( const QString &profileId ) const;
   QString profileIdByName( const QString &profileName ) const;
 
-  // Fan profiles (by ID)
+  // Fan profiles (by ID) — all go through daemon
   QString getFanProfile( const QString &fanProfileId );
   bool setFanProfile( const QString &fanProfileId, const QString &name, const QString &json );
-  QStringList customFanProfiles() const { return m_customFanProfiles; }
   bool deleteFanProfile( const QString &fanProfileId );
   bool renameFanProfile( const QString &fanProfileId, const QString &newName );
 
-  // Keyboard profiles (by ID)
+  // Keyboard profiles (by ID) — all go through daemon
   QString getKeyboardProfile( const QString &keyboardProfileId );
   bool setKeyboardProfile( const QString &keyboardProfileId, const QString &name, const QString &json );
-  QStringList customKeyboardProfiles() const { return m_customKeyboardProfiles; }
   bool deleteKeyboardProfile( const QString &keyboardProfileId );
   bool renameKeyboardProfile( const QString &keyboardProfileId, const QString &newName );
 
-  // GPU OC profiles (by ID)
+  // GPU OC profiles (by ID) — all go through daemon
   QString getGpuProfile( const QString &gpuProfileId );
   bool setGpuProfile( const QString &gpuProfileId, const QString &name, const QString &json );
-  QStringList customGpuProfiles() const { return m_customGpuProfiles; }
   bool deleteGpuProfile( const QString &gpuProfileId );
   bool renameGpuProfile( const QString &gpuProfileId, const QString &newName );
+
+  /// Check whether a system profile ID is user-created (editable)
+  bool isProfileEditable( const QString &profileId ) const;
+  /// Check whether a sub-profile ID is editable (returns false for built-ins)
+  bool isProfileEditable( const QString &profileId, const QJsonArray &profilesData ) const;
 
   QString getSettingsJSON();
   bool setStateMap( const QString &state, const QString &profileId );
   bool setBatchStateMap( const std::map< QString, QString > &entries );
 
 signals:
-  void defaultProfilesChanged();
-  void customProfilesChanged();
   void allProfilesChanged();
   void activeProfileChanged();
   void activeKeyboardProfileChanged( const QString &keyboardProfileId );
@@ -128,9 +118,9 @@ signals:
   void powerStateChanged();
   void activeProfileIndexChanged();
   void connectedChanged();
-  void customKeyboardProfilesChanged();
-  void customFanProfilesChanged();
-  void customGpuProfilesChanged();
+  void keyboardProfilesChanged();
+  void fanProfilesChanged();
+  void gpuProfilesChanged();
   void error( const QString &message );
 
 private:
@@ -143,31 +133,15 @@ private:
   QString resolveStateMapToProfileId( const QString &state );
   void updateAllProfiles();
   void updateActiveProfileIndex();
-  void loadCustomProfilesFromSettings();
-  void saveCustomProfilesToSettings();
-  void loadBuiltinFanProfiles();
-  void loadCustomFanProfilesFromSettings();
-  void saveCustomFanProfilesToSettings();
-  void loadCustomKeyboardProfilesFromSettings();
-  void saveCustomKeyboardProfilesToSettings();
-  void loadCustomGpuProfilesFromSettings();
-  void loadBuiltinGpuProfiles();
-  void saveCustomGpuProfilesToSettings();
+  void loadProfilesFromDaemon();
+  void loadFanProfilesFromDaemon();
+  void loadGpuProfilesFromDaemon();
+  void loadKeyboardProfilesFromDaemon();
 
   std::unique_ptr< UccdClient > m_client;
-  std::unique_ptr< QSettings > m_settings;
 
-  // Profile names (for display) and parallel ID lists
-  QStringList m_defaultProfiles;
-  QStringList m_customProfiles;
   QStringList m_allProfiles;
   QStringList m_allProfileIds;      ///< parallel to m_allProfiles
-
-  // Fan profile names (for display)
-  QStringList m_builtinFanProfiles;
-  QStringList m_customFanProfiles;
-  QStringList m_customKeyboardProfiles;
-  QStringList m_customGpuProfiles;
 
   QString m_activeProfileId;
   QString m_activeKeyboardProfileId;
@@ -178,14 +152,10 @@ private:
   bool m_connected = false;
   std::vector< int > m_hardwarePowerLimits;
 
-  QJsonArray m_defaultProfilesData;
-  QJsonArray m_customProfilesData;
-  QJsonArray m_builtinFanProfilesData;   ///< [{id, name}, ...] from daemon
-  QJsonArray m_customFanProfilesData;    ///< [{id, name, json}, ...] local
-  QJsonArray m_customKeyboardProfilesData;
-  QJsonArray m_builtinGpuProfilesData;
-  QJsonArray m_customGpuProfilesData;
-  QJsonObject m_stateMap;
+  QJsonArray m_allProfilesData;          ///< all system profiles (built-in + custom) with editable flag
+  QJsonArray m_fanProfilesData;          ///< all fan profiles (built-in + custom)
+  QJsonArray m_gpuProfilesData;          ///< all GPU profiles (built-in + custom)
+  QJsonArray m_keyboardProfilesData;     ///< all keyboard profiles (all custom)
 };
 
 } // namespace ucc

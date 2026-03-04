@@ -128,16 +128,10 @@ struct UccProfileWebcam
 struct UccProfileFanControl
 {
   bool useControl;
-  std::string fanProfile;
+  std::string fanProfile;  ///< ID reference to a fan profile (e.g. "fan-balanced")
   bool sameSpeed; // when true, all fans are driven at the same percent (highest)
   bool autoControlWC; // when true, automatically control water cooler based on system temperature
   bool enableWaterCooler; // when true, water cooler BLE scanning/connection is enabled
-
-  // Embedded fan curve tables (populated when profile JSON includes them)
-  std::vector< FanTableEntry > tableCPU;
-  std::vector< FanTableEntry > tableGPU;
-  std::vector< FanTableEntry > tablePump;
-  std::vector< FanTableEntry > tableWaterCoolerFan;
 
   UccProfileFanControl()
     : useControl( true ),
@@ -146,15 +140,6 @@ struct UccProfileFanControl
       autoControlWC( true ),
       enableWaterCooler( ucc::WATER_COOLER_INITIAL_STATE )
   {
-  }
-
-  /**
-   * @brief Check if this profile has embedded fan tables
-   * @return true if at least CPU and GPU tables are populated
-   */
-  [[nodiscard]] bool hasEmbeddedTables() const noexcept
-  {
-    return !tableCPU.empty() && !tableGPU.empty();
   }
 };
 
@@ -193,21 +178,15 @@ struct UccODMPowerLimits
  */
 struct UccProfileKeyboard
 {
-  std::string keyboardProfileData;  // JSON string containing keyboard backlight states
-  std::string keyboardProfileName;  // Name of the keyboard profile for reference
-  std::string keyboardProfileId;    // UUID of the keyboard profile (from top-level selectedKeyboardProfile)
+  std::string keyboardProfileId;    ///< UUID of the keyboard profile (ID reference only)
 
   UccProfileKeyboard()
-    : keyboardProfileData( "{}" ),
-      keyboardProfileName( "" ),
-      keyboardProfileId( "" )
+    : keyboardProfileId( "" )
   {
   }
 
-  UccProfileKeyboard( const std::string &data, const std::string &name )
-    : keyboardProfileData( data ),
-      keyboardProfileName( name ),
-      keyboardProfileId( "" )
+  UccProfileKeyboard( const std::string &id )
+    : keyboardProfileId( id )
   {
   }
 };
@@ -230,8 +209,7 @@ struct UccProfile
   UccProfileKeyboard keyboard;
   UccODMProfile odmProfile;
   UccODMPowerLimits odmPowerLimits;
-  std::string gpuProfileId;     ///< UUID reference to GPU OC profile (stored in GUI QSettings)
-  std::string gpuOCProfileData; ///< Embedded GPU OC profile JSON (offsets, locked clocks, powerLimitW)
+  std::string gpuProfileId;     ///< UUID reference to GPU OC profile (ID reference only)
   std::string chargingProfile;  ///< firmware-level charging profile descriptor (e.g. "balanced")
   std::string chargingPriority; ///< USB-C PD charging priority (e.g. "charge_battery", "performance")
   std::string chargeType;       ///< charge type: "Standard" or "Custom"
@@ -259,7 +237,6 @@ struct UccProfile
       odmProfile( other.odmProfile ),
       odmPowerLimits( other.odmPowerLimits ),
       gpuProfileId( other.gpuProfileId ),
-      gpuOCProfileData( other.gpuOCProfileData ),
       chargingProfile( other.chargingProfile ),
       chargingPriority( other.chargingPriority ),
       chargeType( other.chargeType ),
@@ -284,7 +261,6 @@ struct UccProfile
       odmProfile = other.odmProfile;
       odmPowerLimits = other.odmPowerLimits;
       gpuProfileId = other.gpuProfileId;
-      gpuOCProfileData = other.gpuOCProfileData;
       chargingProfile = other.chargingProfile;
       chargingPriority = other.chargingPriority;
       chargeType = other.chargeType;

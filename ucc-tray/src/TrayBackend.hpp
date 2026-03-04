@@ -261,13 +261,13 @@ private slots:
                                const QString &keyboardProfileId,
                                const QString &fanProfileId,
                                const QString &gpuProfileId );
+  void onProfilesListChanged();
   void onSettingsFileChanged( const QString &path );
   void onConnectionStatusChanged( bool connected );
 
 private:
   void loadProfiles();
   void loadCapabilities();
-  void loadLocalProfiles();  // custom fan + keyboard profiles from QSettings
   QString resolveFanProfileName( const QString &fanProfileId ) const;
   QString resolveKeyboardProfileName( const QString &kbProfileId ) const;
   QString resolveGpuProfileName( const QString &gpuProfileId ) const;
@@ -354,14 +354,10 @@ private:
   bool m_fanProfileOverride = false;
   bool m_keyboardProfileOverride = false;
 
-  // Custom fan & keyboard profiles (parallel lists, from local settings)
-  QStringList m_customFanProfileNames;
-  QStringList m_customFanProfileIds;
   QStringList m_keyboardProfileNames;
   QStringList m_keyboardProfileIds;
   QStringList m_gpuProfileNames;
   QStringList m_gpuProfileIds;
-  QJsonArray  m_keyboardProfilesData;
 
   QString m_activeProfileGpuId;
   QString m_activeProfileGpuName;

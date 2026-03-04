@@ -12,7 +12,8 @@ override_dh_auto_configure:
 		-DBUILD_GUI=ON \
 		-DBUILD_TRAY=ON \
 		-DBUILD_GNOME=ON \
-		-DBUILD_CLI=ON
+		-DBUILD_CLI=ON \
+		-DBUILD_FPS_LAYER=ON
 
 override_dh_auto_install:
 	DESTDIR=$(CURDIR)/debian/tmp cmake --install obj-x86_64-linux-gnu

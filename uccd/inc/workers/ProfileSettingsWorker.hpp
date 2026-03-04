@@ -63,7 +63,6 @@ public:
     std::shared_ptr< NvmlWrapper > nvml,
     std::function< UccProfile() > getActiveProfileCallback,
     std::function< void( const std::vector< std::string > & ) > setOdmProfilesAvailableCallback,
-    std::function< void( const std::string & ) > setOdmPowerLimitsJSON,
     std::function< void( const std::string & ) > logFunction,
     TccSettings &settings,
     std::atomic< bool > &modeReapplyPending,
@@ -76,7 +75,6 @@ public:
       m_nvml( std::move( nvml ) ),
       m_getActiveProfile( std::move( getActiveProfileCallback ) ),
       m_setOdmProfilesAvailable( std::move( setOdmProfilesAvailableCallback ) ),
-      m_setOdmPowerLimitsJSON( std::move( setOdmPowerLimitsJSON ) ),
       m_logFunction( std::move( logFunction ) ),
       m_skipAcpiPlatformProfile( skipAcpiPlatformProfile ),
       m_settings( settings ),
@@ -155,7 +153,6 @@ private:
   std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< void( const std::vector< std::string > & ) > m_setOdmProfilesAvailable;
-  std::function< void( const std::string & ) > m_setOdmPowerLimitsJSON;
   std::function< void( const std::string & ) > m_logFunction;
   ODMProfileType m_odmProfileType = ODMProfileType::None;
   bool m_skipAcpiPlatformProfile = false;
@@ -207,7 +204,6 @@ private:
   std::vector< TDPInfo > getTDPInfo();
   bool setTDPValues( const std::vector< uint32_t > &values );
   void logLine( const std::string &message );
-  void publishODMPowerLimitsJSON( const std::vector< TDPInfo > &tdpInfo );
   void applyODMPowerLimits();
 
   // ----- Charging internals -----

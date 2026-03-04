@@ -85,22 +85,12 @@ void FanControlTab::setupUI()
   m_fanProfileCombo->setEditable( true );
   m_fanProfileCombo->setInsertPolicy( QComboBox::NoInsert );
 
-  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
+  for ( const auto &v : m_profileManager->fanProfilesData() )
   {
     QJsonObject o = v.toObject();
     QString id = o["id"].toString();
     QString name = o["name"].toString();
     m_fanProfileCombo->addItem( name, id );
-    m_builtinFanProfiles.append( id );
-  }
-
-  for ( const auto &v : m_profileManager->customFanProfilesData() )
-  {
-    QJsonObject o = v.toObject();
-    QString id = o["id"].toString();
-    QString name = o["name"].toString();
-    if ( !m_builtinFanProfiles.contains( id ) )
-      m_fanProfileCombo->addItem( name, id );
   }
 
   m_applyFanProfilesButton = new QPushButton( "Apply" );
@@ -337,24 +327,13 @@ void FanControlTab::reloadFanProfiles()
 {
   QString prevId = m_fanProfileCombo ? m_fanProfileCombo->currentData().toString() : QString();
   if ( m_fanProfileCombo ) m_fanProfileCombo->clear();
-  m_builtinFanProfiles.clear();
 
-  for ( const auto &v : m_profileManager->builtinFanProfilesData() )
+  for ( const auto &v : m_profileManager->fanProfilesData() )
   {
     QJsonObject o = v.toObject();
     QString id = o["id"].toString();
     QString name = o["name"].toString();
     m_fanProfileCombo->addItem( name, id );
-    m_builtinFanProfiles.append( id );
-  }
-
-  for ( const auto &v : m_profileManager->customFanProfilesData() )
-  {
-    QJsonObject o = v.toObject();
-    QString id = o["id"].toString();
-    QString name = o["name"].toString();
-    if ( !m_builtinFanProfiles.contains( id ) )
-      m_fanProfileCombo->addItem( name, id );
   }
 
   // Restore selection by ID
@@ -374,7 +353,8 @@ void FanControlTab::reloadFanProfiles()
 void FanControlTab::updateButtonStates( bool uccdConnected )
 {
   const QString id = m_fanProfileCombo ? m_fanProfileCombo->currentData().toString() : QString();
-  const bool isCustom = ( !id.isEmpty() && !m_builtinFanProfiles.contains( id ) );
+  bool isCustom = !id.isEmpty()
+                 && m_profileManager->isProfileEditable( id, m_profileManager->fanProfilesData() );
 
   if ( m_applyFanProfilesButton )   m_applyFanProfilesButton->setEnabled( uccdConnected );
   if ( m_saveFanProfilesButton )    m_saveFanProfilesButton->setEnabled( isCustom );
@@ -411,7 +391,7 @@ void FanControlTab::onFanProfileComboRenamed()
   }
 
   // Cannot rename built-in profiles
-  if ( m_builtinFanProfiles.contains( fanProfileId ) ) {
+  if ( !m_profileManager->isProfileEditable( fanProfileId, m_profileManager->fanProfilesData() ) ) {
     m_fanProfileCombo->setEditText( oldName );
     return;
   }

@@ -16,6 +16,7 @@
 #include "UccDBusService.hpp"
 #include "CommonTypes.hpp"
 #include "NvmlWrapper.hpp"
+#include "profiles/BuiltinSubProfiles.hpp"
 #include "profiles/DefaultProfiles.hpp"
 #include "profiles/FanProfile.hpp"
 #include "PolkitAuthority.hpp"
@@ -30,20 +31,18 @@
 #include <climits>
 #include <fstream>
 #include <filesystem>
+#include <sys/stat.h>
 #include <syslog.h>
 #include <libudev.h>
 #include <algorithm>
+#include <cctype>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QCoreApplication>
 #include <QEventLoop>
-
-namespace
-{
-constexpr const char *BUILTIN_GPU_PROFILE_ID = "gpu-default-builtin";
-constexpr const char *BUILTIN_GPU_PROFILE_NAME = "Default [Built-in]";
-}
+#include <QTimer>
+#include <nlohmann/json.hpp>
 
 static std::string jsonEscape( const std::string &value );
 
@@ -150,12 +149,14 @@ static int32_t optionalValueOr( const std::optional< int32_t > &value, int32_t f
 static std::string profileToJSON( const UccProfile &profile,
                                   int32_t defaultOnlineCores,
                                   int32_t defaultScalingMin,
-                                  int32_t defaultScalingMax )
+                                  int32_t defaultScalingMax,
+                                  bool editable = false )
 {
   std::ostringstream oss;
   oss << "{"
       << "\"id\":\"" << jsonEscape( profile.id ) << "\" ,"
       << "\"name\":\"" << jsonEscape( profile.name ) << "\" ,"
+      << "\"editable\":" << ( editable ? "true" : "false" ) << ","
       << "\"description\":\"" << jsonEscape( profile.description ) << "\" ,"
       << "\"display\":{"
       << "\"brightness\":" << profile.display.brightness << ","
@@ -183,19 +184,8 @@ static std::string profileToJSON( const UccProfile &profile,
       << "\"fanProfile\":\"" << jsonEscape( profile.fan.fanProfile ) << "\" ,"
       << "\"sameSpeed\":" << ( profile.fan.sameSpeed ? "true" : "false" ) << ","
       << "\"autoControlWC\":" << ( profile.fan.autoControlWC ? "true" : "false" ) << ","
-      << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" );
-
-  // Embed fan tables if present
-  if ( !profile.fan.tableCPU.empty() )
-    oss << ",\"tableCPU\":" << ProfileManager::fanTableToJSON( profile.fan.tableCPU );
-  if ( !profile.fan.tableGPU.empty() )
-    oss << ",\"tableGPU\":" << ProfileManager::fanTableToJSON( profile.fan.tableGPU );
-  if ( !profile.fan.tablePump.empty() )
-    oss << ",\"tablePump\":" << ProfileManager::fanTableToJSON( profile.fan.tablePump );
-  if ( !profile.fan.tableWaterCoolerFan.empty() )
-    oss << ",\"tableWaterCoolerFan\":" << ProfileManager::fanTableToJSON( profile.fan.tableWaterCoolerFan );
-
-  oss << "},"
+      << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" )
+      << "},"
       << "\"odmProfile\":{"
       << "\"name\":\"" << jsonEscape( profile.odmProfile.name.value_or( "" ) ) << "\""
       << "},"
@@ -211,31 +201,15 @@ static std::string profileToJSON( const UccProfile &profile,
 
   oss << "]}";
 
-  // GPU OC profile reference and embedded data
+  // GPU OC profile — ID reference only
   if ( !profile.gpuProfileId.empty() )
   {
     oss << ",\"gpuProfileId\":\"" << jsonEscape( profile.gpuProfileId ) << "\"";
   }
-  if ( !profile.gpuOCProfileData.empty() && profile.gpuOCProfileData != "{}" )
-  {
-    oss << ",\"gpuOCProfileData\":" << profile.gpuOCProfileData;
-  }
 
-  // Keyboard section
-  if ( !profile.keyboard.keyboardProfileData.empty() && profile.keyboard.keyboardProfileData != "{}" )
+  // Keyboard — ID reference only
   {
-    oss << ",\"keyboard\":" << profile.keyboard.keyboardProfileData;
-  }
-  else
-  {
-    oss << ",\"keyboard\":{}";
-  }
-
-  // Prefer UUID over display name — tray/GUI use the ID for combo-box indexing
-  {
-    const std::string &kbRef = !profile.keyboard.keyboardProfileId.empty()
-                              ? profile.keyboard.keyboardProfileId
-                              : profile.keyboard.keyboardProfileName;
+    const std::string &kbRef = profile.keyboard.keyboardProfileId;
     if ( !kbRef.empty() )
       oss << ",\"selectedKeyboardProfile\":\"" << jsonEscape( kbRef ) << "\"";
   }
@@ -287,6 +261,17 @@ static std::string buildSettingsJSON( const std::string &keyboardBacklightStates
     oss << "\"" << jsonEscape( key ) << "\":\"" << jsonEscape( value ) << "\"";
   }
 
+  oss << "},\"appGpuProfileMap\":{";
+
+  first = true;
+  for ( const auto &[appKey, profileId] : settings.appGpuProfileMap )
+  {
+    if ( !first )
+      oss << ",";
+    first = false;
+    oss << "\"" << jsonEscape( appKey ) << "\":\"" << jsonEscape( profileId ) << "\"";
+  }
+
   oss << "},"
       << "\"shutdownTime\":" << ( settings.shutdownTime.has_value() ? "\"" + jsonEscape( *settings.shutdownTime ) + "\"" : "null" ) << ","
       << "\"cpuSettingsEnabled\":" << ( settings.cpuSettingsEnabled ? "true" : "false" ) << ","
@@ -314,6 +299,174 @@ UccDBusInterfaceAdaptor::UccDBusInterfaceAdaptor( QObject *parent,
   // via Q_CLASSINFO and public slots declarations
   setAutoRelaySignals( true );
   syslog( LOG_INFO, "UccDBusInterfaceAdaptor: registered interface %s", UccDBusInterfaceAdaptor::INTERFACE_NAME );
+
+  // Create a 1-second timer to poll the FPS socket and push MetricId::Fps
+  // to the daemon's metric history store when sensor collection is active.
+  m_fpsPollTimer = new QTimer( this );
+  m_fpsPollTimer->setInterval( 1000 );
+  m_fpsPollTimer->setSingleShot( false );
+  QObject::connect( m_fpsPollTimer, &QTimer::timeout, this, [this]()
+  {
+    // Auto-recovery: if the socket file was removed while collection is
+    // active (e.g. /tmp cleanup), recreate it transparently.
+    if ( m_fpsServer.isRunning() )
+    {
+      struct stat st;
+      if ( ::stat( m_fpsServer.socketPath().c_str(), &st ) != 0 )
+      {
+        syslog( LOG_WARNING, "FpsServer: socket file disappeared — recreating" );
+        m_fpsServer.rebind();
+      }
+    }
+
+    m_fpsServer.poll();
+    const std::string appName = m_fpsServer.clientAppName();
+    const pid_t clientPid = m_fpsServer.clientPid();
+
+    // Auto-apply app-bound GPU profile on FPS client connect/switch.
+    // Fallback behavior:
+    // - If no app mapping exists, use currently active profile's GPU profile.
+    // - If no 3D app is active, restore currently active profile's GPU profile.
+    if ( m_service )
+    {
+      const bool autoUvRunning = m_service->m_autoUndervoltWorker
+                              && m_service->m_autoUndervoltWorker->isRunning();
+
+      if ( !autoUvRunning && !appName.empty() )
+      {
+        auto it = m_service->m_settings.appGpuProfileMap.find( appName );
+        if ( it != m_service->m_settings.appGpuProfileMap.end() )
+        {
+          const std::string &mappedGpuProfileId = it->second;
+          const bool needsApply = ( appName != m_lastAutoAppliedApp )
+                               || ( clientPid != m_lastAutoAppliedPid )
+                               || ( mappedGpuProfileId != m_lastAutoAppliedGpuProfileId );
+
+          if ( needsApply )
+          {
+            const std::string gpuJson = m_service->resolveGpuProfileJSON( mappedGpuProfileId );
+            if ( !gpuJson.empty() && gpuJson != "{}" )
+            {
+              UccProfile profile;
+              profile.name = "AutoUV runtime " + appName;
+              profile.gpuProfileId = mappedGpuProfileId;
+              m_service->applyGpuOCFromProfile( profile );
+
+              if ( m_service->m_adaptor )
+              {
+                m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
+                                                          m_service->m_activeProfile.keyboard.keyboardProfileId,
+                                                          m_service->m_activeProfile.fan.fanProfile,
+                                                          mappedGpuProfileId );
+              }
+
+              m_lastAutoAppliedApp = appName;
+              m_lastAutoAppliedPid = clientPid;
+              m_lastAutoAppliedGpuProfileId = mappedGpuProfileId;
+
+              syslog( LOG_INFO, "[AutoUV] Auto-applied GPU profile '%s' for app '%s' (pid=%d)",
+                      mappedGpuProfileId.c_str(), appName.c_str(), static_cast< int >( clientPid ) );
+            }
+            else
+            {
+              syslog( LOG_WARNING, "[AutoUV] Mapped GPU profile '%s' for app '%s' not found",
+                      mappedGpuProfileId.c_str(), appName.c_str() );
+            }
+          }
+        }
+        else
+        {
+          const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
+          const bool needsFallback = !fallbackGpuProfileId.empty()
+                                  && ( fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId
+                                    || appName != m_lastAutoAppliedApp
+                                    || clientPid != m_lastAutoAppliedPid );
+          if ( needsFallback )
+          {
+            m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
+
+            if ( m_service->m_adaptor )
+            {
+              m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
+                                                        m_service->m_activeProfile.keyboard.keyboardProfileId,
+                                                        m_service->m_activeProfile.fan.fanProfile,
+                                                        fallbackGpuProfileId );
+            }
+
+            m_lastAutoAppliedApp = appName;
+            m_lastAutoAppliedPid = clientPid;
+            m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
+            syslog( LOG_INFO, "[AutoUV] No app GPU mapping for '%s'; restored active profile GPU profile '%s'",
+                    appName.c_str(), fallbackGpuProfileId.c_str() );
+          }
+        }
+      }
+      else if ( !autoUvRunning && appName.empty() )
+      {
+        const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
+        if ( !fallbackGpuProfileId.empty() && fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId )
+        {
+          m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
+
+          if ( m_service->m_adaptor )
+          {
+            m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
+                                                      m_service->m_activeProfile.keyboard.keyboardProfileId,
+                                                      m_service->m_activeProfile.fan.fanProfile,
+                                                      fallbackGpuProfileId );
+          }
+
+          syslog( LOG_INFO, "[AutoUV] No active 3D app; restored active profile GPU profile '%s'",
+                  fallbackGpuProfileId.c_str() );
+        }
+
+        // Clear app/pid so the next 3D app launch always re-evaluates mapping.
+        m_lastAutoAppliedApp.clear();
+        m_lastAutoAppliedPid = 0;
+        m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
+      }
+    }
+
+    const double fps = m_fpsServer.currentFps();
+    if ( fps < 0.0 || !m_service )
+      return;
+
+    if ( !appName.empty() )
+      m_seenFpsApps.insert( appName );
+
+    // FPS ingestion policy:
+    // 1) NVIDIA must be present.
+    // 2) Optional P0 requirement.
+    // 3) Optional manual source-app filter.
+    bool allow = m_service->m_nvml && m_service->m_nvml->isAvailable()
+                 && m_service->m_nvml->deviceCount() > 0;
+
+    if ( allow && m_requireFpsP0 )
+    {
+      auto pstate = m_service->m_nvml->getCurrentPstate( 0 );
+      allow = pstate.has_value() && *pstate == 0U;
+    }
+
+    if ( allow && !m_selectedFpsApp.empty() && m_selectedFpsApp != "auto" )
+    {
+      auto toLower = []( const std::string &s ) {
+        std::string out = s;
+        std::transform( out.begin(), out.end(), out.begin(),
+                        []( unsigned char c ) { return static_cast< char >( std::tolower( c ) ); } );
+        return out;
+      };
+      allow = !appName.empty() && toLower( appName ) == toLower( m_selectedFpsApp );
+    }
+
+    if ( allow )
+      m_service->m_metricsStore.push( MetricId::Fps, fps );
+  } );
+
+  // FPS collection must remain available unconditionally for AutoOC.
+  if ( !m_fpsServer.start() )
+    syslog( LOG_WARNING, "FpsServer: failed to start always-on socket server" );
+  if ( m_fpsPollTimer )
+    m_fpsPollTimer->start();
 }
 
 bool UccDBusInterfaceAdaptor::checkAuth( const char *actionId ) noexcept
@@ -547,6 +700,33 @@ QString UccDBusInterfaceAdaptor::GetActiveProfileJSON()
   return QString::fromStdString( m_data.activeProfileJSON );
 }
 
+QString UccDBusInterfaceAdaptor::GetAppliedProfilesJSON()
+{
+  QJsonObject root;
+
+  if ( !m_service )
+    return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+
+  // Applied profile view for live UI consumers (tray).
+  // Keep GetActiveProfileJSON() as persisted profile source of truth.
+  root[ "profileId" ] = QString::fromStdString( m_service->m_activeProfile.id );
+  root[ "profileName" ] = QString::fromStdString( m_service->m_activeProfile.name );
+  root[ "fanProfileId" ] = QString::fromStdString( m_service->m_activeProfile.fan.fanProfile );
+  root[ "wcAutoControl" ] = m_service->m_activeProfile.fan.autoControlWC;
+  root[ "keyboardProfileId" ] = QString::fromStdString( m_service->m_activeProfile.keyboard.keyboardProfileId );
+  root[ "savedGpuProfileId" ] = QString::fromStdString( m_service->m_activeProfile.gpuProfileId );
+
+  std::string appliedGpuProfileId = m_service->m_activeProfile.gpuProfileId;
+  if ( !m_lastAutoAppliedGpuProfileId.empty() )
+    appliedGpuProfileId = m_lastAutoAppliedGpuProfileId;
+
+  root[ "appliedGpuProfileId" ] = QString::fromStdString( appliedGpuProfileId );
+  root[ "appliedByApp" ] = QString::fromStdString( m_lastAutoAppliedApp );
+  root[ "appliedByPid" ] = static_cast< qlonglong >( m_lastAutoAppliedPid );
+
+  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+}
+
 bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
@@ -766,20 +946,21 @@ bool UccDBusInterfaceAdaptor::ApplyProfile( const QString &profileJSON )
 
 QString UccDBusInterfaceAdaptor::GetProfilesJSON()
 {
+  // Returns ALL profiles (built-in + custom) with "editable" flag
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   return QString::fromStdString( m_data.profilesJSON );
 }
 
 QString UccDBusInterfaceAdaptor::GetCustomProfilesJSON()
 {
+  // Backward-compat: returns only editable (custom) profiles
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  //std::cout << "[DBus] GetCustomProfilesJSON called, returning "
-  //          << m_data.customProfilesJSON.length() << " bytes" << std::endl;
   return QString::fromStdString( m_data.customProfilesJSON );
 }
 
 QString UccDBusInterfaceAdaptor::GetDefaultProfilesJSON()
 {
+  // Backward-compat: returns only built-in profiles
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   return QString::fromStdString( m_data.defaultProfilesJSON );
 }
@@ -800,52 +981,30 @@ QString UccDBusInterfaceAdaptor::GetDefaultValuesProfileJSON()
   return QString::fromStdString( m_data.defaultValuesProfileJSON );
 }
 
+// ---------------------------------------------------------------------------
+// Unified profile save/delete (new API)
+// ---------------------------------------------------------------------------
+
+bool UccDBusInterfaceAdaptor::SaveProfile( const QString &profileJSON )
+{
+  // Unified save: handles both new and existing custom profiles.
+  // Forwards to the existing SaveCustomProfile logic.
+  return SaveCustomProfile( profileJSON );
+}
+
+bool UccDBusInterfaceAdaptor::DeleteProfile( const QString &profileId )
+{
+  // Unified delete: forwards to existing logic.
+  return DeleteCustomProfile( profileId );
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compatible aliases (deprecated — forward to unified methods)
+// ---------------------------------------------------------------------------
+
 bool UccDBusInterfaceAdaptor::AddCustomProfile( const QString &profileJSON )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( !m_service )
-  {
-    std::cerr << "[Profile] AddCustomProfile called but service not available" << std::endl;
-    return false;
-  }
-
-  try
-  {
-    // Parse the profile JSON and add it
-    auto profile = ProfileManager::parseProfileJSON( profileJSON.toStdString() );
-
-    // Generate new ID if empty
-    if ( profile.id.empty() )
-    {
-      profile.id = generateProfileId();
-    }
-
-    std::cout << "[Profile] Adding custom profile '" << profile.name
-              << "' (id: " << profile.id << ")" << std::endl;
-
-    bool result = m_service->addCustomProfile( profile );
-
-    if ( result )
-    {
-      std::cout << "[Profile] Successfully added profile '" << profile.name << "'" << std::endl;
-    }
-    else
-    {
-      std::cerr << "[Profile] Failed to add profile '" << profile.name << "'" << std::endl;
-    }
-
-    return result;
-  }
-  catch ( const std::exception &e )
-  {
-    std::cerr << "[Profile] Exception in AddCustomProfile: " << e.what() << std::endl;
-    return false;
-  }
-  catch ( ... )
-  {
-    std::cerr << "[Profile] Unknown exception in AddCustomProfile" << std::endl;
-    return false;
-  }
+  return SaveProfile( profileJSON );
 }
 
 bool UccDBusInterfaceAdaptor::DeleteCustomProfile( const QString &profileId )
@@ -876,58 +1035,7 @@ bool UccDBusInterfaceAdaptor::DeleteCustomProfile( const QString &profileId )
 
 bool UccDBusInterfaceAdaptor::UpdateCustomProfile( const QString &profileJSON )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( !m_service )
-  {
-    std::cerr << "[Profile] UpdateCustomProfile called but service not available" << std::endl;
-    return false;
-  }
-
-  try
-  {
-    const std::string jsonStr = profileJSON.toStdString();
-    std::cout << "[Profile] Received profile JSON (first 200 chars): "
-              << jsonStr.substr(0, 200) << "..." << std::endl;
-
-    // Parse the profile JSON and update it
-    auto profile = ProfileManager::parseProfileJSON( jsonStr );
-
-    if ( profile.id.empty() )
-    {
-      std::cerr << "[Profile] UpdateCustomProfile called with empty profile ID" << std::endl;
-      return false; // Must have an ID to update
-    }
-
-    std::cout << "[Profile] Updating custom profile '" << profile.name
-              << "' (id: " << profile.id << ")" << std::endl;
-    std::cout << "[Profile]   Fan control: " << (profile.fan.useControl ? "enabled" : "disabled") << std::endl;
-    std::cout << "[Profile]   Fan profile: " << profile.fan.fanProfile << std::endl;
-    std::cout << "[Profile]   Auto control WC: " << (profile.fan.autoControlWC ? "enabled" : "disabled") << std::endl;
-    std::cout << "[Profile]   Fan profile name: " << profile.fan.fanProfile << std::endl;
-
-    bool result = m_service->updateCustomProfile( profile );
-
-    if ( result )
-    {
-      std::cout << "[Profile] Successfully updated profile '" << profile.name << "'" << std::endl;
-    }
-    else
-    {
-      std::cerr << "[Profile] Failed to update profile '" << profile.name << "' (not found or error)" << std::endl;
-    }
-
-    return result;
-  }
-  catch ( const std::exception &e )
-  {
-    std::cerr << "[Profile] Exception in UpdateCustomProfile: " << e.what() << std::endl;
-    return false;
-  }
-  catch ( ... )
-  {
-    std::cerr << "[Profile] Unknown exception in UpdateCustomProfile" << std::endl;
-    return false;
-  }
+  return SaveProfile( profileJSON );
 }
 
 bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
@@ -1139,58 +1247,403 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
   }
 }
 
-QString UccDBusInterfaceAdaptor::GetFanProfile( const QString &name )
-{
-  return QString::fromStdString( getFanProfileJson( name.toStdString() ) );
-}
+// ---------------------------------------------------------------------------
+// Unified fan profile methods (new API)
+// ---------------------------------------------------------------------------
 
-QString UccDBusInterfaceAdaptor::GetFanProfileNames()
+QString UccDBusInterfaceAdaptor::GetFanProfilesJSON()
 {
-  // Return JSON array of objects with id and name for each built-in fan profile
+  // Returns all fan profiles: built-in (editable=false) + custom (editable=true)
   std::string json = "[";
+  size_t idx = 0;
+
   for ( size_t i = 0; i < defaultFanProfiles.size(); ++i )
   {
-    if ( i > 0 ) json += ",";
+    if ( idx > 0 ) json += ",";
     json += "{\"id\":\"" + defaultFanProfiles[i].id + "\","
-            "\"name\":\"" + defaultFanProfiles[i].name + "\"}";
+            "\"name\":\"" + defaultFanProfiles[i].name + "\","
+            "\"editable\":false}";
+    ++idx;
   }
+
+  if ( m_service )
+  {
+    for ( const auto &fp : m_service->m_customFanProfiles )
+    {
+      if ( idx > 0 ) json += ",";
+      json += "{\"id\":\"" + fp.id + "\","
+              "\"name\":\"" + fp.name + "\","
+              "\"editable\":true}";
+      ++idx;
+    }
+  }
+
   json += "]";
   return QString::fromStdString( json );
 }
 
-QString UccDBusInterfaceAdaptor::GetGpuProfile( const QString &id )
+QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
 {
-  if ( !m_service )
-    return QStringLiteral( "{}" );
-
   const std::string requestedId = id.toStdString();
-  auto it = std::find_if( m_service->m_builtinGpuProfiles.begin(),
-                          m_service->m_builtinGpuProfiles.end(),
-                          [&requestedId]( const UccDBusService::BuiltinGpuProfile &profile ) {
-                            return profile.id == requestedId;
-                          } );
 
-  if ( it == m_service->m_builtinGpuProfiles.end() )
-    return QStringLiteral( "{}" );
+  // Check custom fan profiles first (daemon-side)
+  if ( m_service )
+  {
+    for ( const auto &fp : m_service->m_customFanProfiles )
+    {
+      if ( fp.id == requestedId )
+        return QString::fromStdString( fp.json );
+    }
+  }
 
-  return QString::fromStdString( it->json );
+  // Fall back to built-in fan profiles
+  return QString::fromStdString( getFanProfileJson( requestedId ) );
 }
 
-QString UccDBusInterfaceAdaptor::GetGpuProfileNames()
+bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &name, const QString &json )
 {
-  if ( !m_service )
-    return QStringLiteral( "[]" );
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service ) return false;
+
+  const std::string sid = id.toStdString();
+  const std::string sname = name.toStdString();
+  const std::string sjson = json.toStdString();
+
+  // Check this doesn't collide with a built-in fan profile
+  for ( const auto &fp : defaultFanProfiles )
+  {
+    if ( fp.id == sid )
+    {
+      std::cerr << "[FanProfile] Cannot overwrite built-in fan profile '" << sid << "'" << std::endl;
+      return false;
+    }
+  }
+
+  // Update or add
+  bool found = false;
+  for ( auto &fp : m_service->m_customFanProfiles )
+  {
+    if ( fp.id == sid )
+    {
+      fp.name = sname;
+      fp.json = sjson;
+      found = true;
+      break;
+    }
+  }
+  if ( !found )
+  {
+    m_service->m_customFanProfiles.push_back( { sid, sname, sjson } );
+  }
+
+  // Persist to settings
+  // Wrap the raw fan JSON inside an object with "name" so loadSubProfiles can extract it
+  nlohmann::json wrapper;
+  try { wrapper = nlohmann::json::parse( sjson ); } catch ( ... ) { wrapper = nlohmann::json::object(); }
+  wrapper["name"] = sname;
+  m_service->m_settings.fanProfiles[sid] = wrapper.dump();
+
+  if ( m_service->m_settingsManager.writeSettings( m_service->m_settings ) )
+    std::cout << "[FanProfile] Saved fan profile '" << sname << "' (ID: " << sid << ")" << std::endl;
+  else
+    std::cerr << "[FanProfile] Failed to persist fan profile '" << sname << "'" << std::endl;
+
+  return true;
+}
+
+bool UccDBusInterfaceAdaptor::DeleteFanProfile( const QString &id )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service ) return false;
+
+  const std::string sid = id.toStdString();
+
+  // Cannot delete built-in
+  for ( const auto &fp : defaultFanProfiles )
+  {
+    if ( fp.id == sid ) return false;
+  }
+
+  auto &vec = m_service->m_customFanProfiles;
+  auto it = std::remove_if( vec.begin(), vec.end(),
+                            [&sid]( const UccDBusService::SubProfile &p ) { return p.id == sid; } );
+  if ( it == vec.end() ) return false;
+
+  vec.erase( it, vec.end() );
+  m_service->m_settings.fanProfiles.erase( sid );
+  (void) m_service->m_settingsManager.writeSettings( m_service->m_settings );
+  std::cout << "[FanProfile] Deleted fan profile '" << sid << "'" << std::endl;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Unified GPU profile methods (new API)
+// ---------------------------------------------------------------------------
+
+QString UccDBusInterfaceAdaptor::GetGpuProfilesJSON()
+{
+  if ( !m_service ) return QStringLiteral( "[]" );
 
   QJsonArray arr;
+
+  // Built-in GPU profiles (editable=false)
   for ( const auto &profile : m_service->m_builtinGpuProfiles )
   {
     QJsonObject obj;
     obj[ "id" ] = QString::fromStdString( profile.id );
     obj[ "name" ] = QString::fromStdString( profile.name );
+    obj[ "editable" ] = false;
+    arr.append( obj );
+  }
+
+  // Custom GPU profiles (editable=true)
+  for ( const auto &profile : m_service->m_customGpuProfiles )
+  {
+    QJsonObject obj;
+    obj[ "id" ] = QString::fromStdString( profile.id );
+    obj[ "name" ] = QString::fromStdString( profile.name );
+    obj[ "editable" ] = true;
     arr.append( obj );
   }
 
   return QString::fromUtf8( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+}
+
+QString UccDBusInterfaceAdaptor::GetGpuProfileJSON( const QString &id )
+{
+  if ( !m_service ) return QStringLiteral( "{}" );
+
+  const std::string requestedId = id.toStdString();
+
+  // Check custom GPU profiles first
+  for ( const auto &profile : m_service->m_customGpuProfiles )
+  {
+    if ( profile.id == requestedId )
+      return QString::fromStdString( profile.json );
+  }
+
+  // Fall back to built-in GPU profiles
+  auto it = std::find_if( m_service->m_builtinGpuProfiles.begin(),
+                          m_service->m_builtinGpuProfiles.end(),
+                          [&requestedId]( const UccDBusService::SubProfile &profile ) {
+                            return profile.id == requestedId;
+                          } );
+  if ( it != m_service->m_builtinGpuProfiles.end() )
+    return QString::fromStdString( it->json );
+
+  return QStringLiteral( "{}" );
+}
+
+bool UccDBusInterfaceAdaptor::SaveGpuProfile( const QString &id, const QString &name, const QString &json )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service ) return false;
+
+  const std::string sid = id.toStdString();
+  const std::string sname = name.toStdString();
+  const std::string sjson = json.toStdString();
+
+  // Cannot overwrite built-in
+  for ( const auto &gp : m_service->m_builtinGpuProfiles )
+  {
+    if ( gp.id == sid )
+    {
+      std::cerr << "[GpuProfile] Cannot overwrite built-in GPU profile '" << sid << "'" << std::endl;
+      return false;
+    }
+  }
+
+  bool found = false;
+  for ( auto &gp : m_service->m_customGpuProfiles )
+  {
+    if ( gp.id == sid )
+    {
+      gp.name = sname;
+      gp.json = sjson;
+      found = true;
+      break;
+    }
+  }
+  if ( !found )
+    m_service->m_customGpuProfiles.push_back( { sid, sname, sjson } );
+
+  nlohmann::json wrapper;
+  try { wrapper = nlohmann::json::parse( sjson ); } catch ( ... ) { wrapper = nlohmann::json::object(); }
+  wrapper["name"] = sname;
+  m_service->m_settings.gpuProfiles[sid] = wrapper.dump();
+  (void) m_service->m_settingsManager.writeSettings( m_service->m_settings );
+  std::cout << "[GpuProfile] Saved GPU profile '" << sname << "' (ID: " << sid << ")" << std::endl;
+  return true;
+}
+
+bool UccDBusInterfaceAdaptor::DeleteGpuProfile( const QString &id )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service ) return false;
+
+  const std::string sid = id.toStdString();
+
+  for ( const auto &gp : m_service->m_builtinGpuProfiles )
+  {
+    if ( gp.id == sid ) return false;
+  }
+
+  auto &vec = m_service->m_customGpuProfiles;
+  auto it = std::remove_if( vec.begin(), vec.end(),
+                            [&sid]( const UccDBusService::SubProfile &p ) { return p.id == sid; } );
+  if ( it == vec.end() ) return false;
+
+  vec.erase( it, vec.end() );
+  m_service->m_settings.gpuProfiles.erase( sid );
+  (void) m_service->m_settingsManager.writeSettings( m_service->m_settings );
+  std::cout << "[GpuProfile] Deleted GPU profile '" << sid << "'" << std::endl;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Unified keyboard profile methods (new API)
+// ---------------------------------------------------------------------------
+
+QString UccDBusInterfaceAdaptor::GetKeyboardProfilesJSON()
+{
+  if ( !m_service ) return QStringLiteral( "[]" );
+
+  QJsonArray arr;
+
+  // Built-in keyboard profiles (editable=false)
+  for ( const auto &profile : m_service->m_builtinKeyboardProfiles )
+  {
+    QJsonObject obj;
+    obj[ "id" ] = QString::fromStdString( profile.id );
+    obj[ "name" ] = QString::fromStdString( profile.name );
+    obj[ "editable" ] = false;
+    arr.append( obj );
+  }
+
+  // Custom keyboard profiles (editable=true)
+  for ( const auto &profile : m_service->m_customKeyboardProfiles )
+  {
+    QJsonObject obj;
+    obj[ "id" ] = QString::fromStdString( profile.id );
+    obj[ "name" ] = QString::fromStdString( profile.name );
+    obj[ "editable" ] = true;
+    arr.append( obj );
+  }
+  return QString::fromUtf8( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+}
+
+QString UccDBusInterfaceAdaptor::GetKeyboardProfileJSON( const QString &id )
+{
+  if ( !m_service ) return QStringLiteral( "{}" );
+
+  const std::string requestedId = id.toStdString();
+
+  // Check custom keyboard profiles first
+  for ( const auto &profile : m_service->m_customKeyboardProfiles )
+  {
+    if ( profile.id == requestedId )
+      return QString::fromStdString( profile.json );
+  }
+
+  // Fall back to built-in keyboard profiles
+  for ( const auto &profile : m_service->m_builtinKeyboardProfiles )
+  {
+    if ( profile.id == requestedId )
+      return QString::fromStdString( profile.json );
+  }
+
+  return QStringLiteral( "{}" );
+}
+
+bool UccDBusInterfaceAdaptor::SaveKeyboardProfile( const QString &id, const QString &name, const QString &json )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service ) return false;
+
+  const std::string sid = id.toStdString();
+  const std::string sname = name.toStdString();
+  const std::string sjson = json.toStdString();
+
+  // Cannot overwrite built-in
+  for ( const auto &kp : m_service->m_builtinKeyboardProfiles )
+  {
+    if ( kp.id == sid )
+    {
+      std::cerr << "[KbProfile] Cannot overwrite built-in keyboard profile '" << sid << "'" << std::endl;
+      return false;
+    }
+  }
+
+  bool found = false;
+  for ( auto &kp : m_service->m_customKeyboardProfiles )
+  {
+    if ( kp.id == sid )
+    {
+      kp.name = sname;
+      kp.json = sjson;
+      found = true;
+      break;
+    }
+  }
+  if ( !found )
+    m_service->m_customKeyboardProfiles.push_back( { sid, sname, sjson } );
+
+  nlohmann::json wrapper;
+  try { wrapper = nlohmann::json::parse( sjson ); } catch ( ... ) { wrapper = nlohmann::json::object(); }
+  wrapper["name"] = sname;
+  m_service->m_settings.keyboardProfiles[sid] = wrapper.dump();
+  (void) m_service->m_settingsManager.writeSettings( m_service->m_settings );
+  std::cout << "[KbProfile] Saved keyboard profile '" << sname << "' (ID: " << sid << ")" << std::endl;
+  return true;
+}
+
+bool UccDBusInterfaceAdaptor::DeleteKeyboardProfile( const QString &id )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service ) return false;
+
+  const std::string sid = id.toStdString();
+
+  // Cannot delete built-in
+  for ( const auto &kp : m_service->m_builtinKeyboardProfiles )
+  {
+    if ( kp.id == sid ) return false;
+  }
+
+  auto &vec = m_service->m_customKeyboardProfiles;
+  auto it = std::remove_if( vec.begin(), vec.end(),
+                            [&sid]( const UccDBusService::SubProfile &p ) { return p.id == sid; } );
+  if ( it == vec.end() ) return false;
+
+  vec.erase( it, vec.end() );
+  m_service->m_settings.keyboardProfiles.erase( sid );
+  (void) m_service->m_settingsManager.writeSettings( m_service->m_settings );
+  std::cout << "[KbProfile] Deleted keyboard profile '" << sid << "'" << std::endl;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compatible fan/GPU aliases (deprecated)
+// ---------------------------------------------------------------------------
+
+QString UccDBusInterfaceAdaptor::GetFanProfile( const QString &name )
+{
+  return GetFanProfileJSON( name );
+}
+
+QString UccDBusInterfaceAdaptor::GetFanProfileNames()
+{
+  return GetFanProfilesJSON();
+}
+
+QString UccDBusInterfaceAdaptor::GetGpuProfile( const QString &id )
+{
+  return GetGpuProfileJSON( id );
+}
+
+QString UccDBusInterfaceAdaptor::GetGpuProfileNames()
+{
+  return GetGpuProfilesJSON();
 }
 
 bool UccDBusInterfaceAdaptor::SetFanProfile( const QString &name, const QString &json )
@@ -1377,8 +1830,35 @@ QStringList UccDBusInterfaceAdaptor::ODMProfilesAvailable()
 
 QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
 {
-  std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.odmPowerLimitsJSON );
+  if ( !m_service )
+    return QStringLiteral( "[]" );
+
+  int nrTDPs = 0;
+  if ( !m_service->m_io.getNumberTDPs( nrTDPs ) || nrTDPs <= 0 )
+    return QStringLiteral( "[]" );
+
+  std::ostringstream jsonStream;
+  jsonStream << "[";
+
+  for ( int i = 0; i < nrTDPs; ++i )
+  {
+    int current = 0, min = 0, max = 0;
+    m_service->m_io.getTDPMin( i, min );
+    m_service->m_io.getTDPMax( i, max );
+    m_service->m_io.getTDP( i, current );
+
+    if ( i > 0 )
+      jsonStream << ",";
+
+    jsonStream << "{"
+               << "\"current\":" << current << ","
+               << "\"min\":" << min << ","
+               << "\"max\":" << max
+               << "}";
+  }
+
+  jsonStream << "]";
+  return QString::fromStdString( jsonStream.str() );
 }
 
 // keyboard backlight methods
@@ -1603,6 +2083,8 @@ void UccDBusInterfaceAdaptor::SetSensorDataCollectionStatus( bool status )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return;
   m_data.sensorDataCollectionStatus = status;
+
+  // FPS collection stays always-on; this flag only controls sensor data policy.
 }
 
 bool UccDBusInterfaceAdaptor::GetSensorDataCollectionStatus()
@@ -1620,24 +2102,68 @@ void UccDBusInterfaceAdaptor::SetDGpuD0Metrics( bool status )
 
 int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLDefaultPowerLimit()
 {
+  if ( m_service && m_service->m_nvml && m_service->m_nvml->isAvailable() && m_service->m_nvml->deviceCount() > 0 )
+  {
+    if ( auto v = m_service->m_nvml->getPowerDefaultLimitW( 0 ) )
+    {
+      m_data.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+      return static_cast< int >( *v );
+    }
+  }
   return m_data.nvidiaPowerCTRLDefaultPowerLimit;
 }
 
 int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLMaxPowerLimit()
 {
+  if ( m_service && m_service->m_nvml && m_service->m_nvml->isAvailable() && m_service->m_nvml->deviceCount() > 0 )
+  {
+    if ( auto v = m_service->m_nvml->getPowerMaxLimitW( 0 ) )
+    {
+      m_data.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+      return static_cast< int >( *v );
+    }
+  }
   return m_data.nvidiaPowerCTRLMaxPowerLimit;
 }
 
 bool UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLAvailable()
 {
-  return m_data.nvidiaPowerCTRLAvailable;
+  static const std::string NVIDIA_CTGP_OFFSET =
+      "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
+
+  std::error_code ec;
+  const bool available = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
+                      && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+  m_data.nvidiaPowerCTRLAvailable = available;
+  return available;
+}
+
+int UccDBusInterfaceAdaptor::GetNVIDIAPowerOffset()
+{
+  if ( !m_service || !m_service->m_profileSettingsWorker )
+    return 0;
+  if ( !GetNVIDIAPowerCTRLAvailable() )
+    return 0;
+
+  // Read the actual current cTGP offset from sysfs so callers always see
+  // the hardware-accepted value, not a potentially stale profile value.
+  static const std::string NVIDIA_CTGP_OFFSET =
+      "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
+  std::ifstream file( NVIDIA_CTGP_OFFSET );
+  if ( file.is_open() )
+  {
+    int value = 0;
+    file >> value;
+    return value;
+  }
+  return 0;
 }
 
 bool UccDBusInterfaceAdaptor::SetNVIDIAPowerOffset( int offset )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_profileSettingsWorker ) return false;
-  if ( !m_data.nvidiaPowerCTRLAvailable ) return false;
+  if ( !GetNVIDIAPowerCTRLAvailable() ) return false;
 
   return m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( offset );
 }
@@ -1856,6 +2382,78 @@ int UccDBusInterfaceAdaptor::GetCpuFrequencyMHz()
   return m_data.cpuFrequencyMHz.load();
 }
 
+QString UccDBusInterfaceAdaptor::GetFpsSourcesJSON()
+{
+  QJsonObject root;
+  root[ "selectedApp" ] = QString::fromStdString( m_selectedFpsApp.empty() ? std::string( "auto" ) : m_selectedFpsApp );
+  root[ "requireP0" ] = m_requireFpsP0;
+  root[ "currentApp" ] = QString::fromStdString( m_fpsServer.clientAppName() );
+  root[ "currentPid" ] = static_cast< qlonglong >( m_fpsServer.clientPid() );
+
+  QJsonArray apps;
+  apps.append( QStringLiteral( "auto" ) );
+  for ( const auto &app : m_seenFpsApps )
+    apps.append( QString::fromStdString( app ) );
+  root[ "apps" ] = apps;
+
+  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+}
+
+QString UccDBusInterfaceAdaptor::GetAutoUvAutoApplyStatusJSON()
+{
+  QJsonObject root;
+  root[ "lastApp" ] = QString::fromStdString( m_lastAutoAppliedApp );
+  root[ "lastPid" ] = static_cast< qlonglong >( m_lastAutoAppliedPid );
+  root[ "lastGpuProfileId" ] = QString::fromStdString( m_lastAutoAppliedGpuProfileId );
+
+  const std::string currentApp = m_fpsServer.clientAppName();
+  root[ "currentApp" ] = QString::fromStdString( currentApp );
+  root[ "currentPid" ] = static_cast< qlonglong >( m_fpsServer.clientPid() );
+
+  std::string mapped;
+  if ( m_service && !currentApp.empty() )
+  {
+    auto it = m_service->m_settings.appGpuProfileMap.find( currentApp );
+    if ( it != m_service->m_settings.appGpuProfileMap.end() )
+      mapped = it->second;
+  }
+  root[ "mappedGpuProfileId" ] = QString::fromStdString( mapped );
+
+  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+}
+
+bool UccDBusInterfaceAdaptor::SetFpsSourceApp( const QString &appName )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  const QString trimmed = appName.trimmed();
+  if ( trimmed.isEmpty() || trimmed.compare( "auto", Qt::CaseInsensitive ) == 0 )
+  {
+    m_selectedFpsApp = "auto";
+    return true;
+  }
+
+  m_selectedFpsApp = trimmed.toStdString();
+  m_seenFpsApps.insert( m_selectedFpsApp );
+  return true;
+}
+
+QString UccDBusInterfaceAdaptor::GetFpsSourceApp()
+{
+  return QString::fromStdString( m_selectedFpsApp.empty() ? std::string( "auto" ) : m_selectedFpsApp );
+}
+
+bool UccDBusInterfaceAdaptor::SetFpsRequireP0( bool enabled )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  m_requireFpsP0 = enabled;
+  return true;
+}
+
+bool UccDBusInterfaceAdaptor::GetFpsRequireP0()
+{
+  return m_requireFpsP0;
+}
+
 // ---------------------------------------------------------------------------
 // NVIDIA GPU OC methods
 // ---------------------------------------------------------------------------
@@ -1965,8 +2563,6 @@ bool UccDBusInterfaceAdaptor::ApplyNvidiaGpuOCProfile( const QString &profileJSO
         m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( ctgpOffset );
       }
 
-      // Update active profile's embedded GPU OC data for readback
-      m_service->m_activeProfile.gpuOCProfileData = profileJsonStd;
       m_service->updateDBusActiveProfileData();
     }
   }
@@ -2000,8 +2596,115 @@ bool UccDBusInterfaceAdaptor::ApplyNvidiaGpuOCProfile( const QString &profileJSO
 bool UccDBusInterfaceAdaptor::ResetNvidiaGpuOCAll( int deviceIndex )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
-  return m_service->m_nvidiaOCWorker->resetAll( static_cast< unsigned int >( deviceIndex ) );
+  if ( !m_service || !m_service->m_nvidiaOCWorker || !m_service->m_profileSettingsWorker ) return false;
+
+  const bool ocResetOk = m_service->m_nvidiaOCWorker->resetAll( static_cast< unsigned int >( deviceIndex ) );
+  const bool ctgpResetOk = m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( 0 );
+  if ( !ctgpResetOk )
+    syslog( LOG_WARNING, "[GPU-RESET] Failed to reset NVIDIA cTGP offset to 0" );
+
+  return ocResetOk && ctgpResetOk;
+}
+
+// ── Auto-OC ─────────────────────────────────────────────────────────────────
+
+bool UccDBusInterfaceAdaptor::StartAutoOC( const QString &component, int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoOCWorker ) return false;
+
+  AutoOCComponent comp = AutoOCComponent::Both;
+  if ( component == "core" ) comp = AutoOCComponent::Core;
+  else if ( component == "vram" ) comp = AutoOCComponent::Vram;
+
+  AutoOCConfig config;
+  config.mode = AutoOCMode::MaxOffset;
+
+  return m_service->m_autoOCWorker->start( comp, static_cast< unsigned int >( deviceIndex ), config );
+}
+
+bool UccDBusInterfaceAdaptor::StopAutoOC()
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoOCWorker ) return false;
+  m_service->m_autoOCWorker->stop();
+  return true;
+}
+
+bool UccDBusInterfaceAdaptor::GetAutoOCRunning()
+{
+  if ( !m_service || !m_service->m_autoOCWorker ) return false;
+  return m_service->m_autoOCWorker->isRunning();
+}
+
+QString UccDBusInterfaceAdaptor::GetAutoOCProgress()
+{
+  // Progress is pushed via the AutoOCProgressChanged signal; this method
+  // returns the current running state as a simple JSON for polling clients.
+  if ( !m_service || !m_service->m_autoOCWorker )
+    return QStringLiteral( "{\"running\":false}" );
+
+  bool running = m_service->m_autoOCWorker->isRunning();
+  return running ? QStringLiteral( "{\"running\":true}" )
+                 : QStringLiteral( "{\"running\":false}" );
+}
+
+// ─── Auto-Undervolt D-Bus methods ───────────────────────────────────────────
+
+bool UccDBusInterfaceAdaptor::StartAutoUndervolt( int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
+
+  return m_service->m_autoUndervoltWorker->start(
+    static_cast< unsigned int >( deviceIndex ) );
+}
+
+bool UccDBusInterfaceAdaptor::StopAutoUndervolt()
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
+  m_service->m_autoUndervoltWorker->stop();
+  return true;
+}
+
+bool UccDBusInterfaceAdaptor::GetAutoUndervoltRunning()
+{
+  if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
+  return m_service->m_autoUndervoltWorker->isRunning();
+}
+
+QString UccDBusInterfaceAdaptor::GetAutoUndervoltProgress()
+{
+  if ( !m_service || !m_service->m_autoUndervoltWorker )
+    return QStringLiteral( "{\"running\":false}" );
+
+  bool running = m_service->m_autoUndervoltWorker->isRunning();
+  return running ? QStringLiteral( "{\"running\":true}" )
+                 : QStringLiteral( "{\"running\":false}" );
+}
+
+QString UccDBusInterfaceAdaptor::GetAutoUndervoltProfiles()
+{
+  if ( !m_service || !m_service->m_autoUndervoltWorker )
+    return QStringLiteral( "[]" );
+
+  QString json = QStringLiteral( "[" );
+  bool first = true;
+  for ( const auto &[name, p] : m_service->m_autoUndervoltWorker->profiles() )
+  {
+    if ( !first ) json += ',';
+    first = false;
+    json += QStringLiteral( "{\"app\":\"%1\",\"capMHz\":%2,\"baselineClk\":%3,"
+                            "\"baselineFps\":%4,\"achievedFps\":%5}" )
+      .arg( QString::fromStdString( name ) )
+      .arg( p.gpuFreqCapMHz )
+      .arg( p.baselineClkMHz )
+      .arg( p.baselineFps, 0, 'f', 1 )
+      .arg( p.achievedFps, 0, 'f', 1 );
+  }
+  json += ']';
+  return json;
 }
 
 // signal emitters
@@ -2032,6 +2735,13 @@ void UccDBusInterfaceAdaptor::emitProfileChanged( const std::string &profileId,
 
   QMetaObject::invokeMethod( this, [this, id, kbId, fpId, gpId]() {
     emit ProfileChanged( id, kbId, fpId, gpId );
+  }, Qt::QueuedConnection );
+}
+
+void UccDBusInterfaceAdaptor::emitProfilesListChanged()
+{
+  QMetaObject::invokeMethod( this, [this]() {
+    emit ProfilesListChanged();
   }, Qt::QueuedConnection );
 }
 
@@ -2179,10 +2889,6 @@ UccDBusService::UccDBusService()
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
       m_dbusData.odmProfilesAvailable = profiles;
     },
-    [this]( const std::string &json ) {
-      std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-      m_dbusData.odmPowerLimitsJSON = json;
-    },
     []( const std::string &msg ) { syslog( LOG_INFO, "%s", msg.c_str() ); },
     m_settings,
     m_dbusData.modeReapplyPending,
@@ -2293,9 +2999,9 @@ UccDBusService::UccDBusService()
           const int wcTemp = static_cast< int >( std::round( m_wcTempFiltered ) );
 
           const std::string &fpName = m_activeProfile.fan.fanProfile;
-          FanProfile fp = getDefaultFanProfile( fpName );
+          FanProfile fp = resolveFanProfile( fpName );
 
-          // Overlay water cooler fan table from profile or temporary curves
+          // Overlay water cooler fan table from temporary curves if active
           if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
           {
             const auto &wcTable = m_fanControlWorker->tempWaterCoolerFanTable();
@@ -2304,12 +3010,8 @@ UccDBusService::UccDBusService()
               fp.tableWaterCoolerFan = wcTable;
             }
           }
-          else if ( !m_activeProfile.fan.tableWaterCoolerFan.empty() )
-          {
-            fp.tableWaterCoolerFan = m_activeProfile.fan.tableWaterCoolerFan;
-          }
 
-          // Overlay pump table from temporary curves or from the active profile
+          // Overlay pump table from temporary curves if active
           if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
           {
             const auto &pTable = m_fanControlWorker->tempPumpTable();
@@ -2317,10 +3019,6 @@ UccDBusService::UccDBusService()
             {
               fp.tablePump = pTable;
             }
-          }
-          else if ( !m_activeProfile.fan.tablePump.empty() )
-          {
-            fp.tablePump = m_activeProfile.fan.tablePump;
           }
 
           const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
@@ -2398,6 +3096,8 @@ UccDBusService::UccDBusService()
       if ( m_settings.keyboardBacklightControlEnabled )
         m_keyboardBacklightController.applyStatesFromJSON( defaultStates );
     }
+
+    rebuildBuiltinKeyboardProfile();
   }
 
   // then setup gpu callback before worker starts processing
@@ -2420,6 +3120,103 @@ UccDBusService::UccDBusService()
     m_nvml,
     []( const std::string &msg ) { syslog( LOG_INFO, "%s", msg.c_str() ); }
   );
+
+  // Initialize Auto-OC worker (QTimer-based, lives on main thread)
+  m_autoOCWorker = std::make_unique< AutoOCWorker >(
+    m_nvml,
+    []( const std::string &msg ) { syslog( LOG_INFO, "%s", msg.c_str() ); }
+  );
+
+  // Initialize Auto-Undervolt worker (QTimer-based, lives on main thread)
+  m_autoUndervoltWorker = std::make_unique< AutoUndervoltWorker >(
+    m_nvml,
+    []( const std::string &msg ) { syslog( LOG_INFO, "%s", msg.c_str() ); }
+  );
+
+  // Restore persisted auto-undervolt app profiles from app->GPU-profile map.
+  if ( m_autoUndervoltWorker )
+  {
+    std::map< std::string, AppUndervoltProfile > loadedProfiles;
+    for ( const auto &[appKey, profileId] : m_settings.appGpuProfileMap )
+    {
+      auto gpIt = m_settings.gpuProfiles.find( profileId );
+      if ( gpIt == m_settings.gpuProfiles.end() )
+        continue;
+
+      try
+      {
+        auto j = nlohmann::json::parse( gpIt->second );
+        AppUndervoltProfile p;
+        p.appName = appKey;
+
+        if ( j.contains( "gpuLockedClocks" ) && j["gpuLockedClocks"].is_object() )
+        {
+          const auto &glc = j["gpuLockedClocks"];
+          const bool enabled = glc.value( "enabled", false );
+          if ( enabled )
+          {
+            const int minClk = glc.value( "min", 0 );
+            const int maxClk = glc.value( "max", 0 );
+            if ( minClk > 0 && maxClk > 0 )
+              p.gpuFreqCapMHz = std::min( minClk, maxClk );
+          }
+        }
+
+        if ( j.contains( "offsets" ) && j["offsets"].is_array() )
+        {
+          for ( const auto &entry : j["offsets"] )
+          {
+            if ( !entry.is_object() ) continue;
+            const int pstate = entry.value( "pstate", -1 );
+            if ( pstate == 0 )
+            {
+              p.coreOffsetMHz = std::max( 0, entry.value( "gpuOffsetMHz", 0 ) );
+              break;
+            }
+          }
+        }
+
+        if ( j.contains( "meta" ) && j["meta"].is_object() )
+        {
+          const auto &meta = j["meta"];
+          if ( meta.contains( "autoUndervolt" ) && meta["autoUndervolt"].is_object() )
+          {
+            const auto &uv = meta["autoUndervolt"];
+            p.baselineClkMHz = uv.value( "baselineClkMHz", 0 );
+            p.baselineFps = uv.value( "baselineFps", 0.0 );
+            p.achievedFps = uv.value( "achievedFps", 0.0 );
+            p.achievedPowerW = uv.value( "achievedPowerW", 0.0 );
+            p.achievedVoltageMv = uv.value( "achievedVoltageMv", 0.0 );
+
+            const auto lastUsedEpoch = uv.value( "lastUsedEpochSec", 0LL );
+            if ( lastUsedEpoch > 0 )
+              p.lastUsed = std::chrono::system_clock::time_point{ std::chrono::seconds( lastUsedEpoch ) };
+          }
+        }
+
+        const auto lastUsedEpoch = j.value( "lastUsedEpochSec", 0LL );
+        if ( lastUsedEpoch > 0 )
+          p.lastUsed = std::chrono::system_clock::time_point{ std::chrono::seconds( lastUsedEpoch ) };
+        else
+          p.lastUsed = std::chrono::system_clock::now();
+
+        if ( !p.appName.empty() && p.gpuFreqCapMHz > 0 )
+          loadedProfiles[ p.appName ] = p;
+      }
+      catch ( const std::exception &e )
+      {
+        syslog( LOG_WARNING, "[AutoUV] Failed to parse mapped GPU profile '%s' for app '%s': %s",
+                profileId.c_str(), appKey.c_str(), e.what() );
+      }
+    }
+
+    m_autoUndervoltWorker->loadProfiles( loadedProfiles );
+    if ( !loadedProfiles.empty() )
+      syslog( LOG_INFO, "[AutoUV] Restored %zu persisted app profiles", loadedProfiles.size() );
+  }
+
+  // NOTE: AutoOC and AutoUndervolt signal forwarding to D-Bus is set up in
+  // initDBus() because m_adaptor is not yet created at this point.
 
   rebuildBuiltinGpuProfiles();
 }
@@ -2496,11 +3293,25 @@ void UccDBusService::rebuildBuiltinGpuProfiles()
   nvidiaPowerCtrl[ "cTGPOffset" ] = readCurrentCTGPOffset();
   profile[ "nvidiaPowerCTRLProfile" ] = nvidiaPowerCtrl;
 
-  BuiltinGpuProfile builtin;
+  SubProfile builtin;
   builtin.id = BUILTIN_GPU_PROFILE_ID;
   builtin.name = BUILTIN_GPU_PROFILE_NAME;
   builtin.json = QJsonDocument( profile ).toJson( QJsonDocument::Compact ).toStdString();
   m_builtinGpuProfiles.push_back( builtin );
+}
+
+void UccDBusService::rebuildBuiltinKeyboardProfile()
+{
+  m_builtinKeyboardProfiles.clear();
+
+  if ( !m_keyboardBacklightController.isAvailable() )
+    return;
+
+  SubProfile builtin;
+  builtin.id = BUILTIN_KEYBOARD_PROFILE_ID;
+  builtin.name = BUILTIN_KEYBOARD_PROFILE_NAME;
+  builtin.json = BUILTIN_KEYBOARD_PROFILE_JSON;
+  m_builtinKeyboardProfiles.push_back( builtin );
 }
 
 void UccDBusService::readHardwareCapabilities()
@@ -2513,38 +3324,19 @@ void UccDBusService::readHardwareCapabilities()
     int nrTDPs = 0;
     if ( m_io.getNumberTDPs( nrTDPs ) and nrTDPs > 0 )
     {
-      std::vector< std::string > descriptors;
-      m_io.getTDPDescriptors( descriptors );
-
-      std::ostringstream jsonStream;
-      jsonStream << "[";
-
       for ( int i = 0; i < nrTDPs; ++i )
       {
-        uint32_t current = 0, min = 0, max = 0;
-        m_io.getTDPMin( i, reinterpret_cast< int & >( min ) );
-        m_io.getTDPMax( i, reinterpret_cast< int & >( max ) );
-        m_io.getTDP( i, reinterpret_cast< int & >( current ) );
+        int current = 0, min = 0, max = 0;
+        m_io.getTDPMin( i, min );
+        m_io.getTDPMax( i, max );
+        m_io.getTDP( i, current );
 
-        if ( i > 0 )
-          jsonStream << ",";
-
-        jsonStream << "{"
-                   << "\"current\":" << current << ","
-                   << "\"min\":" << min << ","
-                   << "\"max\":" << max
-                   << "}";
-
-        syslog( LOG_INFO, "[uccd] TDP[%d]: min=%u, max=%u, current=%u", i, min, max, current );
+        syslog( LOG_INFO, "[uccd] TDP[%d]: min=%d, max=%d, current=%d", i, min, max, current );
       }
-
-      jsonStream << "]";
-      m_dbusData.odmPowerLimitsJSON = jsonStream.str();
     }
     else
     {
       syslog( LOG_INFO, "[uccd] No TDP hardware available" );
-      m_dbusData.odmPowerLimitsJSON = "[]";
     }
   }
 
@@ -2869,6 +3661,227 @@ bool UccDBusService::initDBus()
     }
 
     syslog( LOG_INFO, "DBus service registered on %s (Qt D-Bus)", SERVICE_NAME );
+
+    // Forward AutoOC worker signals to D-Bus adaptor signals.
+    // This must happen here (after m_adaptor is created) rather than in the
+    // constructor where m_autoOCWorker is created, since m_adaptor is null
+    // during construction.
+    if ( m_autoOCWorker && m_adaptor )
+    {
+      // Share the adaptor's FPS server with the AutoOC worker so they use
+      // the same socket (which is already open when monitoring is active).
+      m_autoOCWorker->setFpsServer( &m_adaptor->m_fpsServer );
+
+      QObject::connect( m_autoOCWorker.get(), &AutoOCWorker::progress,
+        m_adaptor.get(), [this]( const AutoOCProgress &prog )
+      {
+        QString json = QStringLiteral(
+          "{\"phase\":\"%1\",\"component\":\"%2\",\"iteration\":%3,"
+          "\"maxIterations\":%4,\"currentOffset\":%5,\"bestStable\":%6,"
+          "\"temp\":%7,\"gpuClock\":%8,\"vramClock\":%9,"
+          "\"gpuUtil\":%10,\"fps\":%11,\"message\":\"%12\"}" )
+          .arg( prog.phase == AutoOCPhase::Baseline    ? "baseline"
+                : prog.phase == AutoOCPhase::Searching  ? "searching"
+                : prog.phase == AutoOCPhase::Validating ? "validating"
+                : prog.phase == AutoOCPhase::Done       ? "done"
+                : "idle" )
+          .arg( prog.component == AutoOCComponent::Vram ? "vram" : "core" )
+          .arg( prog.iteration )
+          .arg( prog.maxIterations )
+          .arg( prog.currentOffsetMHz )
+          .arg( prog.bestStableMHz )
+          .arg( prog.tempC )
+          .arg( prog.gpuClockMHz )
+          .arg( prog.vramClockMHz )
+          .arg( prog.gpuUtilPct )
+          .arg( prog.fps, 0, 'f', 1 )
+          .arg( QString::fromStdString( prog.message ) );
+
+        emit m_adaptor->AutoOCProgressChanged( json );
+      } );
+
+      QObject::connect( m_autoOCWorker.get(), &AutoOCWorker::finished,
+        m_adaptor.get(), [this]( const AutoOCResult &result )
+      {
+        emit m_adaptor->AutoOCFinished(
+          result.coreOffsetMHz,
+          result.vramOffsetMHz,
+          result.success,
+          QString::fromStdString( result.message ) );
+      } );
+    }
+
+    // Forward AutoUndervolt worker signals to D-Bus adaptor signals.
+    if ( m_autoUndervoltWorker && m_adaptor )
+    {
+      m_autoUndervoltWorker->setFpsServer( &m_adaptor->m_fpsServer );
+
+      QObject::connect( m_autoUndervoltWorker.get(), &AutoUndervoltWorker::progress,
+        m_adaptor.get(), [this]( const UndervoltProgress &prog )
+      {
+        QString json = QStringLiteral(
+          "{\"phase\":\"%1\",\"iteration\":%2,\"maxIterations\":%3,"
+            "\"currentCapMHz\":%4,\"bestCapMHz\":%5,"
+            "\"currentOffsetMHz\":%6,\"bestOffsetMHz\":%7,"
+            "\"temp\":%8,\"gpuClock\":%9,\"powerDraw\":%10,"
+            "\"gpuUtil\":%11,\"fps\":%12,\"baselineFps\":%13,"
+            "\"app\":\"%14\",\"message\":\"%15\"}" )
+          .arg( prog.phase == UVPhase::Baseline    ? "baseline"
+                : prog.phase == UVPhase::Searching  ? "searching"
+              : prog.phase == UVPhase::OffsetSearching ? "offset_searching"
+                : prog.phase == UVPhase::Validating ? "validating"
+                : prog.phase == UVPhase::Done       ? "done"
+                : "idle" )
+          .arg( prog.iteration )
+          .arg( prog.maxIterations )
+          .arg( prog.currentCapMHz )
+          .arg( prog.bestCapMHz )
+            .arg( prog.currentOffsetMHz )
+            .arg( prog.bestOffsetMHz )
+          .arg( prog.tempC )
+          .arg( prog.gpuClockMHz )
+          .arg( prog.powerDrawW )
+          .arg( prog.gpuUtilPct )
+          .arg( prog.fps, 0, 'f', 1 )
+          .arg( prog.baselineFps, 0, 'f', 1 )
+          .arg( QString::fromStdString( prog.appName ) )
+          .arg( QString::fromStdString( prog.message ) );
+
+        emit m_adaptor->AutoUndervoltProgressChanged( json );
+      } );
+
+      QObject::connect( m_autoUndervoltWorker.get(), &AutoUndervoltWorker::finished,
+        m_adaptor.get(), [this]( const UndervoltResult &result )
+      {
+        if ( result.success && m_autoUndervoltWorker )
+        {
+          const auto appKey = result.appName;
+          if ( !appKey.empty() && result.gpuFreqCapMHz > 0 )
+          {
+            std::string profileId;
+            auto mapIt = m_settings.appGpuProfileMap.find( appKey );
+            if ( mapIt != m_settings.appGpuProfileMap.end() )
+              profileId = mapIt->second;
+            if ( profileId.empty() )
+              profileId = generateProfileId();
+
+            const std::string profileName = "AutoUV: " + appKey;
+
+            nlohmann::json profileJson;
+            auto existing = m_settings.gpuProfiles.find( profileId );
+            if ( existing != m_settings.gpuProfiles.end() )
+            {
+              try { profileJson = nlohmann::json::parse( existing->second ); }
+              catch ( ... ) { profileJson = nlohmann::json::object(); }
+            }
+
+            profileJson[ "name" ] = profileName;
+            if ( !profileJson.contains( "offsets" ) || !profileJson["offsets"].is_array() )
+              profileJson[ "offsets" ] = nlohmann::json::array();
+
+            // Upsert P0 graphics offset entry.
+            bool updatedP0 = false;
+            for ( auto &entry : profileJson["offsets"] )
+            {
+              if ( !entry.is_object() ) continue;
+              if ( entry.value( "pstate", -1 ) == 0 )
+              {
+                entry[ "gpuOffsetMHz" ] = result.coreOffsetMHz;
+                if ( !entry.contains( "vramOffsetMHz" ) )
+                  entry[ "vramOffsetMHz" ] = 0;
+                updatedP0 = true;
+                break;
+              }
+            }
+            if ( !updatedP0 )
+            {
+              profileJson[ "offsets" ].push_back( {
+                { "pstate", 0 },
+                { "gpuOffsetMHz", result.coreOffsetMHz },
+                { "vramOffsetMHz", 0 }
+              } );
+            }
+
+            profileJson[ "gpuLockedClocks" ] = {
+              { "enabled", true },
+              { "min", result.gpuFreqCapMHz },
+              { "max", result.gpuFreqCapMHz }
+            };
+
+            // AutoUV profiles must only control graphics cap + graphics offset.
+            // Drop stale power/VRAM lock fields inherited from previously mapped
+            // profiles, otherwise applyGpuOCProfile() can unexpectedly reset power
+            // limits or force VRAM clock locks from old profile content.
+            profileJson.erase( "vramLockedClocks" );
+            profileJson.erase( "powerLimitW" );
+
+            const auto nowEpochSec = static_cast< long long >(
+              std::chrono::duration_cast< std::chrono::seconds >(
+                std::chrono::system_clock::now().time_since_epoch() ).count() );
+
+            profileJson[ "meta" ][ "autoUndervolt" ] = {
+              { "appName", appKey },
+              { "baselineClkMHz", result.baselineClkMHz },
+              { "baselineFps", result.baselineFps },
+              { "achievedFps", result.finalFps },
+              { "coreOffsetMHz", result.coreOffsetMHz },
+              { "baselineVoltageMv", result.baselineVoltageMv },
+              { "achievedVoltageMv", result.finalVoltageMv },
+              { "achievedPowerW", result.finalPowerW },
+              { "lastUsedEpochSec", nowEpochSec }
+            };
+
+            const std::string profilePayload = profileJson.dump();
+            m_settings.gpuProfiles[ profileId ] = profilePayload;
+            m_settings.appGpuProfileMap[ appKey ] = profileId;
+
+            bool found = false;
+            for ( auto &gp : m_customGpuProfiles )
+            {
+              if ( gp.id == profileId )
+              {
+                gp.name = profileName;
+                gp.json = profilePayload;
+                found = true;
+                break;
+              }
+            }
+            if ( !found )
+              m_customGpuProfiles.push_back( { profileId, profileName, profilePayload } );
+
+            // Keep worker cache aligned with persisted settings.
+            std::map< std::string, AppUndervoltProfile > syncedProfiles;
+            for ( const auto &[app, p] : m_autoUndervoltWorker->profiles() )
+              syncedProfiles[ app ] = p;
+
+            AppUndervoltProfile cache;
+            cache.appName = appKey;
+            cache.gpuFreqCapMHz = result.gpuFreqCapMHz;
+            cache.coreOffsetMHz = result.coreOffsetMHz;
+            cache.baselineClkMHz = result.baselineClkMHz;
+            cache.baselineFps = result.baselineFps;
+            cache.achievedFps = result.finalFps;
+            cache.achievedPowerW = result.finalPowerW;
+            cache.achievedVoltageMv = result.finalVoltageMv;
+            cache.lastUsed = std::chrono::system_clock::now();
+            syncedProfiles[ appKey ] = cache;
+            m_autoUndervoltWorker->loadProfiles( syncedProfiles );
+
+            if ( !m_settingsManager.writeSettings( m_settings ) )
+              syslog( LOG_WARNING, "[AutoUV] Failed to persist app->GPU profile mapping" );
+            else
+              updateDBusSettingsData();
+          }
+        }
+
+        emit m_adaptor->AutoUndervoltFinished(
+          result.gpuFreqCapMHz,
+          result.success,
+          QString::fromStdString( result.message ),
+          QString::fromStdString( result.appName ) );
+      } );
+    }
+
     return true;
   }
   catch ( const std::exception &e )
@@ -3423,11 +4436,18 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
 
       if ( m_keyboardBacklightController.isAvailable()
            && m_settings.keyboardBacklightControlEnabled
-           && !profile.keyboard.keyboardProfileData.empty()
-           && profile.keyboard.keyboardProfileData != "{}" )
+           && !profile.keyboard.keyboardProfileId.empty() )
       {
-        bool kbResult = m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
-        std::cout << "[Profile] Keyboard apply result: " << ( kbResult ? "SUCCESS" : "FAILED" ) << std::endl;
+        std::string kbData = resolveKeyboardProfileJSON( profile.keyboard.keyboardProfileId );
+        if ( !kbData.empty() && kbData != "{}" )
+        {
+          bool kbResult = m_keyboardBacklightController.applyProfileKeyboardStates( kbData );
+          std::cout << "[Profile] Keyboard apply result: " << ( kbResult ? "SUCCESS" : "FAILED" ) << std::endl;
+        }
+        else
+        {
+          std::cout << "[Profile] Keyboard profile '" << profile.keyboard.keyboardProfileId << "' not found" << std::endl;
+        }
       }
       else
       {
@@ -3503,31 +4523,15 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
       std::vector< FanTableEntry > wcFanTable;
       std::vector< FanTableEntry > pumpTable;
 
-      // First, try embedded tables from the profile itself
-      if ( profile.fan.hasEmbeddedTables() )
+      // Always resolve fan profile by ID
+      FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
+      if ( fp.isValid() )
       {
-        cpuTable = profile.fan.tableCPU;
-        gpuTable = profile.fan.tableGPU;
-        wcFanTable = profile.fan.tableWaterCoolerFan;
-        pumpTable = profile.fan.tablePump;
-        std::cout << "[Profile] Using embedded fan tables from profile" << std::endl;
-      }
-      else
-      {
-        // Fallback: resolve from named fan profile preset
-        const std::string fpName = profile.fan.fanProfile;
-        if ( !fpName.empty() )
-        {
-          FanProfile fp = getDefaultFanProfile( fpName );
-          if ( fp.isValid() )
-          {
-            cpuTable = fp.tableCPU;
-            gpuTable = fp.tableGPU;
-            wcFanTable = fp.tableWaterCoolerFan;
-            pumpTable = fp.tablePump;
-            std::cout << "[Profile] Using fan tables from named profile '" << fpName << "'" << std::endl;
-          }
-        }
+        cpuTable = fp.tableCPU;
+        gpuTable = fp.tableGPU;
+        wcFanTable = fp.tableWaterCoolerFan;
+        pumpTable = fp.tablePump;
+        std::cout << "[Profile] Using fan tables from profile '" << profile.fan.fanProfile << "'" << std::endl;
       }
 
       if ( m_fanControlWorker && !cpuTable.empty() )
@@ -3623,11 +4627,14 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
 
     if ( m_keyboardBacklightController.isAvailable()
          && m_settings.keyboardBacklightControlEnabled
-         && !profile.keyboard.keyboardProfileData.empty()
-         && profile.keyboard.keyboardProfileData != "{}" )
+         && !profile.keyboard.keyboardProfileId.empty() )
     {
-      std::cout << "[Profile] Applying keyboard backlight settings from profile" << std::endl;
-      m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
+      std::string kbData = resolveKeyboardProfileJSON( profile.keyboard.keyboardProfileId );
+      if ( !kbData.empty() && kbData != "{}" )
+      {
+        std::cout << "[Profile] Applying keyboard backlight settings from profile" << std::endl;
+        m_keyboardBacklightController.applyProfileKeyboardStates( kbData );
+      }
     }
 
     // Apply GPU OC and cTGP from the profile
@@ -3715,6 +4722,9 @@ bool UccDBusService::addCustomProfile( const UccProfile &profile )
 
   // Update DBus data
   updateDBusActiveProfileData();
+  serializeProfilesJSON();
+  if ( m_adaptor )
+    m_adaptor->emitProfilesListChanged();
 
   std::cout << "[ProfileManager] Profile added successfully" << std::endl;
   return true;
@@ -3733,6 +4743,9 @@ bool UccDBusService::deleteCustomProfile( const std::string &profileId )
 
     // Update DBus data
     updateDBusActiveProfileData();
+    serializeProfilesJSON();
+    if ( m_adaptor )
+      m_adaptor->emitProfilesListChanged();
 
     std::cout << "[ProfileManager] Profile deleted successfully" << std::endl;
     return true;
@@ -3746,8 +4759,7 @@ bool UccDBusService::updateCustomProfile( const UccProfile &profile )
 {
   std::cout << "[ProfileManager] Updating profile '" << profile.name << "' (ID: " << profile.id << ") in memory" << std::endl;
   std::cout << "[ProfileManager]   Active profile ID: '" << m_activeProfile.id << "'" << std::endl;
-  std::cout << "[ProfileManager]   Incoming keyboard data length: " << profile.keyboard.keyboardProfileData.size()
-            << " bytes, profileName='" << profile.keyboard.keyboardProfileName << "'" << std::endl;
+  std::cout << "[ProfileManager]   Incoming keyboard profile ID: '" << profile.keyboard.keyboardProfileId << "'" << std::endl;
 
   // Check if this is a default (hardcoded) profile
   bool isDefaultProfile = false;
@@ -3777,6 +4789,9 @@ bool UccDBusService::updateCustomProfile( const UccProfile &profile )
 
     // Update DBus data
     updateDBusActiveProfileData();
+    serializeProfilesJSON();
+    if ( m_adaptor )
+      m_adaptor->emitProfilesListChanged();
 
     // Update active profile if it was the one modified
     if ( m_activeProfile.id == profile.id )
@@ -4077,6 +5092,35 @@ void UccDBusService::loadSettings()
     }
   }
 
+  // Load custom sub-profiles from settings into in-memory vectors
+  auto loadSubProfiles = []( const std::map< std::string, std::string > &map,
+                             std::vector< SubProfile > &out,
+                             const char *label ) {
+    out.clear();
+    for ( const auto &[id, jsonStr] : map )
+    {
+      try
+      {
+        auto j = nlohmann::json::parse( jsonStr );
+        SubProfile sp;
+        sp.id = id;
+        sp.name = j.value( "name", id );
+        sp.json = jsonStr;
+        out.push_back( std::move( sp ) );
+        std::cout << "[Settings] Loaded " << label << " profile '" << sp.name
+                  << "' (ID: " << id << ")" << std::endl;
+      }
+      catch ( const std::exception &e )
+      {
+        std::cerr << "[Settings] Failed to parse " << label << " profile '"
+                  << id << "': " << e.what() << std::endl;
+      }
+    }
+  };
+  loadSubProfiles( m_settings.fanProfiles, m_customFanProfiles, "fan" );
+  loadSubProfiles( m_settings.keyboardProfiles, m_customKeyboardProfiles, "keyboard" );
+  loadSubProfiles( m_settings.gpuProfiles, m_customGpuProfiles, "GPU" );
+
   // IMPORTANT: Do NOT resync/clear m_settings.profiles!
   // Reason: m_settings.profiles is the authoritative source from the file.
   // Resyncing can change keys or representation, breaking stateMap lookups.
@@ -4180,6 +5224,16 @@ void UccDBusService::initializeStartupProfile()
   if ( resolved.id.empty() )
   {
     syslog( LOG_INFO, "[Startup] No startup profile resolved — no state map entry for current power state" );
+    // Still apply the default keyboard profile so the backlight is not left dark.
+    if ( m_keyboardBacklightController.isAvailable()
+         && m_settings.keyboardBacklightControlEnabled
+         && !m_builtinKeyboardProfiles.empty() )
+    {
+      const auto &kbFallback = m_builtinKeyboardProfiles.front();
+      syslog( LOG_INFO, "[Startup] Applying default keyboard profile '%s' as fallback",
+              kbFallback.id.c_str() );
+      m_keyboardBacklightController.applyProfileKeyboardStates( kbFallback.json );
+    }
     return;
   }
 
@@ -4209,11 +5263,7 @@ void UccDBusService::applyStartupProfile()
   if ( m_profileSettingsWorker )
     m_profileSettingsWorker->reapplyProfile();
 
-  if ( m_keyboardBacklightController.isAvailable()
-       && m_settings.keyboardBacklightControlEnabled
-       && !profile.keyboard.keyboardProfileData.empty()
-       && profile.keyboard.keyboardProfileData != "{}" )
-    m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
+  applyKeyboardFromProfile( profile );
 
   applyGpuOCFromProfile( profile );
 
@@ -4235,29 +5285,15 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
     std::vector< FanTableEntry > wcFanTable;
     std::vector< FanTableEntry > pumpTable;
 
-    if ( profile.fan.hasEmbeddedTables() )
+    // Always resolve fan profile by ID — no more embedded tables
+    FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
+    if ( fp.isValid() )
     {
-      cpuTable = profile.fan.tableCPU;
-      gpuTable = profile.fan.tableGPU;
-      wcFanTable = profile.fan.tableWaterCoolerFan;
-      pumpTable = profile.fan.tablePump;
-      std::cout << "[FanPump] Using embedded fan tables from profile" << std::endl;
-    }
-    else
-    {
-      const std::string &fpName = profile.fan.fanProfile;
-      if ( !fpName.empty() )
-      {
-        FanProfile fp = getDefaultFanProfile( fpName );
-        if ( fp.isValid() )
-        {
-          cpuTable = fp.tableCPU;
-          gpuTable = fp.tableGPU;
-          wcFanTable = fp.tableWaterCoolerFan;
-          pumpTable = fp.tablePump;
-          std::cout << "[FanPump] Using fan tables from named profile '" << fpName << "'" << std::endl;
-        }
-      }
+      cpuTable = fp.tableCPU;
+      gpuTable = fp.tableGPU;
+      wcFanTable = fp.tableWaterCoolerFan;
+      pumpTable = fp.tablePump;
+      std::cout << "[FanPump] Using fan tables from profile '" << profile.fan.fanProfile << "'" << std::endl;
     }
 
     if ( m_fanControlWorker && !cpuTable.empty() )
@@ -4297,16 +5333,22 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
 
 void UccDBusService::applyGpuOCFromProfile( const UccProfile &profile )
 {
-  // GPU OC / cTGP data lives exclusively inside gpuOCProfileData.
-  // Profiles with no GPU profile selected have empty gpuOCProfileData and
-  // should not touch GPU state at all.
-  if ( profile.gpuOCProfileData.empty() || profile.gpuOCProfileData == "{}" )
+  // Profiles with no GPU profile selected should not touch GPU state at all.
+  if ( profile.gpuProfileId.empty() )
     return;
 
-  // Extract and apply cTGP offset from embedded GPU profile data
+  // Resolve GPU OC profile data from the sub-profile store
+  std::string gpuData = resolveGpuProfileJSON( profile.gpuProfileId );
+  if ( gpuData.empty() || gpuData == "{}" )
+  {
+    std::cerr << "[GpuOC] GPU profile '" << profile.gpuProfileId << "' not found" << std::endl;
+    return;
+  }
+
+  // Extract and apply cTGP offset from GPU profile data
   if ( m_profileSettingsWorker && m_dbusData.nvidiaPowerCTRLAvailable.load() )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( profile.gpuOCProfileData ) );
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( gpuData ) );
     if ( doc.isObject() )
     {
       QJsonObject obj = doc.object();
@@ -4322,11 +5364,102 @@ void UccDBusService::applyGpuOCFromProfile( const UccProfile &profile )
   // Apply GPU OC settings (clock offsets, locked clocks, power limit)
   if ( m_nvidiaOCWorker && m_nvidiaOCWorker->isAvailable() )
   {
-    std::cout << "[GpuOc] Applying embedded GPU OC profile data from profile '"
-              << profile.name << "'" << std::endl;
-    if ( !m_nvidiaOCWorker->applyGpuOCProfile( profile.gpuOCProfileData, 0 ) )
+    std::cout << "[GpuOc] Applying GPU OC profile '" << profile.gpuProfileId
+              << "' from profile '" << profile.name << "'" << std::endl;
+    if ( !m_nvidiaOCWorker->applyGpuOCProfile( gpuData, 0 ) )
       std::cerr << "[GpuOC] Failed to apply GPU OC profile data" << std::endl;
   }
+}
+
+void UccDBusService::applyKeyboardFromProfile( const UccProfile &profile )
+{
+  if ( !m_keyboardBacklightController.isAvailable()
+       || !m_settings.keyboardBacklightControlEnabled )
+    return;
+
+  std::string kbId = profile.keyboard.keyboardProfileId;
+  if ( kbId.empty() )
+  {
+    // No keyboard profile assigned — fall back to the first built-in keyboard profile.
+    if ( m_builtinKeyboardProfiles.empty() )
+      return;
+    kbId = m_builtinKeyboardProfiles.front().id;
+    std::cout << "[Keyboard] No keyboard profile assigned, using built-in fallback '" << kbId << "'" << std::endl;
+  }
+
+  std::string kbData = resolveKeyboardProfileJSON( kbId );
+  if ( kbData.empty() || kbData == "{}" )
+  {
+    std::cerr << "[Keyboard] Keyboard profile '" << kbId << "' not found" << std::endl;
+    return;
+  }
+
+  bool kbResult = m_keyboardBacklightController.applyProfileKeyboardStates( kbData );
+  std::cout << "[Keyboard] Apply keyboard profile '" << kbId << "': "
+            << ( kbResult ? "SUCCESS" : "FAILED" ) << std::endl;
+}
+
+FanProfile UccDBusService::resolveFanProfile( const std::string &fanProfileId ) const
+{
+  if ( fanProfileId.empty() )
+    return FanProfile();
+
+  // Check custom fan profiles first
+  for ( const auto &fp : m_customFanProfiles )
+  {
+    if ( fp.id == fanProfileId )
+    {
+      // Parse JSON to FanProfile
+      return ProfileManager::parseFanProfileJSON( fp.json );
+    }
+  }
+
+  // Fall back to built-in fan profiles
+  return getDefaultFanProfile( fanProfileId );
+}
+
+std::string UccDBusService::resolveGpuProfileJSON( const std::string &gpuProfileId ) const
+{
+  if ( gpuProfileId.empty() )
+    return {};
+
+  // Check custom GPU profiles first
+  for ( const auto &gp : m_customGpuProfiles )
+  {
+    if ( gp.id == gpuProfileId )
+      return gp.json;
+  }
+
+  // Check built-in GPU profiles
+  for ( const auto &gp : m_builtinGpuProfiles )
+  {
+    if ( gp.id == gpuProfileId )
+      return gp.json;
+  }
+
+  return {};
+}
+
+std::string UccDBusService::resolveKeyboardProfileJSON( const std::string &keyboardProfileId ) const
+{
+  if ( keyboardProfileId.empty() )
+    return {};
+
+  // Check custom keyboard profiles first
+  for ( const auto &kp : m_customKeyboardProfiles )
+  {
+    if ( kp.id == keyboardProfileId )
+      return kp.json;
+  }
+
+  // Check built-in keyboard profiles
+  for ( const auto &kp : m_builtinKeyboardProfiles )
+  {
+    if ( kp.id == keyboardProfileId )
+      return kp.json;
+  }
+
+  return {};
 }
 
 void UccDBusService::applyProfileForCurrentState()
@@ -4370,29 +5503,15 @@ void UccDBusService::applyProfileForCurrentState()
       std::vector< FanTableEntry > wcFanTable;
       std::vector< FanTableEntry > pumpTable;
 
-      if ( profile.fan.hasEmbeddedTables() )
+      // Always resolve fan profile by ID
+      FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
+      if ( fp.isValid() )
       {
-        cpuTable = profile.fan.tableCPU;
-        gpuTable = profile.fan.tableGPU;
-        wcFanTable = profile.fan.tableWaterCoolerFan;
-        pumpTable = profile.fan.tablePump;
-        std::cout << "[State] Using embedded fan tables from profile" << std::endl;
-      }
-      else
-      {
-        const std::string &fpName = profile.fan.fanProfile;
-        if ( !fpName.empty() )
-        {
-          FanProfile fp = getDefaultFanProfile( fpName );
-          if ( fp.isValid() )
-          {
-            cpuTable = fp.tableCPU;
-            gpuTable = fp.tableGPU;
-            wcFanTable = fp.tableWaterCoolerFan;
-            pumpTable = fp.tablePump;
-            std::cout << "[State] Using fan tables from named profile '" << fpName << "'" << std::endl;
-          }
-        }
+        cpuTable = fp.tableCPU;
+        gpuTable = fp.tableGPU;
+        wcFanTable = fp.tableWaterCoolerFan;
+        pumpTable = fp.tablePump;
+        std::cout << "[State] Using fan tables from profile '" << profile.fan.fanProfile << "'" << std::endl;
       }
 
       if ( m_fanControlWorker && !cpuTable.empty() )
@@ -4434,11 +5553,7 @@ void UccDBusService::applyProfileForCurrentState()
       m_cpuWorker->reapplyProfile();
     if ( m_profileSettingsWorker )
       m_profileSettingsWorker->reapplyProfile();
-    if ( m_keyboardBacklightController.isAvailable()
-         && m_settings.keyboardBacklightControlEnabled
-         && !profile.keyboard.keyboardProfileData.empty()
-         && profile.keyboard.keyboardProfileData != "{}" )
-      m_keyboardBacklightController.applyProfileKeyboardStates( profile.keyboard.keyboardProfileData );
+    applyKeyboardFromProfile( profile );
 
     // Apply GPU OC and cTGP from the profile
     applyGpuOCFromProfile( profile );
@@ -4515,61 +5630,58 @@ void UccDBusService::serializeProfilesJSON()
 
   UccProfile defaultProfile = m_profileManager.getDefaultCustomProfiles()[0];
 
-  // serialize all profiles to JSON
+  // Serialize all profiles — built-in (editable=false) + custom (editable=true)
   std::ostringstream allProfilesJSON;
   allProfilesJSON << "[";
 
-  auto allProfiles = getAllProfiles();
-  for ( size_t i = 0; i < allProfiles.size(); ++i )
+  size_t allIdx = 0;
+  // Built-in profiles (not editable)
+  for ( const auto &profile : m_defaultProfiles )
   {
-    if ( i > 0 )
-      allProfilesJSON << ",";
-
-    allProfilesJSON << profileToJSON( allProfiles[ i ],
-                      defaultOnlineCores,
-                      defaultScalingMin,
-                      defaultScalingMax );
+    if ( allIdx > 0 ) allProfilesJSON << ",";
+    allProfilesJSON << profileToJSON( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, false );
+    ++allIdx;
+  }
+  // Custom profiles (editable)
+  for ( const auto &profile : m_customProfiles )
+  {
+    if ( allIdx > 0 ) allProfilesJSON << ",";
+    allProfilesJSON << profileToJSON( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, true );
+    ++allIdx;
   }
   allProfilesJSON << "]";
 
+  // Default-only list (backward compat)
   std::ostringstream defaultProfilesJSON;
   defaultProfilesJSON << "[";
   for ( size_t i = 0; i < m_defaultProfiles.size(); ++i )
   {
-    if ( i > 0 )
-      defaultProfilesJSON << ",";
-
-    defaultProfilesJSON << profileToJSON( m_defaultProfiles[ i ],
-                        defaultOnlineCores,
-                        defaultScalingMin,
-                        defaultScalingMax );
+    if ( i > 0 ) defaultProfilesJSON << ",";
+    defaultProfilesJSON << profileToJSON( m_defaultProfiles[i], defaultOnlineCores, defaultScalingMin, defaultScalingMax, false );
   }
   defaultProfilesJSON << "]";
 
+  // Custom-only list (backward compat)
   std::ostringstream customProfilesJSON;
   customProfilesJSON << "[";
   for ( size_t i = 0; i < m_customProfiles.size(); ++i )
   {
-    if ( i > 0 )
-      customProfilesJSON << ",";
-
-    customProfilesJSON << profileToJSON( m_customProfiles[ i ],
-                       defaultOnlineCores,
-                       defaultScalingMin,
-                       defaultScalingMax );
+    if ( i > 0 ) customProfilesJSON << ",";
+    customProfilesJSON << profileToJSON( m_customProfiles[i], defaultOnlineCores, defaultScalingMin, defaultScalingMax, true );
   }
   customProfilesJSON << "]";
 
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-  m_dbusData.profilesJSON = defaultProfilesJSON.str();  // Only default profiles now
+  m_dbusData.profilesJSON = allProfilesJSON.str();
   m_dbusData.defaultProfilesJSON = defaultProfilesJSON.str();
-  m_dbusData.customProfilesJSON = "[]";  // Empty array since custom profiles are local
+  m_dbusData.customProfilesJSON = customProfilesJSON.str();
   m_dbusData.defaultValuesProfileJSON = profileToJSON( defaultProfile,
                                                        defaultOnlineCores,
                                                        defaultScalingMin,
                                                        defaultScalingMax );
 
-  std::cout << "[DBus] Re-serialized profile JSONs" << std::endl;
+  std::cout << "[DBus] Re-serialized profile JSONs (built-in=" << m_defaultProfiles.size()
+            << " custom=" << m_customProfiles.size() << ")" << std::endl;
 }
 
 void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &profiles )
@@ -4681,6 +5793,14 @@ void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &prof
 
     // Snap CPU frequencies to nearest available hardware frequency
     snapProfileFrequencies( profile );
+
+    // Assign default keyboard profile if none referenced
+    if ( profile.keyboard.keyboardProfileId.empty() && !m_builtinKeyboardProfiles.empty() )
+      profile.keyboard.keyboardProfileId = m_builtinKeyboardProfiles.front().id;
+
+    // Assign default GPU profile if none referenced
+    if ( profile.gpuProfileId.empty() && !m_builtinGpuProfiles.empty() )
+      profile.gpuProfileId = m_builtinGpuProfiles.front().id;
 
     std::cout << "[fillDeviceSpecificDefaults]   Final TDP values: " << profile.odmPowerLimits.tdpValues.size() << std::endl;
   }

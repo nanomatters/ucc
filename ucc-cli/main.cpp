@@ -185,9 +185,9 @@ static QString assignmentTag( const QStringList &states )
   return QString( " [%1]" ).arg( labels.join( ", " ) );
 }
 
-/// Load stateMap and customProfiles from uccrc and resolve which fan/keyboard profiles
+/// Load stateMap from uccrc and profiles from daemon to resolve which fan/keyboard profiles
 /// are transitively referenced through power-state-assigned main profiles.
-static LocalAssignments loadLocalAssignments()
+static LocalAssignments loadLocalAssignments( ucc::UccdClient &c )
 {
   LocalAssignments result;
   QSettings settings = localSettings();
@@ -206,35 +206,37 @@ static LocalAssignments loadLocalAssignments()
     }
   }
 
-  // customProfiles: resolve which fan and keyboard profiles are used by assigned main profiles
-  QByteArray cpData = settings.value( "customProfiles", "[]" ).toByteArray();
-  QJsonDocument cpDoc = QJsonDocument::fromJson( cpData );
-  if ( cpDoc.isArray() )
+  // Profiles from daemon (all with editable flag) — resolve sub-profile references
+  if ( auto json = c.getProfilesJSON() )
   {
-    for ( const QJsonValue &v : cpDoc.array() )
+    QJsonDocument cpDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+    if ( cpDoc.isArray() )
     {
-      if ( !v.isObject() ) continue;
-      QJsonObject prof = v.toObject();
-      QString profId = prof["id"].toString();
-      if ( !result.profileStates.contains( profId ) ) continue;  // not in stateMap
-      const QStringList &states = result.profileStates[profId];
-
-      // Fan profile referenced by this main profile
-      if ( prof.contains( "fan" ) && prof["fan"].isObject() )
+      for ( const QJsonValue &v : cpDoc.array() )
       {
-        QString fanId = prof["fan"].toObject()["fanProfile"].toString();
-        if ( !fanId.isEmpty() )
-          for ( const QString &s : states )
-            if ( !result.fanStates[fanId].contains( s ) )
-              result.fanStates[fanId].append( s );
-      }
+        if ( !v.isObject() ) continue;
+        QJsonObject prof = v.toObject();
+        QString profId = prof["id"].toString();
+        if ( !result.profileStates.contains( profId ) ) continue;  // not in stateMap
+        const QStringList &states = result.profileStates[profId];
 
-      // Keyboard profile referenced by this main profile
-      QString kbId = prof["selectedKeyboardProfile"].toString();
-      if ( !kbId.isEmpty() )
-        for ( const QString &s : states )
-          if ( !result.kbStates[kbId].contains( s ) )
-            result.kbStates[kbId].append( s );
+        // Fan profile referenced by this main profile
+        if ( prof.contains( "fan" ) && prof["fan"].isObject() )
+        {
+          QString fanId = prof["fan"].toObject()["fanProfile"].toString();
+          if ( !fanId.isEmpty() )
+            for ( const QString &s : states )
+              if ( !result.fanStates[fanId].contains( s ) )
+                result.fanStates[fanId].append( s );
+        }
+
+        // Keyboard profile referenced by this main profile
+        QString kbId = prof["selectedKeyboardProfile"].toString();
+        if ( !kbId.isEmpty() )
+          for ( const QString &s : states )
+            if ( !result.kbStates[kbId].contains( s ) )
+              result.kbStates[kbId].append( s );
+      }
     }
   }
 
@@ -421,7 +423,7 @@ static int cmdStatus( ucc::UccdClient &c )
 
 static int cmdProfileList( ucc::UccdClient &c )
 {
-  LocalAssignments assignments = loadLocalAssignments();
+  LocalAssignments assignments = loadLocalAssignments( c );
 
   // Default (built-in) profiles from daemon
   auto defJSON = c.getDefaultProfilesJSON();
@@ -444,45 +446,15 @@ static int cmdProfileList( ucc::UccdClient &c )
     }
   }
 
-  // Custom profiles — use uccrc as authoritative source (daemon may only have assigned ones)
-  QSettings settings = localSettings();
-  QByteArray cpData = settings.value( "customProfiles", "[]" ).toByteArray();
-  QJsonDocument cpDoc = QJsonDocument::fromJson( cpData );
-
-  // Also collect IDs from daemon custom list so we can merge without duplicates
-  QSet<QString> daemonIds;
+  // Custom profiles from daemon (editable ones)
   auto custJSON = c.getCustomProfilesJSON();
+  QList<QJsonObject> customProfiles;
   if ( custJSON )
   {
     QJsonDocument dd = QJsonDocument::fromJson( QByteArray::fromStdString( *custJSON ) );
     if ( dd.isArray() )
       for ( const QJsonValue &v : dd.array() )
         if ( v.isObject() )
-          daemonIds.insert( v.toObject()["id"].toString() );
-  }
-
-  // Collect all custom profiles: start from uccrc, then add any daemon-only ones
-  QList<QJsonObject> customProfiles;
-  QSet<QString> shownIds;
-  if ( cpDoc.isArray() )
-  {
-    for ( const QJsonValue &v : cpDoc.array() )
-    {
-      if ( v.isObject() )
-      {
-        QJsonObject obj = v.toObject();
-        shownIds.insert( obj["id"].toString() );
-        customProfiles.append( obj );
-      }
-    }
-  }
-  // Daemon-only entries not in uccrc
-  if ( custJSON )
-  {
-    QJsonDocument dd = QJsonDocument::fromJson( QByteArray::fromStdString( *custJSON ) );
-    if ( dd.isArray() )
-      for ( const QJsonValue &v : dd.array() )
-        if ( v.isObject() && !shownIds.contains( v.toObject()["id"].toString() ) )
           customProfiles.append( v.toObject() );
   }
 
@@ -510,7 +482,7 @@ static int cmdProfileList( ucc::UccdClient &c )
 }
 
 /// Print a human-readable summary of a profile JSON object.
-static void printProfileSummary( const QJsonObject &obj, bool showHeader = true )
+static void printProfileSummary( const QJsonObject &obj, bool showHeader = true, ucc::UccdClient *client = nullptr )
 {
   std::string name = obj["name"].toString().toStdString();
   std::string id = obj["id"].toString().toStdString();
@@ -608,14 +580,29 @@ static void printProfileSummary( const QJsonObject &obj, bool showHeader = true 
     }
   }
 
-  // NVIDIA cTGP (from embedded GPU OC profile data)
-  if ( obj.contains( "gpuOCProfileData" ) && obj["gpuOCProfileData"].isObject() )
+  // NVIDIA cTGP (resolved from GPU profile by ID)
+  if ( obj.contains( "gpuProfileId" ) )
   {
-    QJsonObject gpuObj = obj["gpuOCProfileData"].toObject();
-    if ( gpuObj.contains( "nvidiaPowerCTRLProfile" ) && gpuObj["nvidiaPowerCTRLProfile"].isObject() )
+    QString gpuId = obj["gpuProfileId"].toString();
+    if ( !gpuId.isEmpty() )
     {
-      int ctgp = gpuObj["nvidiaPowerCTRLProfile"].toObject()["cTGPOffset"].toInt();
-      std::printf( "  %-24s %d W\n", "cTGP offset:", ctgp );
+      std::printf( "  %-24s %s\n", "GPU OC profile:", gpuId.toStdString().c_str() );
+      if ( client )
+      {
+        if ( auto gpuJson = client->getGpuProfileJSON( gpuId.toStdString() ) )
+        {
+          QJsonDocument gpuDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *gpuJson ) );
+          if ( gpuDoc.isObject() )
+          {
+            QJsonObject gpuObj = gpuDoc.object();
+            if ( gpuObj.contains( "nvidiaPowerCTRLProfile" ) && gpuObj["nvidiaPowerCTRLProfile"].isObject() )
+            {
+              int ctgp = gpuObj["nvidiaPowerCTRLProfile"].toObject()["cTGPOffset"].toInt();
+              std::printf( "  %-24s %d W\n", "cTGP offset:", ctgp );
+            }
+          }
+        }
+      }
     }
   }
 
@@ -658,7 +645,7 @@ static int cmdProfileGet( ucc::UccdClient &c )
     std::puts( json->c_str() );
     return 0;
   }
-  printProfileSummary( doc.object() );
+  printProfileSummary( doc.object(), true, &c );
   return 0;
 }
 
@@ -688,7 +675,7 @@ static int cmdProfileGetDefault( ucc::UccdClient &c )
   {
     if ( i > 0 ) std::puts( "" );
     QJsonObject obj = arr[i].toObject();
-    printProfileSummary( obj, false );
+    printProfileSummary( obj, false, &c );
     if ( i < arr.size() - 1 )
       std::puts( "  ────────────────────────────" );
   }
@@ -715,7 +702,7 @@ static int cmdProfileGetCustom( ucc::UccdClient &c )
   {
     if ( i > 0 ) std::puts( "" );
     QJsonObject obj = arr[i].toObject();
-    printProfileSummary( obj, false );
+    printProfileSummary( obj, false, &c );
     if ( i < arr.size() - 1 )
       std::puts( "  ────────────────────────────" );
   }
@@ -744,7 +731,7 @@ static int cmdProfileDelete( ucc::UccdClient &c, const char *id )
 
 static int cmdFanList( ucc::UccdClient &c )
 {
-  LocalAssignments assignments = loadLocalAssignments();
+  LocalAssignments assignments = loadLocalAssignments( c );
 
   auto json = c.getFanProfilesJSON();
   if ( !json )
@@ -775,31 +762,7 @@ static int cmdFanList( ucc::UccdClient &c )
     printJSON( *json );
   }
 
-  // Custom fan profiles from local storage
-  QSettings settings = localSettings();
-  QByteArray customFP = settings.value( "customFanProfiles", "[]" ).toByteArray();
-  if ( !customFP.isEmpty() && customFP != "[]" )
-  {
-    QJsonDocument cdoc = QJsonDocument::fromJson( customFP );
-    if ( cdoc.isArray() && !cdoc.array().isEmpty() )
-    {
-      std::puts( "\nCustom fan profiles:" );
-      for ( const QJsonValue &v : cdoc.array() )
-      {
-        if ( v.isObject() )
-        {
-          QJsonObject obj = v.toObject();
-          QString id = obj["id"].toString();
-          QString tag = assignmentTag( assignments.fanStates.value( id ) );
-          std::printf( "  %-36s  %s%s\n",
-                       id.toStdString().c_str(),
-                       obj["name"].toString().toStdString().c_str(),
-                       tag.toStdString().c_str() );
-        }
-      }
-    }
-  }
-
+  // All fan profiles (built-in + custom) are now in the daemon response above
   return 0;
 }
 
@@ -819,40 +782,11 @@ static void printFanCurve( const char *label, const QJsonArray &arr )
 
 static int cmdFanGet( ucc::UccdClient &c, const char *fanProfileId )
 {
-  auto json = c.getFanProfile( fanProfileId );
-  QString customName, customId;
+  auto json = c.getFanProfileJSON( fanProfileId );
 
-  // Check if daemon returned an empty object (invalid response for custom profiles)
+  // Check if daemon returned an empty object
   if ( json && *json == "{}" )
     json = std::nullopt;
-
-  // Fall back to custom fan profiles from local storage (GUI only, not in daemon)
-  if ( !json )
-  {
-    QSettings settings = localSettings();
-    QByteArray customFP = settings.value( "customFanProfiles", "[]" ).toByteArray();
-    if ( !customFP.isEmpty() && customFP != "[]" )
-    {
-      QJsonDocument cdoc = QJsonDocument::fromJson( customFP );
-      if ( cdoc.isArray() )
-      {
-        for ( const QJsonValue &v : cdoc.array() )
-        {
-          if ( v.isObject() )
-          {
-            QJsonObject obj = v.toObject();
-            if ( obj["id"].toString() == QString::fromUtf8( fanProfileId ) )
-            {
-              json = obj["json"].toString().toStdString();
-              customName = obj["name"].toString();
-              customId = obj["id"].toString();
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
 
   if ( !json )
   {
@@ -867,11 +801,9 @@ static int cmdFanGet( ucc::UccdClient &c, const char *fanProfileId )
   }
   QJsonObject obj = doc.object();
   
-  // Use custom name/id if retrieved from local storage, otherwise from JSON, fallback to argument
-  QString displayName = !customName.isEmpty() ? customName : 
-                        (!obj["name"].toString().isEmpty() ? obj["name"].toString() : QString::fromUtf8( fanProfileId ));
-  QString displayId = !customId.isEmpty() ? customId : 
-                      (!obj["id"].toString().isEmpty() ? obj["id"].toString() : QString::fromUtf8( fanProfileId ));
+  // Use name/id from JSON, fallback to argument
+  QString displayName = !obj["name"].toString().isEmpty() ? obj["name"].toString() : QString::fromUtf8( fanProfileId );
+  QString displayId = !obj["id"].toString().isEmpty() ? obj["id"].toString() : QString::fromUtf8( fanProfileId );
   
   std::printf( "=== Fan Profile: %s ===\n", displayName.toStdString().c_str() );
   std::printf( "  %-24s %s\n", "ID:", displayId.toStdString().c_str() );
@@ -907,34 +839,12 @@ static int cmdFanRevert( ucc::UccdClient &c )
 /// Activate a fan profile by ID: fetch its curves, remap keys, and apply.
 static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
 {
-  // Try daemon built-in profiles first
-  auto json = c.getFanProfile( fanProfileId );
+  // All fan profiles (built-in + custom) are now on the daemon
+  auto json = c.getFanProfileJSON( fanProfileId );
 
-  // Check if daemon returned an empty object (invalid response for custom profiles)
+  // Check if daemon returned an empty object
   if ( json && *json == "{}" )
     json = std::nullopt;
-
-  // Fall back to custom fan profiles from local storage (GUI only, not in daemon)
-  if ( !json )
-  {
-    QSettings settings = localSettings();
-    QByteArray customFP = settings.value( "customFanProfiles", "[]" ).toByteArray();
-    if ( !customFP.isEmpty() && customFP != "[]" )
-    {
-      QJsonDocument cdoc = QJsonDocument::fromJson( customFP );
-      if ( cdoc.isArray() )
-      {
-        for ( const QJsonValue &v : cdoc.array() )
-        {
-          if ( v.isObject() && v.toObject()["id"].toString() == QString::fromUtf8( fanProfileId ) )
-          {
-            json = v.toObject()["json"].toString().toStdString();
-            break;
-          }
-        }
-      }
-    }
-  }
 
   if ( !json )
   {
@@ -1144,22 +1054,21 @@ static int cmdKeyboardSet( ucc::UccdClient &c, const char *jsonStr )
   return 0;
 }
 
-/// List custom keyboard profiles from local settings.
-static int cmdKeyboardProfileList()
+/// List keyboard profiles from the daemon.
+static int cmdKeyboardProfileList( ucc::UccdClient &c )
 {
-  LocalAssignments assignments = loadLocalAssignments();
+  LocalAssignments assignments = loadLocalAssignments( c );
 
-  QSettings settings = localSettings();
-  QByteArray customKP = settings.value( "customKeyboardProfiles", "[]" ).toByteArray();
-  if ( customKP.isEmpty() || customKP == "[]" )
+  auto json = c.getKeyboardProfilesJSON();
+  if ( !json )
   {
-    std::puts( "No custom keyboard profiles found." );
+    std::puts( "No keyboard profiles found." );
     return 0;
   }
-  QJsonDocument doc = QJsonDocument::fromJson( customKP );
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
   if ( !doc.isArray() || doc.array().isEmpty() )
   {
-    std::puts( "No custom keyboard profiles found." );
+    std::puts( "No keyboard profiles found." );
     return 0;
   }
   std::puts( "Keyboard profiles:" );
@@ -1179,39 +1088,30 @@ static int cmdKeyboardProfileList()
   return 0;
 }
 
-/// Set a keyboard profile by ID from local settings.
+/// Set a keyboard profile by ID from the daemon.
 static int cmdKeyboardProfileSet( ucc::UccdClient &c, const char *profileId )
 {
-  QSettings settings = localSettings();
-  QByteArray customKP = settings.value( "customKeyboardProfiles", "[]" ).toByteArray();
-  if ( customKP.isEmpty() || customKP == "[]" )
+  auto json = c.getKeyboardProfileJSON( profileId );
+  if ( !json || *json == "{}" )
   {
-    std::fputs( "Error: No custom keyboard profiles found\n", stderr );
+    std::fputs( "Error: Keyboard profile not found\n", stderr );
     return 1;
   }
-  QJsonDocument doc = QJsonDocument::fromJson( customKP );
-  if ( !doc.isArray() )
+
+  // The daemon returns the full profile JSON; extract the "json" sub-field if present
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+  if ( doc.isObject() )
   {
-    std::fputs( "Error: Invalid keyboard profiles data\n", stderr );
-    return 1;
-  }
-  QString qId = QString::fromUtf8( profileId );
-  for ( const QJsonValue &v : doc.array() )
-  {
-    if ( v.isObject() && v.toObject()["id"].toString() == qId )
+    QString innerJson = doc.object()["json"].toString();
+    if ( !innerJson.isEmpty() )
     {
-      QString json = v.toObject()["json"].toString();
-      if ( json.isEmpty() )
-      {
-        std::fputs( "Error: Keyboard profile has no data\n", stderr );
-        return 1;
-      }
-      ok( c.setKeyboardBacklight( json.toStdString() ) );
+      ok( c.setKeyboardBacklight( innerJson.toStdString() ) );
       return 0;
     }
   }
-  std::fputs( "Error: Keyboard profile not found\n", stderr );
-  return 1;
+  // Fall back to applying the whole response as-is
+  ok( c.setKeyboardBacklight( *json ) );
+  return 0;
 }
 
 static int cmdKeyboardColor( ucc::UccdClient &c, int r, int g, int b, int brightness )
@@ -1671,44 +1571,24 @@ static int cmdGpuInfo( ucc::UccdClient &c )
 
 static int cmdGpuProfileList( ucc::UccdClient &c )
 {
-  // Daemon built-in GPU profiles
+  // All GPU profiles (built-in + custom) from daemon
   auto json = c.getGpuProfilesJSON();
   if ( json )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
     if ( doc.isArray() && !doc.array().isEmpty() )
     {
-      std::puts( "GPU OC profiles (built-in):" );
+      std::puts( "GPU OC profiles:" );
       for ( const QJsonValue &v : doc.array() )
       {
         if ( v.isObject() )
         {
           QJsonObject obj = v.toObject();
-          std::printf( "  %-36s  %s\n",
+          bool editable = obj["editable"].toBool( false );
+          std::printf( "  %-36s  %s%s\n",
                        obj["id"].toString().toStdString().c_str(),
-                       obj["name"].toString().toStdString().c_str() );
-        }
-      }
-    }
-  }
-
-  // Custom GPU profiles from local storage
-  QSettings settings = localSettings();
-  QByteArray customGP = settings.value( "customGpuProfiles", "[]" ).toByteArray();
-  if ( !customGP.isEmpty() && customGP != "[]" )
-  {
-    QJsonDocument cdoc = QJsonDocument::fromJson( customGP );
-    if ( cdoc.isArray() && !cdoc.array().isEmpty() )
-    {
-      std::puts( "\nGPU OC profiles (custom):" );
-      for ( const QJsonValue &v : cdoc.array() )
-      {
-        if ( v.isObject() )
-        {
-          QJsonObject obj = v.toObject();
-          std::printf( "  %-36s  %s\n",
-                       obj["id"].toString().toStdString().c_str(),
-                       obj["name"].toString().toStdString().c_str() );
+                       obj["name"].toString().toStdString().c_str(),
+                       editable ? " (custom)" : "" );
         }
       }
     }
@@ -1719,35 +1599,10 @@ static int cmdGpuProfileList( ucc::UccdClient &c )
 
 static int cmdGpuProfileGet( ucc::UccdClient &c, const char *gpuProfileId )
 {
-  // Try daemon first
-  auto json = c.getGpuProfile( gpuProfileId );
+  // All GPU profiles (built-in + custom) are now on the daemon
+  auto json = c.getGpuProfileJSON( gpuProfileId );
   if ( json && *json == "{}" )
     json = std::nullopt;
-
-  // Fall back to custom GPU profiles from local storage
-  QString customName, customId;
-  if ( !json )
-  {
-    QSettings settings = localSettings();
-    QByteArray customGP = settings.value( "customGpuProfiles", "[]" ).toByteArray();
-    if ( !customGP.isEmpty() && customGP != "[]" )
-    {
-      QJsonDocument cdoc = QJsonDocument::fromJson( customGP );
-      if ( cdoc.isArray() )
-      {
-        for ( const QJsonValue &v : cdoc.array() )
-        {
-          if ( v.isObject() && v.toObject()["id"].toString() == QString::fromUtf8( gpuProfileId ) )
-          {
-            json = v.toObject()["json"].toString().toStdString();
-            customName = v.toObject()["name"].toString();
-            customId = v.toObject()["id"].toString();
-            break;
-          }
-        }
-      }
-    }
-  }
 
   if ( !json )
   {
@@ -1762,10 +1617,8 @@ static int cmdGpuProfileGet( ucc::UccdClient &c, const char *gpuProfileId )
     return 0;
   }
   QJsonObject obj = doc.object();
-  QString displayName = !customName.isEmpty() ? customName :
-                        ( !obj["name"].toString().isEmpty() ? obj["name"].toString() : QString::fromUtf8( gpuProfileId ) );
-  QString displayId = !customId.isEmpty() ? customId :
-                      ( !obj["id"].toString().isEmpty() ? obj["id"].toString() : QString::fromUtf8( gpuProfileId ) );
+  QString displayName = !obj["name"].toString().isEmpty() ? obj["name"].toString() : QString::fromUtf8( gpuProfileId );
+  QString displayId = !obj["id"].toString().isEmpty() ? obj["id"].toString() : QString::fromUtf8( gpuProfileId );
 
   std::printf( "=== GPU OC Profile: %s ===\n", displayName.toStdString().c_str() );
   std::printf( "  %-24s %s\n", "ID:", displayId.toStdString().c_str() );
@@ -1799,33 +1652,10 @@ static int cmdGpuProfileGet( ucc::UccdClient &c, const char *gpuProfileId )
 
 static int cmdGpuProfileSet( ucc::UccdClient &c, const char *gpuProfileId )
 {
-  // Resolve profile JSON: try daemon first, then local customs
-  std::optional< std::string > json;
-
-  json = c.getGpuProfile( gpuProfileId );
+  // All GPU profiles (built-in + custom) are now on the daemon
+  auto json = c.getGpuProfileJSON( gpuProfileId );
   if ( json && *json == "{}" )
     json = std::nullopt;
-
-  if ( !json )
-  {
-    QSettings settings = localSettings();
-    QByteArray customGP = settings.value( "customGpuProfiles", "[]" ).toByteArray();
-    if ( !customGP.isEmpty() && customGP != "[]" )
-    {
-      QJsonDocument cdoc = QJsonDocument::fromJson( customGP );
-      if ( cdoc.isArray() )
-      {
-        for ( const QJsonValue &v : cdoc.array() )
-        {
-          if ( v.isObject() && v.toObject()["id"].toString() == QString::fromUtf8( gpuProfileId ) )
-          {
-            json = v.toObject()["json"].toString().toStdString();
-            break;
-          }
-        }
-      }
-    }
-  }
 
   if ( !json )
   {
@@ -1882,6 +1712,109 @@ static int cmdGpuOCState( ucc::UccdClient &c )
   }
   std::puts( "=== NVIDIA OC State ===" );
   printJSON( *state );
+  return 0;
+}
+
+// --- Auto-OC ---
+
+static int cmdGpuAutoOC( ucc::UccdClient &c, const char *component )
+{
+  std::string comp = component ? component : "both";
+
+  // Verify valid component
+  if ( comp != "core" && comp != "vram" && comp != "both" )
+  {
+    std::fprintf( stderr, "Invalid component: %s (expected: core, vram, both)\n", comp.c_str() );
+    return 1;
+  }
+
+  std::printf( "Starting auto-OC scan (%s)...\n", comp.c_str() );
+  std::puts( "IMPORTANT: Keep a GPU-intensive workload running during the scan!" );
+  std::puts( "  (e.g., a game, benchmark, or 'gpu_burn')" );
+  std::puts( "Press Ctrl+C to cancel.\n" );
+
+  // Subscribe to progress before starting
+  std::atomic_bool done{ false };
+  int exitCode = 0;
+
+  c.subscribeAutoOCProgress( [&]( const std::string &json )
+  {
+    // Parse and display nicely
+    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
+    if ( doc.isObject() )
+    {
+      auto obj = doc.object();
+      std::string phase   = obj["phase"].toString().toStdString();
+      std::string msg     = obj["message"].toString().toStdString();
+      int         offset  = obj["currentOffset"].toInt();
+      int         best    = obj["bestStable"].toInt();
+      int         iter    = obj["iteration"].toInt();
+      int         maxIter = obj["maxIterations"].toInt();
+      int         temp    = obj["temp"].toInt();
+      int         gpuClk  = obj["gpuClock"].toInt();
+      int         gpuUtil = obj["gpuUtil"].toInt();
+
+      std::printf( "\r[%s] offset=%+d best=%+d step=%d/%d temp=%d°C clk=%dMHz util=%d%% %s",
+                   phase.c_str(), offset, best, iter, maxIter, temp, gpuClk, gpuUtil,
+                   msg.c_str() );
+      std::fflush( stdout );
+    }
+  } );
+
+  c.subscribeAutoOCFinished( [&]( int coreOffset, int vramOffset, bool success, const std::string &msg )
+  {
+    std::printf( "\n\n" );
+    if ( success )
+    {
+      std::puts( "=== Auto-OC Complete ===" );
+      if ( coreOffset > 0 )
+        std::printf( "  Core offset: +%d MHz\n", coreOffset );
+      if ( vramOffset > 0 )
+        std::printf( "  VRAM offset: +%d MHz\n", vramOffset );
+      std::printf( "  %s\n", msg.c_str() );
+      exitCode = 0;
+    }
+    else
+    {
+      std::fprintf( stderr, "Auto-OC failed: %s\n", msg.c_str() );
+      exitCode = 1;
+    }
+    done = true;
+  } );
+
+  if ( !c.startAutoOC( comp, 0 ) )
+  {
+    std::fputs( "Error: Could not start auto-OC (check uccd logs)\n", stderr );
+    return 1;
+  }
+
+  // Process D-Bus events until finished
+  while ( !done )
+  {
+    QCoreApplication::processEvents( QEventLoop::WaitForMoreEvents, 200 );
+  }
+
+  return exitCode;
+}
+
+static int cmdGpuAutoOCStop( ucc::UccdClient &c )
+{
+  if ( c.stopAutoOC() )
+    std::puts( "Auto-OC stop requested" );
+  else
+    std::fputs( "Error: Could not stop auto-OC\n", stderr );
+  return 0;
+}
+
+static int cmdGpuAutoOCStatus( ucc::UccdClient &c )
+{
+  auto running = c.getAutoOCRunning();
+  if ( !running.has_value() )
+  {
+    std::fputs( "Error: Could not query auto-OC status\n", stderr );
+    return 1;
+  }
+  std::printf( "Auto-OC: %s\n", *running ? "running" : "idle" );
   return 0;
 }
 
@@ -2103,6 +2036,9 @@ static void printUsage()
     "  gpu profile set <ID>          Apply a GPU OC profile by ID\n"
     "  gpu profile reset             Reset all GPU OC (clocks, power limits)\n"
     "  gpu oc-state                  Show current NVIDIA OC state (JSON)\n"
+    "  gpu auto-oc [core|vram|both]  Auto-tune GPU/VRAM clock offset (binary search)\n"
+    "  gpu auto-oc stop              Cancel a running auto-OC scan\n"
+    "  gpu auto-oc status            Check if auto-OC is running\n"
     "\n"
     "ODM performance profile:\n"
     "  odm list                      List available ODM performance profiles\n"
@@ -2493,7 +2429,7 @@ int main( int argc, char *argv[] )
       return cmdKeyboardSet( client, args[2] );
     }
     if ( matchArg( sub, "profiles" ) || matchArg( sub, "profile-list" ) || matchArg( sub, "ls" ) )
-      return cmdKeyboardProfileList();
+      return cmdKeyboardProfileList( client );
     if ( matchArg( sub, "activate" ) || matchArg( sub, "use" ) )
     {
       if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli keyboard activate <PROFILE_ID>\n", stderr ); return 1; }
@@ -2666,6 +2602,20 @@ int main( int argc, char *argv[] )
       return cmdGpuInfo( client );
     if ( matchArg( sub, "oc-state" ) || matchArg( sub, "ocstate" ) )
       return cmdGpuOCState( client );
+
+    if ( matchArg( sub, "auto-oc" ) || matchArg( sub, "autooc" ) || matchArg( sub, "auto_oc" ) )
+    {
+      if ( args.size() >= 3 )
+      {
+        if ( matchArg( args[2], "stop" ) || matchArg( args[2], "cancel" ) )
+          return cmdGpuAutoOCStop( client );
+        if ( matchArg( args[2], "status" ) )
+          return cmdGpuAutoOCStatus( client );
+        // component argument
+        return cmdGpuAutoOC( client, args[2] );
+      }
+      return cmdGpuAutoOC( client, "both" );
+    }
 
     if ( matchArg( sub, "profile" ) || matchArg( sub, "prof" ) )
     {

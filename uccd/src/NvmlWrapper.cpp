@@ -23,6 +23,9 @@ constexpr uint32_t NVAPI_INITIALIZE_ID = 0x0150E828;
 constexpr uint32_t NVAPI_UNLOAD_ID = 0xD22BDD7E;
 constexpr uint32_t NVAPI_ENUM_PHYSICAL_GPUS_ID = 0xE5AC921F;
 constexpr uint32_t NVAPI_VOLTAGE_ID = 0x465F9BCF;
+constexpr uint32_t NVAPI_ALL_CLOCK_FREQUENCIES_ID = 0xDCB616C3;
+constexpr uint32_t NVAPI_PERF_POLICIES_STATUS_ID = 0x3D358A0C;
+constexpr uint32_t NVAPI_CLIENT_POWER_TOPOLOGY_ID = 0x60DED2ED;
 constexpr uint32_t NVAPI_OK = 0;
 constexpr nvml::nvmlReturn_t NVML_ERROR_NO_PERMISSION = 4;
 
@@ -71,6 +74,9 @@ NvmlWrapper::NvmlWrapper( bool enableOcFeatures )
   if ( !m_getMemoryInfoV2 )
     m_getMemoryInfo = loadSym< DeviceGetMemoryInfoFn >( "nvmlDeviceGetMemoryInfo" );
   m_getCurrentClocksThrottleReasons = loadSym< DeviceGetCurrentClocksThrottleReasonsFn >( "nvmlDeviceGetCurrentClocksThrottleReasons" );
+  m_getCurrentClocksEventReasons = loadSym< DeviceGetCurrentClocksEventReasonsFn >( "nvmlDeviceGetCurrentClocksEventReasons" );
+  m_getTotalEnergyConsumption = loadSym< DeviceGetTotalEnergyConsumptionFn >( "nvmlDeviceGetTotalEnergyConsumption" );
+  m_getViolationStatus = loadSym< DeviceGetViolationStatusFn >( "nvmlDeviceGetViolationStatus" );
   m_getEncoderUtilization = loadSym< DeviceGetEncoderUtilizationFn >( "nvmlDeviceGetEncoderUtilization" );
   m_getDecoderUtilization = loadSym< DeviceGetDecoderUtilizationFn >( "nvmlDeviceGetDecoderUtilization" );
 
@@ -238,6 +244,9 @@ void NvmlWrapper::initNvapi()
   m_nvapiUnload = reinterpret_cast< NvApiUnloadFn >( m_nvapiQueryInterface( NVAPI_UNLOAD_ID ) );
   m_nvapiEnumPhysicalGpus = reinterpret_cast< NvApiEnumPhysicalGPUsFn >( m_nvapiQueryInterface( NVAPI_ENUM_PHYSICAL_GPUS_ID ) );
   m_nvapiGetVoltage = reinterpret_cast< NvApiGetVoltageFn >( m_nvapiQueryInterface( NVAPI_VOLTAGE_ID ) );
+  m_nvapiGetAllClockFrequencies = reinterpret_cast< NvApiGetAllClockFrequenciesFn >( m_nvapiQueryInterface( NVAPI_ALL_CLOCK_FREQUENCIES_ID ) );
+  m_nvapiPerfPoliciesGetStatus = reinterpret_cast< NvApiPerfPoliciesGetStatusFn >( m_nvapiQueryInterface( NVAPI_PERF_POLICIES_STATUS_ID ) );
+  m_nvapiClientPowerTopologyGetInfo = reinterpret_cast< NvApiClientPowerTopologyGetInfoFn >( m_nvapiQueryInterface( NVAPI_CLIENT_POWER_TOPOLOGY_ID ) );
 
   if ( !m_nvapiInitialize || !m_nvapiEnumPhysicalGpus || !m_nvapiGetVoltage )
     return;
@@ -357,8 +366,8 @@ std::optional< NvmlOCState > NvmlWrapper::getOCState( unsigned int deviceIndex )
           if ( m_getClockOffsets( device, &offsetInfo ) == nvml::NVML_SUCCESS )
           {
             info.currentOffset = offsetInfo.clockOffsetMHz;
-            info.minOffset = offsetInfo.minClockOffsetMHz;
-            info.maxOffset = offsetInfo.maxClockOffsetMHz;
+            info.minOffset = std::max( offsetInfo.minClockOffsetMHz, NvmlOffsetCaps::GPU_MIN_OFFSET );
+            info.maxOffset = std::min( offsetInfo.maxClockOffsetMHz, NvmlOffsetCaps::GPU_MAX_OFFSET );
             state.offsetsSupported = true;
           }
         }
@@ -413,8 +422,8 @@ std::optional< NvmlOCState > NvmlWrapper::getOCState( unsigned int deviceIndex )
           if ( m_getClockOffsets( device, &offsetInfo ) == nvml::NVML_SUCCESS )
           {
             info.currentOffset = offsetInfo.clockOffsetMHz;
-            info.minOffset = offsetInfo.minClockOffsetMHz;
-            info.maxOffset = offsetInfo.maxClockOffsetMHz;
+            info.minOffset = std::max( offsetInfo.minClockOffsetMHz, NvmlOffsetCaps::VRAM_MIN_OFFSET );
+            info.maxOffset = std::min( offsetInfo.maxClockOffsetMHz, NvmlOffsetCaps::VRAM_MAX_OFFSET );
           }
         }
 
@@ -866,6 +875,59 @@ std::optional< std::string > NvmlWrapper::getPerfLimitReason( unsigned int devic
   return std::string( "None" );
 }
 
+std::optional< unsigned long long >
+NvmlWrapper::getCurrentClocksThrottleReasonsMask( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getCurrentClocksThrottleReasons ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+
+  nvml::nvmlClocksThrottleReasons_t reasons = 0;
+  if ( m_getCurrentClocksThrottleReasons( *devOpt, &reasons ) != nvml::NVML_SUCCESS )
+    return std::nullopt;
+  return static_cast< unsigned long long >( reasons );
+}
+
+std::optional< unsigned long long >
+NvmlWrapper::getCurrentClocksEventReasonsMask( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getCurrentClocksEventReasons ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+
+  nvml::nvmlClocksEventReasons_t reasons = 0;
+  if ( m_getCurrentClocksEventReasons( *devOpt, &reasons ) != nvml::NVML_SUCCESS )
+    return std::nullopt;
+  return static_cast< unsigned long long >( reasons );
+}
+
+std::optional< unsigned long long >
+NvmlWrapper::getTotalEnergyConsumptionmJ( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getTotalEnergyConsumption ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+
+  unsigned long long mj = 0;
+  if ( m_getTotalEnergyConsumption( *devOpt, &mj ) != nvml::NVML_SUCCESS )
+    return std::nullopt;
+  return mj;
+}
+
+std::optional< unsigned long long >
+NvmlWrapper::getPerfPolicyViolationUsec( unsigned int deviceIndex,
+                                         nvml::nvmlPerfPolicyType_t policy ) const noexcept
+{
+  if ( !m_getViolationStatus ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+
+  nvml::nvmlViolationTime_t vt{};
+  if ( m_getViolationStatus( *devOpt, policy, &vt ) != nvml::NVML_SUCCESS )
+    return std::nullopt;
+  return vt.violationTime;
+}
+
 std::optional< unsigned int > NvmlWrapper::getEncoderUtilPct( unsigned int deviceIndex ) const noexcept
 {
   if ( !m_getEncoderUtilization ) return std::nullopt;
@@ -929,4 +991,85 @@ std::optional< int > NvmlWrapper::getMemClockOffsetMHz( unsigned int deviceIndex
   info.pstate  = pstate;
   if ( m_getClockOffsets( *devOpt, &info ) != nvml::NVML_SUCCESS ) return std::nullopt;
   return info.clockOffsetMHz;
+}
+
+std::optional< unsigned int >
+NvmlWrapper::getNvapiCurrentGraphicsClockMHz( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_nvapiInitialized || !m_nvapiGetAllClockFrequencies )
+    return std::nullopt;
+  if ( deviceIndex >= m_nvapiGpuHandles.size() )
+    return std::nullopt;
+
+  NvApiClockFrequenciesV3 data{};
+  data.version = ( static_cast< uint32_t >( sizeof( NvApiClockFrequenciesV3 ) ) & 0xFFFFU ) | ( 3U << 16 );
+  data.clockType = 0; // CURRENT
+
+  if ( m_nvapiGetAllClockFrequencies( m_nvapiGpuHandles[deviceIndex], &data ) != static_cast< int32_t >( NVAPI_OK ) )
+    return std::nullopt;
+  if ( data.domain[0].present == 0U || data.domain[0].freqKHz == 0U )
+    return std::nullopt;
+
+  return data.domain[0].freqKHz / 1000U;
+}
+
+std::optional< unsigned int >
+NvmlWrapper::getNvapiCurrentSmClockMHz( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_nvapiInitialized || !m_nvapiGetAllClockFrequencies )
+    return std::nullopt;
+  if ( deviceIndex >= m_nvapiGpuHandles.size() )
+    return std::nullopt;
+
+  NvApiClockFrequenciesV3 data{};
+  data.version = ( static_cast< uint32_t >( sizeof( NvApiClockFrequenciesV3 ) ) & 0xFFFFU ) | ( 3U << 16 );
+  data.clockType = 0; // CURRENT
+
+  if ( m_nvapiGetAllClockFrequencies( m_nvapiGpuHandles[deviceIndex], &data ) != static_cast< int32_t >( NVAPI_OK ) )
+    return std::nullopt;
+  if ( data.domain[2].present == 0U || data.domain[2].freqKHz == 0U )
+    return std::nullopt;
+
+  return data.domain[2].freqKHz / 1000U;
+}
+
+std::optional< unsigned int >
+NvmlWrapper::getNvapiPerfLimiterMask( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_nvapiInitialized || !m_nvapiPerfPoliciesGetStatus )
+    return std::nullopt;
+  if ( deviceIndex >= m_nvapiGpuHandles.size() )
+    return std::nullopt;
+
+  NvApiPerfPoliciesStatus data{};
+  data.version = ( static_cast< uint32_t >( sizeof( NvApiPerfPoliciesStatus ) ) & 0xFFFFU ) | ( 1U << 16 );
+
+  if ( m_nvapiPerfPoliciesGetStatus( m_nvapiGpuHandles[deviceIndex], &data ) != static_cast< int32_t >( NVAPI_OK ) )
+    return std::nullopt;
+
+  // Probe notes show limiter bitmask at offset 0x18 in v1 payload.
+  const uint32_t *u32 = reinterpret_cast< const uint32_t * >( &data );
+  return u32[6];
+}
+
+std::optional< unsigned int >
+NvmlWrapper::getNvapiClientPowerBudgetW( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_nvapiInitialized || !m_nvapiClientPowerTopologyGetInfo )
+    return std::nullopt;
+  if ( deviceIndex >= m_nvapiGpuHandles.size() )
+    return std::nullopt;
+
+  NvApiClientPowerTopology data{};
+  data.version = ( static_cast< uint32_t >( sizeof( NvApiClientPowerTopology ) ) & 0xFFFFU ) | ( 1U << 16 );
+
+  if ( m_nvapiClientPowerTopologyGetInfo( m_nvapiGpuHandles[deviceIndex], &data ) != static_cast< int32_t >( NVAPI_OK ) )
+    return std::nullopt;
+
+  // Probe notes show a stable power budget at offset 0x24 in v1 payload.
+  const uint32_t *u32 = reinterpret_cast< const uint32_t * >( &data );
+  const uint32_t budgetW = u32[9];
+  if ( budgetW == 0U )
+    return std::nullopt;
+  return budgetW;
 }

@@ -1,0 +1,2 @@
+usr/lib/*/libucc_fps_layer.so
+usr/share/vulkan/implicit_layer.d/VkLayer_ucc_fps.json

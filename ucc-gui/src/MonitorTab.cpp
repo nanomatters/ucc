@@ -26,6 +26,9 @@
 #include <QMainWindow>
 #include <QStatusBar>
 #include <QApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <cstring>
 #include <algorithm>
 #include <functional>
@@ -73,7 +76,7 @@ struct MetricDef
   MetricGroup group;
 };
 
-static constexpr int METRIC_COUNT = 10;
+static constexpr int METRIC_COUNT = 11;
 
 // Order matches MetricId enum in MetricsHistoryStore.hpp
 static const MetricDef kMetrics[ METRIC_COUNT ] =
@@ -88,6 +91,7 @@ static const MetricDef kMetrics[ METRIC_COUNT ] =
   { "gpuFrequency",        "dGPU Frequency",      QColor( 255, 167, 38 ),  MetricGroup::Freq  },
   { "gpuVramFrequency",    "dGPU VRAM Freq",      QColor( 46, 204, 113 ),  MetricGroup::Freq  },
   { "gpuCoreVoltage",      "dGPU Core Voltage",   QColor( 174, 234, 0 ),   MetricGroup::Volt  },
+  { "fps",                 "FPS",                 QColor( 86, 182, 255 ),  MetricGroup::Fps   },
 };
 
 // ---------------------------------------------------------------------------
@@ -107,6 +111,7 @@ double MonitorTab::metricFromNormalisedScale( double normalisedValue, MetricGrou
     case MetricGroup::Power: return normalisedValue / (100.0 / m_maxPowerW);  // 0–100 → 0–m_maxPowerW W
     case MetricGroup::Freq:  return normalisedValue / (100.0 / 6000.0);  // 0–100 → 0–6000 MHz
     case MetricGroup::Volt:  return normalisedValue / (100.0 / 1500.0);  // 0–100 → 0–1500 mV
+    case MetricGroup::Fps:   return normalisedValue / (100.0 / 300.0);   // 0–100 → 0–300 fps
   }
   return normalisedValue;
 }
@@ -124,6 +129,7 @@ double MonitorTab::metricToNormalisedScale( MetricGroup g )
     case MetricGroup::Power: return 100.0 / m_maxPowerW;  // 0–m_maxPowerW W → 0–100
     case MetricGroup::Freq:  return 100.0 / 6000.0;  // 0–6000 MHz→ 0–100
     case MetricGroup::Volt:  return 100.0 / 1500.0;  // 0–1500 mV → 0–100
+    case MetricGroup::Fps:   return 100.0 / 300.0;   // 0–300 fps → 0–100
   }
   return 1.0;
 }
@@ -137,6 +143,7 @@ static const char *metricGroupUnit( MetricGroup g )
     case MetricGroup::Power: return "W";
     case MetricGroup::Freq:  return "MHz";
     case MetricGroup::Volt:  return "mV";
+    case MetricGroup::Fps:   return "fps";
   }
   return "";
 }
@@ -332,12 +339,14 @@ void MonitorTab::setupUI()
   setupPowerChart();
   setupFrequencyChart();
   setupVoltageChart();
+  setupFpsChart();
 
   chartsLayout->addWidget( m_tempChartView, 1 );
   chartsLayout->addWidget( m_dutyChartView, 1 );
   chartsLayout->addWidget( m_powerChartView, 1 );
   chartsLayout->addWidget( m_freqChartView, 1 );
   chartsLayout->addWidget( m_voltChartView, 1 );
+  chartsLayout->addWidget( m_fpsChartView, 1 );
 
   // Wrap the per-group charts in a scroll area so the window can be
   // resized smaller than the combined minimum height of 4 charts.
@@ -366,6 +375,7 @@ void MonitorTab::setupUI()
   installHoverCallout( m_powerChart );
   installHoverCallout( m_freqChart );
   installHoverCallout( m_voltChart );
+  installHoverCallout( m_fpsChart );
   // Unified chart hover is installed lazily in setUnifiedMode()
   // because its series don't exist yet at this point.
 
@@ -389,7 +399,99 @@ void MonitorTab::setupUI()
 
 void MonitorTab::setupControls()
 {
-  // Time window is controlled by mouse scroll; no combo box needed.
+  auto *mainLayout = qobject_cast< QVBoxLayout * >( layout() );
+  if ( !mainLayout )
+    return;
+
+  auto *controls = new QWidget( this );
+  auto *row = new QHBoxLayout( controls );
+  row->setContentsMargins( 0, 0, 0, 0 );
+
+  auto *sourceLabel = new QLabel( "FPS Source:", controls );
+  m_fpsSourceCombo = new QComboBox( controls );
+  m_fpsSourceCombo->setMinimumWidth( 260 );
+  m_fpsSourceCombo->addItem( "Auto", "auto" );
+
+  m_fpsRequireP0Check = new QCheckBox( "Require NVIDIA P0", controls );
+  m_fpsRequireP0Check->setChecked( true );
+
+  m_fpsCurrentAppLabel = new QLabel( "Current: -", controls );
+
+  row->addWidget( sourceLabel );
+  row->addWidget( m_fpsSourceCombo );
+  row->addWidget( m_fpsRequireP0Check );
+  row->addWidget( m_fpsCurrentAppLabel, 1 );
+
+  connect( m_fpsSourceCombo, &QComboBox::currentIndexChanged, this, [this]( int ) {
+    if ( m_syncingFpsControls || !m_client || !m_fpsSourceCombo )
+      return;
+    m_client->setFpsSourceApp( m_fpsSourceCombo->currentData().toString().toStdString() );
+  } );
+
+  connect( m_fpsRequireP0Check, &QCheckBox::toggled, this, [this]( bool checked ) {
+    if ( m_syncingFpsControls || !m_client )
+      return;
+    m_client->setFpsRequireP0( checked );
+  } );
+
+  mainLayout->addWidget( controls );
+  refreshFpsSourceControls();
+}
+
+void MonitorTab::refreshFpsSourceControls()
+{
+  if ( !m_client || !m_fpsSourceCombo || !m_fpsRequireP0Check || !m_fpsCurrentAppLabel )
+    return;
+
+  auto jsonOpt = m_client->getFpsSourcesJSON();
+  if ( !jsonOpt.has_value() )
+    return;
+
+  const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
+  if ( !doc.isObject() )
+    return;
+
+  const QJsonObject root = doc.object();
+  const QString selected = root.value( "selectedApp" ).toString( "auto" );
+  const bool requireP0 = root.value( "requireP0" ).toBool( true );
+  const QString currentApp = root.value( "currentApp" ).toString();
+  const qint64 currentPid = root.value( "currentPid" ).toInteger( 0 );
+
+  QStringList apps;
+  apps.append( "auto" );
+  const QJsonArray appArr = root.value( "apps" ).toArray();
+  for ( const auto &v : appArr )
+  {
+    const QString a = v.toString().trimmed();
+    if ( !a.isEmpty() && !apps.contains( a, Qt::CaseInsensitive ) )
+      apps.append( a );
+  }
+  if ( !selected.isEmpty() && !apps.contains( selected, Qt::CaseInsensitive ) )
+    apps.append( selected );
+
+  m_syncingFpsControls = true;
+
+  m_fpsSourceCombo->clear();
+  for ( const QString &a : apps )
+  {
+    const QString label = ( a.compare( "auto", Qt::CaseInsensitive ) == 0 ) ? "Auto" : a;
+    m_fpsSourceCombo->addItem( label, a );
+  }
+
+  int idx = m_fpsSourceCombo->findData( selected );
+  if ( idx < 0 )
+    idx = m_fpsSourceCombo->findData( QStringLiteral( "auto" ) );
+  if ( idx >= 0 )
+    m_fpsSourceCombo->setCurrentIndex( idx );
+
+  m_fpsRequireP0Check->setChecked( requireP0 );
+
+  const QString currentText = currentApp.isEmpty()
+    ? QStringLiteral( "Current: -" )
+    : QStringLiteral( "Current: %1 (pid %2)" ).arg( currentApp ).arg( currentPid );
+  m_fpsCurrentAppLabel->setText( currentText );
+
+  m_syncingFpsControls = false;
 }
 
 void MonitorTab::setTimeWindow( int seconds )
@@ -725,6 +827,7 @@ QChart *MonitorTab::chartForGroup( MetricGroup g ) const
     case MetricGroup::Power: return m_powerChart;
     case MetricGroup::Freq:  return m_freqChart;
     case MetricGroup::Volt:  return m_voltChart;
+    case MetricGroup::Fps:   return m_fpsChart;
   }
   return m_tempChart;
 }
@@ -1689,6 +1792,25 @@ void MonitorTab::setupVoltageChart()
   m_voltChartView = createChartView( m_voltChart );
 }
 
+void MonitorTab::setupFpsChart()
+{
+  m_fpsChart = createChart();
+  m_fpsXAxis = createXAxis();
+  m_fpsYAxis = createYAxis( "FPS", 0, 300 );
+  m_fpsChart->addAxis( m_fpsXAxis, Qt::AlignBottom );
+  m_fpsChart->addAxis( m_fpsYAxis, Qt::AlignLeft );
+
+  for ( const auto &md : kMetrics )
+  {
+    if ( md.group != MetricGroup::Fps ) continue;
+    auto *s = m_seriesMap[ md.key ].series;
+    m_fpsChart->addSeries( s );
+    s->attachAxis( m_fpsXAxis );
+    s->attachAxis( m_fpsYAxis );
+  }
+  m_fpsChartView = createChartView( m_fpsChart );
+}
+
 // ---------------------------------------------------------------------------
 // Incremental data fetch
 // ---------------------------------------------------------------------------
@@ -1697,6 +1819,10 @@ void MonitorTab::fetchData()
 {
   if ( !m_client || m_paused )
     return;
+
+  ++m_fpsSourceRefreshTicks;
+  if ( m_fpsSourceRefreshTicks % 5 == 0 )
+    refreshFpsSourceControls();
 
   auto result = m_client->getMonitorDataSince( m_lastTimestamp );
   if ( !result.has_value() || result->isEmpty() )
@@ -1708,6 +1834,7 @@ void MonitorTab::fetchData()
   m_powerChartView->setUpdatesEnabled( false );
   m_freqChartView->setUpdatesEnabled( false );
   m_voltChartView->setUpdatesEnabled( false );
+  m_fpsChartView->setUpdatesEnabled( false );
   m_unifiedChartView->setUpdatesEnabled( false );
 
   applyBinaryData( *result );
@@ -1722,6 +1849,7 @@ void MonitorTab::fetchData()
   m_powerChartView->setUpdatesEnabled( true );
   m_freqChartView->setUpdatesEnabled( true );
   m_voltChartView->setUpdatesEnabled( true );
+  m_fpsChartView->setUpdatesEnabled( true );
   m_unifiedChartView->setUpdatesEnabled( true );
 
   // Refresh floating crosshair labels so they don't lag behind the scrolling data
@@ -1874,6 +2002,7 @@ void MonitorTab::updateAxes()
     setRange( m_powerXAxis );
     setRange( m_freqXAxis );
     setRange( m_voltXAxis );
+    setRange( m_fpsXAxis );
   }
   else
   {
@@ -1895,6 +2024,7 @@ void MonitorTab::updateGroupChartVisibility()
     { MetricGroup::Power, m_powerChartView },
     { MetricGroup::Freq,  m_freqChartView  },
     { MetricGroup::Volt,  m_voltChartView  },
+    { MetricGroup::Fps,   m_fpsChartView   },
   };
 
   for ( const auto &[group, view] : groupViews )

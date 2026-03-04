@@ -15,9 +15,6 @@
 
 #include "ProfileManager.hpp"
 #include <QDebug>
-#include <QSettings>
-#include <QStandardPaths>
-#include <QDir>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -34,18 +31,8 @@ namespace ucc
 ProfileManager::ProfileManager( QObject *parent )
   : QObject( parent )
   , m_client( std::make_unique< UccdClient >( this ) )
-  , m_settings( std::make_unique< QSettings >( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat, this ) )
 {
   m_connected = m_client->isConnected();
-
-  // Load local custom fan profiles regardless of DBus connection
-  loadCustomFanProfilesFromSettings();
-
-  // Load local custom keyboard profiles
-  loadCustomKeyboardProfilesFromSettings();
-
-  // Load local custom GPU OC profiles
-  loadCustomGpuProfilesFromSettings();
 
   // Always wire daemon signals — they won't fire while disconnected but will
   // start arriving as soon as uccd appears (see connectionStatusChanged below).
@@ -71,28 +58,90 @@ ProfileManager::ProfileManager( QObject *parent )
     m_connected = connected;
     if ( connected && !wasConnected )
     {
-      qInfo() << "[ProfileManager] uccd reconnected — reloading data";
+      qInfo() << "[ProfileManager] uccd reconnected — reloading data from daemon";
       m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
-      loadBuiltinFanProfiles();
-      loadBuiltinGpuProfiles();
-      loadCustomProfilesFromSettings();
+      loadProfilesFromDaemon();
+      loadFanProfilesFromDaemon();
+      loadGpuProfilesFromDaemon();
+      loadKeyboardProfilesFromDaemon();
     }
     emit connectedChanged();
   } );
 
   if ( m_connected )
   {
-    // Fetch hardware power limits immediately
     m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
-
-    // Fetch built-in fan profiles from daemon (id + name)
-    loadBuiltinFanProfiles();
-    loadBuiltinGpuProfiles();
-
-    // Load custom profiles from local storage
-    loadCustomProfilesFromSettings();
+    loadProfilesFromDaemon();
+    loadFanProfilesFromDaemon();
+    loadGpuProfilesFromDaemon();
+    loadKeyboardProfilesFromDaemon();
   }
+
   emit connectedChanged();
+}
+
+// ---------------------------------------------------------------------------
+// Load all profiles from daemon (replaces loadCustomProfilesFromSettings +
+// loadBuiltinFanProfiles + loadBuiltinGpuProfiles)
+// ---------------------------------------------------------------------------
+
+void ProfileManager::loadProfilesFromDaemon()
+{
+  m_allProfilesData = QJsonArray();
+
+  // GetProfilesJSON returns ALL profiles with "editable" flag
+  if ( auto json = m_client->getProfilesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_allProfilesData = doc.array();
+  }
+
+  m_activeProfileId.clear();
+
+  updateAllProfiles();
+}
+
+void ProfileManager::loadFanProfilesFromDaemon()
+{
+  m_fanProfilesData = QJsonArray();
+
+  if ( auto json = m_client->getFanProfilesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_fanProfilesData = doc.array();
+  }
+
+  emit fanProfilesChanged();
+}
+
+void ProfileManager::loadGpuProfilesFromDaemon()
+{
+  m_gpuProfilesData = QJsonArray();
+
+  if ( auto json = m_client->getGpuProfilesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+    if ( doc.isArray() )
+      m_gpuProfilesData = doc.array();
+  }
+
+  emit gpuProfilesChanged();
+}
+
+void ProfileManager::loadKeyboardProfilesFromDaemon()
+{
+  m_keyboardProfilesData = QJsonArray();
+
+  if ( auto json = m_client->getKeyboardProfilesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_keyboardProfilesData = doc.array();
+  }
+
+  emit keyboardProfilesChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -106,39 +155,10 @@ void ProfileManager::refresh()
 
 void ProfileManager::updateProfiles()
 {
-  // Fetch default profiles if not already loaded
-  if ( m_defaultProfilesData.isEmpty() )
-  {
-    try {
-      if ( auto json = m_client->getDefaultProfilesJSON() )
-      {
-        QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
-        if ( doc.isArray() )
-        {
-          m_defaultProfilesData = doc.array();
-          m_defaultProfiles.clear();
-          for ( const auto &profile : m_defaultProfilesData )
-          {
-            if ( profile.isObject() )
-            {
-              QString name = profile.toObject()["name"].toString();
-              if ( !name.isEmpty() )
-              {
-                m_defaultProfiles.append( name );
-              }
-            }
-          }
-        }
-      }
-    } catch ( const std::exception &e ) {
-      qWarning() << "Failed to get default profiles:" << e.what();
-    }
-  }
+  // Fetch profiles from daemon if not already loaded
+  if ( m_allProfilesData.isEmpty() )
+    loadProfilesFromDaemon();
 
-  emit defaultProfilesChanged();
-  emit customProfilesChanged();
-
-  // Ensure combined list is up-to-date
   updateAllProfiles();
 
   // Query daemon for current power state
@@ -156,9 +176,6 @@ void ProfileManager::updateProfiles()
   }
 
   // Resolve the active profile for the current power state from the stateMap.
-  // This is the authoritative source: if the user set a built-in profile via
-  // SetStateMap, the stateMap reflects that — whereas the daemon's
-  // GetActiveProfileJSON only reports the *running* profile which may differ.
   if ( m_activeProfileId.isEmpty() && !m_powerState.isEmpty() )
   {
     if ( QString mapped = resolveStateMapToProfileId( m_powerState ); !mapped.isEmpty() )
@@ -168,7 +185,7 @@ void ProfileManager::updateProfiles()
     }
   }
 
-  // Fallback: ask daemon for currently running profile (e.g. fresh install, no stateMap yet)
+  // Fallback: ask daemon for currently running profile
   if ( m_activeProfileId.isEmpty() )
   {
     try
@@ -178,9 +195,7 @@ void ProfileManager::updateProfiles()
         QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
         if ( doc.isObject() )
         {
-          QJsonObject obj = doc.object();
-          QString id = obj["id"].toString();
-
+          QString id = doc.object()["id"].toString();
           if ( !id.isEmpty() )
           {
             m_activeProfileId = id;
@@ -193,9 +208,7 @@ void ProfileManager::updateProfiles()
     }
   }
 
-  // Query the daemon's live active profile to learn the current keyboard and
-  // fan sub-profile IDs.  These may differ from the stored profile if a remote
-  // client (e.g. the tray applet) changed them at runtime.
+  // Query the daemon's live active profile for current sub-profile IDs
   try
   {
     if ( auto json = m_client->getActiveProfileJSON() )
@@ -205,18 +218,15 @@ void ProfileManager::updateProfiles()
       {
         QJsonObject obj = doc.object();
 
-        // Keyboard profile ID
         QString kbId = obj[ "selectedKeyboardProfile" ].toString();
         if ( !kbId.isEmpty() )
           m_activeKeyboardProfileId = kbId;
 
-        // Fan profile ID
         auto fanObj = obj[ "fan" ].toObject();
         QString fpId = fanObj[ "fanProfile" ].toString();
         if ( !fpId.isEmpty() )
           m_activeFanProfileId = fpId;
 
-        // GPU profile ID
         QString gpId = obj[ "gpuProfileId" ].toString();
         if ( !gpId.isEmpty() )
           m_activeGpuProfileId = gpId;
@@ -246,13 +256,7 @@ QString ProfileManager::profileNameById( const QString &profileId ) const
 {
   if ( profileId.isEmpty() ) return QString();
 
-  // Search custom profiles first (they take precedence)
-  for ( const auto &p : m_customProfilesData )
-  {
-    if ( p.isObject() && p.toObject()["id"].toString() == profileId )
-      return p.toObject()["name"].toString();
-  }
-  for ( const auto &p : m_defaultProfilesData )
+  for ( const auto &p : m_allProfilesData )
   {
     if ( p.isObject() && p.toObject()["id"].toString() == profileId )
       return p.toObject()["name"].toString();
@@ -264,13 +268,7 @@ QString ProfileManager::profileIdByName( const QString &profileName ) const
 {
   if ( profileName.isEmpty() ) return QString();
 
-  // Search custom profiles first
-  for ( const auto &p : m_customProfilesData )
-  {
-    if ( p.isObject() && p.toObject()["name"].toString() == profileName )
-      return p.toObject()["id"].toString();
-  }
-  for ( const auto &p : m_defaultProfilesData )
+  for ( const auto &p : m_allProfilesData )
   {
     if ( p.isObject() && p.toObject()["name"].toString() == profileName )
       return p.toObject()["id"].toString();
@@ -284,29 +282,29 @@ QString ProfileManager::profileIdByName( const QString &profileName ) const
 
 void ProfileManager::setActiveProfile( const QString &profileId )
 {
-  // Check if this is a custom profile
-  bool isCustom = false;
+  // Custom (editable) profiles are applied by sending data; built-in profiles by ID only
   QString profileData;
-  for ( const auto &profile : m_customProfilesData )
+  bool isEditable = false;
+  for ( const auto &profile : m_allProfilesData )
   {
     QJsonObject obj = profile.toObject();
     if ( obj.value( "id" ).toString() == profileId )
     {
-      isCustom = true;
-      profileData = QJsonDocument( obj ).toJson( QJsonDocument::Compact );
+      isEditable = obj.value( "editable" ).toBool( false );
+      if ( isEditable )
+        profileData = QJsonDocument( obj ).toJson( QJsonDocument::Compact );
       break;
     }
   }
 
   bool success = false;
-  if ( isCustom && !profileData.isEmpty() )
+  if ( isEditable && !profileData.isEmpty() )
   {
     try {
       success = m_client->applyProfile( profileData.toStdString() );
     } catch ( const std::exception &e ) {
       qWarning() << "Failed to apply custom profile:" << e.what();
     }
-    qDebug() << "Custom profile applied:" << profileId;
   }
   else
   {
@@ -315,7 +313,6 @@ void ProfileManager::setActiveProfile( const QString &profileId )
     } catch ( const std::exception &e ) {
       qWarning() << "Failed to set active profile:" << e.what();
     }
-    qDebug() << "Default profile activated:" << profileId;
   }
 
   if ( m_activeProfileId != profileId )
@@ -327,13 +324,11 @@ void ProfileManager::setActiveProfile( const QString &profileId )
   updateActiveProfileIndex();
 
   if ( !success )
-  {
     emit error( "Failed to activate profile: " + profileId );
-  }
 }
 
 // ---------------------------------------------------------------------------
-// Save / delete / create profiles
+// Save / delete / create profiles — all go through daemon
 // ---------------------------------------------------------------------------
 
 void ProfileManager::saveProfile( const QString &profileJSON )
@@ -355,65 +350,60 @@ void ProfileManager::saveProfile( const QString &profileJSON )
     return;
   }
 
-  int foundIndex = -1;
-  QString oldName;
-  for ( int i = 0; i < m_customProfilesData.size(); ++i )
+  // Save to daemon (daemon now handles all persistence)
+  if ( m_connected )
   {
-    QJsonObject existingProfile = m_customProfilesData[i].toObject();
-    if ( existingProfile.value( "id" ).toString() == profileId )
+    bool success = m_client->saveProfile( profileJSON.toStdString() );
+    if ( !success )
+    {
+      qWarning() << "Failed to save profile to daemon:" << profileName;
+      emit error( "Failed to save profile: " + profileName );
+      return;
+    }
+    qDebug() << "Profile saved to daemon:" << profileName;
+  }
+
+  // Update local cache
+  int foundIndex = -1;
+  for ( int i = 0; i < m_allProfilesData.size(); ++i )
+  {
+    if ( m_allProfilesData[i].toObject().value( "id" ).toString() == profileId )
     {
       foundIndex = i;
-      oldName = existingProfile.value( "name" ).toString();
       break;
     }
   }
 
   if ( foundIndex == -1 )
-  {
-    m_customProfilesData.append( profileObj );
-    m_customProfiles.append( profileName );
-  }
+    m_allProfilesData.append( profileObj );
   else
-  {
-    m_customProfilesData[foundIndex] = profileObj;
-    if ( !oldName.isEmpty() && oldName != profileName )
-    {
-      int nameIndex = m_customProfiles.indexOf( oldName );
-      if ( nameIndex != -1 )
-        m_customProfiles.replace( nameIndex, profileName );
-      else if ( !m_customProfiles.contains( profileName ) )
-        m_customProfiles.append( profileName );
-    }
-  }
-
-  saveCustomProfilesToSettings();
-
-  if ( m_connected )
-  {
-    bool success = m_client->saveCustomProfile( profileJSON.toStdString() );
-    if ( !success )
-      qWarning() << "Failed to save profile to daemon:" << profileName;
-    else
-      qDebug() << "Profile saved to daemon:" << profileName;
-  }
+    m_allProfilesData[foundIndex] = profileObj;
 
   updateAllProfiles();
-  qDebug() << "Profile saved locally:" << profileName;
 }
 
 void ProfileManager::deleteProfile( const QString &profileId )
 {
-  for ( int i = 0; i < m_customProfilesData.size(); ++i )
+  // Delete via daemon
+  if ( m_connected )
   {
-    QJsonObject profileObj = m_customProfilesData[i].toObject();
-    if ( profileObj.value( "id" ).toString() == profileId )
+    bool success = m_client->deleteProfile( profileId.toStdString() );
+    if ( !success )
     {
-      QString profileName = profileObj.value( "name" ).toString();
-      m_customProfilesData.removeAt( i );
-      m_customProfiles.removeAll( profileName );
-      saveCustomProfilesToSettings();
+      qWarning() << "Failed to delete profile from daemon:" << profileId;
+      emit error( "Failed to delete profile: " + profileId );
+      return;
+    }
+  }
+
+  // Update local cache
+  for ( int i = 0; i < m_allProfilesData.size(); ++i )
+  {
+    if ( m_allProfilesData[i].toObject().value( "id" ).toString() == profileId )
+    {
+      m_allProfilesData.removeAt( i );
       updateAllProfiles();
-      qDebug() << "Profile deleted locally:" << profileName;
+      qDebug() << "Profile deleted:" << profileId;
       return;
     }
   }
@@ -431,14 +421,25 @@ QString ProfileManager::createProfileFromDefault( const QString &name )
       QString id = QUuid::createUuid().toString( QUuid::WithoutBraces );
       profileObj["name"] = name;
       profileObj["id"] = id;
+      profileObj["editable"] = true;
 
-      m_customProfilesData.append( profileObj );
-      m_customProfiles.append( name );
-      saveCustomProfilesToSettings();
+      QString profileJSON = QJsonDocument( profileObj ).toJson( QJsonDocument::Compact );
+
+      // Save through daemon
+      if ( m_connected )
+      {
+        if ( !m_client->saveProfile( profileJSON.toStdString() ) )
+        {
+          emit error( "Failed to save new profile to daemon" );
+          return QString();
+        }
+      }
+
+      m_allProfilesData.append( profileObj );
       updateAllProfiles();
 
       qDebug() << "Created new profile from default:" << name;
-      return QJsonDocument( profileObj ).toJson( QJsonDocument::Compact );
+      return profileJSON;
     }
   }
 
@@ -452,14 +453,7 @@ QString ProfileManager::createProfileFromDefault( const QString &name )
 
 QString ProfileManager::getProfileDetails( const QString &profileId )
 {
-  // Search in custom profiles first
-  for ( const auto &profile : m_customProfilesData )
-  {
-    if ( profile.toObject()["id"].toString() == profileId )
-      return QJsonDocument( profile.toObject() ).toJson( QJsonDocument::Compact );
-  }
-  // Then default profiles
-  for ( const auto &profile : m_defaultProfilesData )
+  for ( const auto &profile : m_allProfilesData )
   {
     if ( profile.toObject()["id"].toString() == profileId )
       return QJsonDocument( profile.toObject() ).toJson( QJsonDocument::Compact );
@@ -485,15 +479,11 @@ void ProfileManager::onProfileChanged( const std::string &profileId,
     qDebug() << "Active profile updated from signal:" << qId;
   }
 
-  // Propagate keyboard / fan sub-profile changes regardless of whether the
-  // top-level profile ID changed.  Clients that only care about sub-profiles
-  // (e.g. keyboard editor combo) listen to these dedicated signals.
   if ( const QString kbId = QString::fromStdString( keyboardProfileId );
        !kbId.isEmpty() && kbId != m_activeKeyboardProfileId )
   {
     m_activeKeyboardProfileId = kbId;
     emit activeKeyboardProfileChanged( kbId );
-    qDebug() << "Active keyboard profile updated from signal:" << kbId;
   }
 
   if ( const QString fpId = QString::fromStdString( fanProfileId );
@@ -501,7 +491,6 @@ void ProfileManager::onProfileChanged( const std::string &profileId,
   {
     m_activeFanProfileId = fpId;
     emit activeFanProfileChanged( fpId );
-    qDebug() << "Active fan profile updated from signal:" << fpId;
   }
 
   if ( const QString gpId = QString::fromStdString( gpuProfileId );
@@ -509,7 +498,6 @@ void ProfileManager::onProfileChanged( const std::string &profileId,
   {
     m_activeGpuProfileId = gpId;
     emit activeGpuProfileChanged( gpId );
-    qDebug() << "Active GPU profile updated from signal:" << gpId;
   }
 
   updateProfiles();
@@ -517,19 +505,11 @@ void ProfileManager::onProfileChanged( const std::string &profileId,
 
 void ProfileManager::onPowerStateChanged( const QString &state )
 {
-  qDebug() << "Power state changed:" << state;
-
   m_powerState = state;
   emit powerStateChanged();
 
-  // Resolve the mapped profile ID for display purposes only.
-  // The daemon is responsible for applying the correct profile.
   QString desiredProfileId = resolveStateMapToProfileId( state );
-  if ( desiredProfileId.isEmpty() )
-  {
-    qDebug() << "No profile mapped for state:" << state;
-    return;
-  }
+  if ( desiredProfileId.isEmpty() ) return;
 
   if ( m_activeProfileId != desiredProfileId )
   {
@@ -549,17 +529,7 @@ void ProfileManager::updateAllProfiles()
   QStringList newAllProfiles;
   QStringList newAllProfileIds;
 
-  // Default profiles
-  for ( const auto &p : m_defaultProfilesData )
-  {
-    if ( p.isObject() )
-    {
-      newAllProfiles.append( p.toObject()["name"].toString() );
-      newAllProfileIds.append( p.toObject()["id"].toString() );
-    }
-  }
-  // Custom profiles
-  for ( const auto &p : m_customProfilesData )
+  for ( const auto &p : m_allProfilesData )
   {
     if ( p.isObject() )
     {
@@ -589,24 +559,20 @@ void ProfileManager::updateActiveProfileIndex()
 void ProfileManager::setActiveProfileByIndex( int index )
 {
   if ( index >= 0 && index < m_allProfileIds.size() )
-  {
     setActiveProfile( m_allProfileIds.at( index ) );
-  }
 }
 
 std::vector< int > ProfileManager::getHardwarePowerLimits()
 {
+  if ( auto liveLimits = m_client->getODMPowerLimits(); liveLimits && !liveLimits->empty() )
+    m_hardwarePowerLimits = *liveLimits;
+
   return m_hardwarePowerLimits;
 }
 
-bool ProfileManager::isCustomProfile( const QString &profileId ) const
+bool ProfileManager::isProfileEditable( const QString &profileId ) const
 {
-  for ( const auto &p : m_customProfilesData )
-  {
-    if ( p.isObject() && p.toObject()["id"].toString() == profileId )
-      return true;
-  }
-  return false;
+  return isProfileEditable( profileId, m_allProfilesData );
 }
 
 // ---------------------------------------------------------------------------
@@ -615,25 +581,32 @@ bool ProfileManager::isCustomProfile( const QString &profileId ) const
 
 QString ProfileManager::resolveStateMapToProfileId( const QString &state )
 {
-  if ( !m_stateMap.contains( state ) ) return QString();
-  return m_stateMap[state].toString();
+  const QString settingsJson = getSettingsJSON();
+  if ( settingsJson.isEmpty() )
+    return QString();
+
+  const QJsonDocument settingsDoc = QJsonDocument::fromJson( settingsJson.toUtf8() );
+  if ( !settingsDoc.isObject() )
+    return QString();
+
+  const QJsonObject settingsObj = settingsDoc.object();
+  if ( !settingsObj.contains( "stateMap" ) || !settingsObj["stateMap"].isObject() )
+    return QString();
+
+  const QJsonObject stateMap = settingsObj["stateMap"].toObject();
+  if ( !stateMap.contains( state ) )
+    return QString();
+
+  return stateMap[state].toString();
 }
 
 bool ProfileManager::setStateMap( const QString &state, const QString &profileId )
 {
-  m_stateMap[state] = profileId;
-  saveCustomProfilesToSettings();
   return m_client->setStateMap( state.toStdString(), profileId.toStdString() );
 }
 
 bool ProfileManager::setBatchStateMap( const std::map< QString, QString > &entries )
 {
-  // Update local stateMap first
-  for ( const auto &[state, profileId] : entries )
-    m_stateMap[state] = profileId;
-  saveCustomProfilesToSettings();
-
-  // Convert to std::string map for D-Bus client
   std::map< std::string, std::string > stdEntries;
   for ( const auto &[state, profileId] : entries )
     stdEntries[state.toStdString()] = profileId.toStdString();
@@ -641,141 +614,13 @@ bool ProfileManager::setBatchStateMap( const std::map< QString, QString > &entri
 }
 
 // ---------------------------------------------------------------------------
-// Local settings persistence (profiles + stateMap)
+// Fan profiles — all go through daemon
 // ---------------------------------------------------------------------------
-
-void ProfileManager::loadCustomProfilesFromSettings()
-{
-  m_customProfilesData = QJsonArray();
-  m_customProfiles.clear();
-
-  QString profilesJson = m_settings->value( "customProfiles", "{}" ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( profilesJson.toUtf8() );
-
-  if ( doc.isArray() )
-  {
-    m_customProfilesData = doc.array();
-    for ( int i = 0; i < m_customProfilesData.size(); ++i )
-    {
-      const QJsonValue &value = m_customProfilesData[i];
-      if ( value.isObject() )
-      {
-        QJsonObject obj = value.toObject();
-        QString name = obj.value( "name" ).toString();
-        if ( !name.isEmpty() )
-          m_customProfiles.append( name );
-      }
-    }
-  }
-
-  m_activeProfileId = "";
-
-  // Load stateMap
-  QString stateMapJson = m_settings->value( "stateMap", "{}" ).toString();
-  QJsonDocument stateMapDoc = QJsonDocument::fromJson( stateMapJson.toUtf8() );
-  if ( stateMapDoc.isObject() )
-    m_stateMap = stateMapDoc.object();
-  else
-  {
-    qWarning() << "Failed to parse stateMap JSON, using empty map";
-    m_stateMap = QJsonObject();
-  }
-}
-
-void ProfileManager::saveCustomProfilesToSettings()
-{
-  QJsonDocument doc( m_customProfilesData );
-  m_settings->setValue( "customProfiles", doc.toJson( QJsonDocument::Compact ) );
-
-  QJsonDocument stateMapDoc( m_stateMap );
-  m_settings->setValue( "stateMap", stateMapDoc.toJson( QJsonDocument::Compact ) );
-
-  m_settings->sync();
-}
-
-// ---------------------------------------------------------------------------
-// Built-in fan profiles (from daemon)
-// ---------------------------------------------------------------------------
-
-void ProfileManager::loadBuiltinFanProfiles()
-{
-  m_builtinFanProfilesData = QJsonArray();
-  m_builtinFanProfiles.clear();
-
-  if ( auto json = m_client->getFanProfilesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
-    if ( doc.isArray() )
-    {
-      m_builtinFanProfilesData = doc.array();
-      for ( const auto &val : m_builtinFanProfilesData )
-      {
-        if ( val.isObject() )
-        {
-          QString name = val.toObject().value( "name" ).toString();
-          if ( !name.isEmpty() )
-            m_builtinFanProfiles.append( name );
-        }
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Custom fan profiles (local storage, by ID)
-// ---------------------------------------------------------------------------
-
-void ProfileManager::loadCustomFanProfilesFromSettings()
-{
-  m_customFanProfilesData = QJsonArray();
-  m_customFanProfiles.clear();
-
-  QString fanJson = m_settings->value( "customFanProfiles", "[]" ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( fanJson.toUtf8() );
-
-  if ( doc.isArray() )
-  {
-    m_customFanProfilesData = doc.array();
-    for ( const auto &val : m_customFanProfilesData )
-    {
-      if ( val.isObject() )
-      {
-        QString name = val.toObject().value( "name" ).toString();
-        if ( !name.isEmpty() )
-          m_customFanProfiles.append( name );
-      }
-    }
-  }
-}
-
-void ProfileManager::saveCustomFanProfilesToSettings()
-{
-  QJsonDocument doc( m_customFanProfilesData );
-  m_settings->setValue( "customFanProfiles", doc.toJson( QJsonDocument::Compact ) );
-  m_settings->sync();
-}
 
 QString ProfileManager::getFanProfile( const QString &fanProfileId )
 {
-  // Check custom fan profiles first (by ID)
-  for ( const auto &v : m_customFanProfilesData )
-  {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      if ( o.value( "id" ).toString() == fanProfileId )
-      {
-        QString jsonStr = o.value( "json" ).toString();
-        if ( !jsonStr.trimmed().isEmpty() )
-          return jsonStr;
-
-        qWarning() << "[ProfileManager] Custom fan profile" << fanProfileId << "has empty JSON, falling back to built-in";
-      }
-    }
-  }
-
-  // Fall back to daemon-provided built-in profiles
-  if ( auto json = m_client->getFanProfile( fanProfileId.toStdString() ) )
+  // Fetch from daemon (supports both built-in and custom)
+  if ( auto json = m_client->getFanProfileJSON( fanProfileId.toStdString() ) )
     return QString::fromStdString( *json );
 
   return "{}";
@@ -783,433 +628,152 @@ QString ProfileManager::getFanProfile( const QString &fanProfileId )
 
 bool ProfileManager::setFanProfile( const QString &fanProfileId, const QString &name, const QString &json )
 {
-  // Update existing entry or append new
-  bool found = false;
-  for ( int i = 0; i < m_customFanProfilesData.size(); ++i )
+  bool success = m_client->saveFanProfile( fanProfileId.toStdString(), name.toStdString(), json.toStdString() );
+  if ( success )
   {
-    if ( m_customFanProfilesData[i].isObject() )
-    {
-      QJsonObject o = m_customFanProfilesData[i].toObject();
-      if ( o.value( "id" ).toString() == fanProfileId )
-      {
-        o["name"] = name;
-        o["json"] = json;
-        m_customFanProfilesData[i] = o;
-        found = true;
-        break;
-      }
-    }
+    loadFanProfilesFromDaemon();
+    qDebug() << "Fan profile saved via daemon:" << name;
   }
-
-  if ( !found )
+  else
   {
-    QJsonObject o;
-    o["id"] = fanProfileId;
-    o["name"] = name;
-    o["json"] = json;
-    m_customFanProfilesData.append( o );
-    m_customFanProfiles.append( name );
+    qWarning() << "Failed to save fan profile via daemon:" << name;
   }
-
-  saveCustomFanProfilesToSettings();
-  emit customFanProfilesChanged();
-  return true;
+  return success;
 }
 
 bool ProfileManager::deleteFanProfile( const QString &fanProfileId )
 {
-  bool removed = false;
-  QJsonArray newArr;
-  for ( const auto &v : m_customFanProfilesData )
+  bool success = m_client->deleteFanProfile( fanProfileId.toStdString() );
+  if ( success )
   {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      if ( o.value( "id" ).toString() == fanProfileId )
-      {
-        m_customFanProfiles.removeAll( o.value( "name" ).toString() );
-        removed = true;
-        continue;
-      }
-    }
-    newArr.append( v );
+    loadFanProfilesFromDaemon();
+    qDebug() << "Fan profile deleted via daemon:" << fanProfileId;
   }
-
-  if ( removed )
-  {
-    m_customFanProfilesData = newArr;
-    saveCustomFanProfilesToSettings();
-    emit customFanProfilesChanged();
-  }
-  return removed;
+  return success;
 }
 
 bool ProfileManager::renameFanProfile( const QString &fanProfileId, const QString &newName )
 {
   if ( newName.isEmpty() ) return false;
 
-  for ( int i = 0; i < m_customFanProfilesData.size(); ++i )
+  // Fetch current data, update name, re-save
+  if ( auto json = m_client->getFanProfileJSON( fanProfileId.toStdString() ) )
   {
-    if ( m_customFanProfilesData[i].isObject() )
-    {
-      QJsonObject o = m_customFanProfilesData[i].toObject();
-      if ( o.value( "id" ).toString() == fanProfileId )
-      {
-        QString oldName = o.value( "name" ).toString();
-        o["name"] = newName;
-        m_customFanProfilesData[i] = o;
-
-        int nameIdx = m_customFanProfiles.indexOf( oldName );
-        if ( nameIdx != -1 )
-          m_customFanProfiles.replace( nameIdx, newName );
-
-        saveCustomFanProfilesToSettings();
-        emit customFanProfilesChanged();
-        return true;
-      }
-    }
+    return setFanProfile( fanProfileId, newName, QString::fromStdString( *json ) );
   }
   return false;
 }
 
 // ---------------------------------------------------------------------------
-// Custom keyboard profiles (local storage, by ID)
+// Keyboard profiles — all go through daemon
 // ---------------------------------------------------------------------------
-
-void ProfileManager::loadCustomKeyboardProfilesFromSettings()
-{
-  m_customKeyboardProfilesData = QJsonArray();
-  m_customKeyboardProfiles.clear();
-
-  QString keyboardJson = m_settings->value( "customKeyboardProfiles", "[]" ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( keyboardJson.toUtf8() );
-
-  if ( doc.isArray() )
-  {
-    m_customKeyboardProfilesData = doc.array();
-    for ( const auto &val : m_customKeyboardProfilesData )
-    {
-      if ( val.isObject() )
-      {
-        QString name = val.toObject().value( "name" ).toString();
-        if ( !name.isEmpty() )
-          m_customKeyboardProfiles.append( name );
-      }
-    }
-  }
-}
-
-void ProfileManager::saveCustomKeyboardProfilesToSettings()
-{
-  QJsonDocument doc( m_customKeyboardProfilesData );
-  m_settings->setValue( "customKeyboardProfiles", doc.toJson( QJsonDocument::Compact ) );
-  m_settings->sync();
-}
 
 QString ProfileManager::getKeyboardProfile( const QString &keyboardProfileId )
 {
-  for ( const auto &v : m_customKeyboardProfilesData )
-  {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      if ( o.value( "id" ).toString() == keyboardProfileId )
-      {
-        QString jsonStr = o.value( "json" ).toString();
-        if ( !jsonStr.trimmed().isEmpty() )
-          return jsonStr;
+  if ( auto json = m_client->getKeyboardProfileJSON( keyboardProfileId.toStdString() ) )
+    return QString::fromStdString( *json );
 
-        qWarning() << "[ProfileManager] Keyboard profile" << keyboardProfileId << "has empty JSON";
-      }
-    }
-  }
   return "{}";
 }
 
 bool ProfileManager::setKeyboardProfile( const QString &keyboardProfileId, const QString &name, const QString &json )
 {
-  bool found = false;
-  for ( int i = 0; i < m_customKeyboardProfilesData.size(); ++i )
+  bool success = m_client->saveKeyboardProfile( keyboardProfileId.toStdString(), name.toStdString(), json.toStdString() );
+  if ( success )
   {
-    if ( m_customKeyboardProfilesData[i].isObject() )
-    {
-      QJsonObject o = m_customKeyboardProfilesData[i].toObject();
-      if ( o.value( "id" ).toString() == keyboardProfileId )
-      {
-        o["name"] = name;
-        o["json"] = json;
-        m_customKeyboardProfilesData[i] = o;
-        found = true;
-        break;
-      }
-    }
+    loadKeyboardProfilesFromDaemon();
+    qDebug() << "Keyboard profile saved via daemon:" << name;
   }
-
-  if ( !found )
-  {
-    QJsonObject o;
-    o["id"] = keyboardProfileId;
-    o["name"] = name;
-    o["json"] = json;
-    m_customKeyboardProfilesData.append( o );
-    m_customKeyboardProfiles.append( name );
-  }
-
-  saveCustomKeyboardProfilesToSettings();
-  emit customKeyboardProfilesChanged();
-  return true;
+  return success;
 }
 
 bool ProfileManager::deleteKeyboardProfile( const QString &keyboardProfileId )
 {
-  bool removed = false;
-  QJsonArray newArr;
-  for ( const auto &v : m_customKeyboardProfilesData )
+  bool success = m_client->deleteKeyboardProfile( keyboardProfileId.toStdString() );
+  if ( success )
   {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      if ( o.value( "id" ).toString() == keyboardProfileId )
-      {
-        m_customKeyboardProfiles.removeAll( o.value( "name" ).toString() );
-        removed = true;
-        continue;
-      }
-    }
-    newArr.append( v );
+    loadKeyboardProfilesFromDaemon();
+    qDebug() << "Keyboard profile deleted via daemon:" << keyboardProfileId;
   }
-
-  if ( removed )
-  {
-    m_customKeyboardProfilesData = newArr;
-    saveCustomKeyboardProfilesToSettings();
-    emit customKeyboardProfilesChanged();
-  }
-  return removed;
+  return success;
 }
 
 bool ProfileManager::renameKeyboardProfile( const QString &keyboardProfileId, const QString &newName )
 {
   if ( newName.isEmpty() ) return false;
 
-  for ( int i = 0; i < m_customKeyboardProfilesData.size(); ++i )
-  {
-    if ( m_customKeyboardProfilesData[i].isObject() )
-    {
-      QJsonObject o = m_customKeyboardProfilesData[i].toObject();
-      if ( o.value( "id" ).toString() == keyboardProfileId )
-      {
-        QString oldName = o.value( "name" ).toString();
-        o["name"] = newName;
-        m_customKeyboardProfilesData[i] = o;
+  if ( auto json = m_client->getKeyboardProfileJSON( keyboardProfileId.toStdString() ) )
+    return setKeyboardProfile( keyboardProfileId, newName, QString::fromStdString( *json ) );
 
-        int nameIdx = m_customKeyboardProfiles.indexOf( oldName );
-        if ( nameIdx != -1 )
-          m_customKeyboardProfiles.replace( nameIdx, newName );
-
-        saveCustomKeyboardProfilesToSettings();
-        emit customKeyboardProfilesChanged();
-        return true;
-      }
-    }
-  }
   return false;
 }
 
 // ---------------------------------------------------------------------------
-// Custom GPU OC profiles (local storage, by ID)
+// GPU OC profiles — all go through daemon
 // ---------------------------------------------------------------------------
-
-void ProfileManager::loadBuiltinGpuProfiles()
-{
-  m_builtinGpuProfilesData = QJsonArray();
-
-  if ( !m_client || !m_client->isConnected() )
-  {
-    emit customGpuProfilesChanged();
-    return;
-  }
-
-  if ( auto json = m_client->getGpuProfilesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isArray() )
-      m_builtinGpuProfilesData = doc.array();
-  }
-
-  emit customGpuProfilesChanged();
-}
-
-void ProfileManager::loadCustomGpuProfilesFromSettings()
-{
-  m_customGpuProfilesData = QJsonArray();
-  m_customGpuProfiles.clear();
-
-  QString gpuJson = m_settings->value( "customGpuProfiles", "[]" ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( gpuJson.toUtf8() );
-
-  if ( doc.isArray() )
-  {
-    m_customGpuProfilesData = doc.array();
-    for ( const auto &val : m_customGpuProfilesData )
-    {
-      if ( val.isObject() )
-      {
-        QString name = val.toObject().value( "name" ).toString();
-        if ( !name.isEmpty() )
-          m_customGpuProfiles.append( name );
-      }
-    }
-  }
-}
-
-void ProfileManager::saveCustomGpuProfilesToSettings()
-{
-  QJsonDocument doc( m_customGpuProfilesData );
-  m_settings->setValue( "customGpuProfiles", doc.toJson( QJsonDocument::Compact ) );
-  m_settings->sync();
-}
 
 QString ProfileManager::getGpuProfile( const QString &gpuProfileId )
 {
-  for ( const auto &v : m_builtinGpuProfilesData )
-  {
-    if ( !v.isObject() )
-      continue;
+  if ( auto json = m_client->getGpuProfileJSON( gpuProfileId.toStdString() ) )
+    return QString::fromStdString( *json );
 
-    QJsonObject o = v.toObject();
-    if ( o.value( "id" ).toString() == gpuProfileId )
-    {
-      if ( auto json = m_client->getGpuProfile( gpuProfileId.toStdString() ) )
-        return QString::fromStdString( *json );
-      return "{}";
-    }
-  }
-
-  for ( const auto &v : m_customGpuProfilesData )
-  {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      if ( o.value( "id" ).toString() == gpuProfileId )
-      {
-        QString jsonStr = o.value( "json" ).toString();
-        if ( !jsonStr.trimmed().isEmpty() )
-          return jsonStr;
-
-        qWarning() << "[ProfileManager] GPU profile" << gpuProfileId << "has empty JSON";
-      }
-    }
-  }
   return "{}";
 }
 
 bool ProfileManager::setGpuProfile( const QString &gpuProfileId, const QString &name, const QString &json )
 {
-  for ( const auto &v : m_builtinGpuProfilesData )
-  {
-    if ( v.isObject() && v.toObject().value( "id" ).toString() == gpuProfileId )
-      return false;
-  }
+  // Do not allow overwriting built-in profiles
+  if ( !isProfileEditable( gpuProfileId, m_gpuProfilesData ) )
+    return false;
 
-  bool found = false;
-  for ( int i = 0; i < m_customGpuProfilesData.size(); ++i )
+  bool success = m_client->saveGpuProfile( gpuProfileId.toStdString(), name.toStdString(), json.toStdString() );
+  if ( success )
   {
-    if ( m_customGpuProfilesData[i].isObject() )
-    {
-      QJsonObject o = m_customGpuProfilesData[i].toObject();
-      if ( o.value( "id" ).toString() == gpuProfileId )
-      {
-        o["name"] = name;
-        o["json"] = json;
-        m_customGpuProfilesData[i] = o;
-        found = true;
-        break;
-      }
-    }
+    loadGpuProfilesFromDaemon();
+    qDebug() << "GPU profile saved via daemon:" << name;
   }
-
-  if ( !found )
-  {
-    QJsonObject o;
-    o["id"] = gpuProfileId;
-    o["name"] = name;
-    o["json"] = json;
-    m_customGpuProfilesData.append( o );
-    m_customGpuProfiles.append( name );
-  }
-
-  saveCustomGpuProfilesToSettings();
-  emit customGpuProfilesChanged();
-  return true;
+  return success;
 }
 
 bool ProfileManager::deleteGpuProfile( const QString &gpuProfileId )
 {
-  for ( const auto &v : m_builtinGpuProfilesData )
-  {
-    if ( v.isObject() && v.toObject().value( "id" ).toString() == gpuProfileId )
-      return false;
-  }
+  if ( !isProfileEditable( gpuProfileId, m_gpuProfilesData ) )
+    return false;
 
-  bool removed = false;
-  QJsonArray newArr;
-  for ( const auto &v : m_customGpuProfilesData )
+  bool success = m_client->deleteGpuProfile( gpuProfileId.toStdString() );
+  if ( success )
   {
-    if ( v.isObject() )
-    {
-      QJsonObject o = v.toObject();
-      if ( o.value( "id" ).toString() == gpuProfileId )
-      {
-        m_customGpuProfiles.removeAll( o.value( "name" ).toString() );
-        removed = true;
-        continue;
-      }
-    }
-    newArr.append( v );
+    loadGpuProfilesFromDaemon();
+    qDebug() << "GPU profile deleted via daemon:" << gpuProfileId;
   }
-
-  if ( removed )
-  {
-    m_customGpuProfilesData = newArr;
-    saveCustomGpuProfilesToSettings();
-    emit customGpuProfilesChanged();
-  }
-  return removed;
+  return success;
 }
 
 bool ProfileManager::renameGpuProfile( const QString &gpuProfileId, const QString &newName )
 {
   if ( newName.isEmpty() ) return false;
 
-  for ( const auto &v : m_builtinGpuProfilesData )
-  {
-    if ( v.isObject() && v.toObject().value( "id" ).toString() == gpuProfileId )
-      return false;
-  }
+  if ( !isProfileEditable( gpuProfileId, m_gpuProfilesData ) )
+    return false;
 
-  for ( int i = 0; i < m_customGpuProfilesData.size(); ++i )
-  {
-    if ( m_customGpuProfilesData[i].isObject() )
-    {
-      QJsonObject o = m_customGpuProfilesData[i].toObject();
-      if ( o.value( "id" ).toString() == gpuProfileId )
-      {
-        QString oldName = o.value( "name" ).toString();
-        o["name"] = newName;
-        m_customGpuProfilesData[i] = o;
+  if ( auto json = m_client->getGpuProfileJSON( gpuProfileId.toStdString() ) )
+    return setGpuProfile( gpuProfileId, newName, QString::fromStdString( *json ) );
 
-        int nameIdx = m_customGpuProfiles.indexOf( oldName );
-        if ( nameIdx != -1 )
-          m_customGpuProfiles.replace( nameIdx, newName );
-
-        saveCustomGpuProfilesToSettings();
-        emit customGpuProfilesChanged();
-        return true;
-      }
-    }
-  }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Editable helper
+// ---------------------------------------------------------------------------
+
+bool ProfileManager::isProfileEditable( const QString &profileId, const QJsonArray &profilesData ) const
+{
+  for ( const auto &v : profilesData )
+  {
+    if ( v.isObject() && v.toObject().value( "id" ).toString() == profileId )
+      return v.toObject().value( "editable" ).toBool( false );
+  }
+  return true;  // unknown ID → treat as editable (new profile being created)
 }
 
 // ---------------------------------------------------------------------------

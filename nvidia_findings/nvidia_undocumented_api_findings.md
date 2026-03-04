@@ -17,6 +17,7 @@
 8. [Disassembly Insights](#disassembly)
 9. [UCC Integration Recommendations](#ucc-integration)
 10. [Version Encoding Reference](#version-encoding)
+11. [2026 Stability Telemetry Update](#stability-update-2026)
 
 ---
 
@@ -493,6 +494,86 @@ Formula: `(ver << 24) | (size & 0x00FFFFFF)`
 0x00020068 = Unknown_0D258BB5     (sz=104,  ver=2)
 ```
 Formula: `(ver << 16) | (size & 0xFFFF)`
+
+---
+
+## 11. 2026 Stability Telemetry Update <a name="stability-update-2026"></a>
+
+This section captures a later pass focused specifically on runtime stability
+checks for undervolt/OC validation.
+
+### 11.1 Host-Verified NVML Exports (Linux)
+
+A host-side `readelf -Ws` check confirmed these stability-relevant NVML APIs are
+exported by `libnvidia-ml.so.1`:
+
+- `nvmlDeviceGetViolationStatus`
+- `nvmlDeviceGetCurrentClocksEventReasons`
+- `nvmlDeviceGetCurrentClocksThrottleReasons`
+- `nvmlDeviceGetTotalEnergyConsumption`
+- `nvmlDeviceGetFieldValues`
+- `nvmlDeviceGetRetiredPages`, `nvmlDeviceGetRetiredPages_v2`
+- `nvmlDeviceGetRemappedRows`
+- `nvmlDeviceGetRepairStatus`
+- `nvmlDeviceGetDetailedEccErrors`
+- `nvmlDeviceGetMemoryErrorCounter`
+- `nvmlDeviceGetSramEccErrorStatus`
+
+These are strong candidates for improving stability screening beyond FPS-only
+thresholding. Exported symbol presence does not, by itself, guarantee that each
+struct layout is already decoded here.
+
+### 11.2 Confidence Ranking for Stability Inputs
+
+High confidence (already decoded/used in current findings):
+
+- `nvmlDeviceGetCurrentClocksThrottleReasons`
+- `nvmlDeviceGetDynamicPstatesInfo`
+- `nvmlDeviceGetMarginTemperature`
+- `NvAPI Voltage (0x465F9BCF)`
+- `NvAPI AllClockFrequencies (0xDCB616C3)`
+
+Medium confidence (exported and likely useful, but not fully mapped in this
+folder yet):
+
+- `nvmlDeviceGetViolationStatus`
+- `nvmlDeviceGetCurrentClocksEventReasons`
+- `nvmlDeviceGetTotalEnergyConsumption`
+- `nvmlDeviceGetFieldValues`
+- `nvmlDeviceGetRepairStatus`
+
+Lower confidence for immediate tuning loops (better as health gates):
+
+- ECC/row-remap families (`GetDetailedEccErrors`, `GetMemoryErrorCounter`,
+  `GetSramEccErrorStatus`, `GetRetiredPages`, `GetRemappedRows`)
+
+### 11.3 Internal Inconsistencies Found in Existing Probe Notes
+
+ClockBoost/VF function ID conflicts across files:
+
+- `GetClockBoostTable`: `0x23F1B133` vs `0x507B4B59`
+- `GetVFPCurve`: `0x21537AD4` vs `0x7F5F90A7`
+
+Thermals consistency conflict:
+
+- Some notes indicate Thermals `0x65FE3AAD` is available/usable
+- `deep_nvapi_output.txt` includes `NVAPI_DATA_NOT_FOUND` for tested layouts
+
+Interpretation: behavior appears architecture/driver dependent and/or sensitive
+to exact struct versioning and call context.
+
+### 11.4 Practical Guidance for UCC Stability Logic
+
+Best next additions for undervolt/OC validation are:
+
+1. Use `ViolationStatus` + clocks event/throttle reasons as first-class
+    pass/fail signals per step.
+2. Track `TotalEnergyConsumption` delta over validation windows to stabilize
+    decisions versus short-term FPS noise.
+3. Use ECC/remap/repair APIs as preflight health gates (invalidate scan quality
+    when hardware reliability state is degraded).
+4. Keep strict runtime capability probing and fallback paths because Blackwell
+    support is uneven across undocumented APIs.
 
 ---
 

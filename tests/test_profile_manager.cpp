@@ -41,13 +41,11 @@ private:
         "fanProfile": "fan-balanced",
         "sameSpeed": false,
         "autoControlWC": true,
-        "enableWaterCooler": false,
-        "tableCPU": [{"temp":30,"speed":20},{"temp":70,"speed":60}],
-        "tableGPU": [{"temp":30,"speed":25},{"temp":70,"speed":65}]
+        "enableWaterCooler": false
       },
       "odmProfile": { "name": "enthusiast" },
       "odmPowerLimits": { "tdpValues": [45, 80] },
-      "keyboard": { "keyboardProfileName": "Rainbow" },
+      "keyboard": {},
       "selectedKeyboardProfile": "kb-uuid-001",
       "chargingProfile": "balanced",
       "chargingPriority": "performance",
@@ -107,15 +105,10 @@ private slots:
 
   void parseProfile_embeddedFanTables()
   {
+    // Embedded fan tables are no longer parsed — profiles only store ID references
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
-    QCOMPARE( static_cast< int >( p.fan.tableCPU.size() ), 2 );
-    QCOMPARE( p.fan.tableCPU[0].temp, 30 );
-    QCOMPARE( p.fan.tableCPU[0].speed, 20 );
-    QCOMPARE( p.fan.tableCPU[1].temp, 70 );
-    QCOMPARE( p.fan.tableCPU[1].speed, 60 );
-
-    QCOMPARE( static_cast< int >( p.fan.tableGPU.size() ), 2 );
-    QCOMPARE( p.fan.tableGPU[0].speed, 25 );
+    // fanProfile ID should be set
+    QCOMPARE( p.fan.fanProfile, std::string( "fan-balanced" ) );
   }
 
   void parseProfile_odmAndNvidia()
@@ -131,8 +124,7 @@ private slots:
   void parseProfile_keyboard()
   {
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
-    QCOMPARE( p.keyboard.keyboardProfileId,   std::string( "kb-uuid-001" ) );
-    QCOMPARE( p.keyboard.keyboardProfileName, std::string( "Rainbow" ) );
+    QCOMPARE( p.keyboard.keyboardProfileId, std::string( "kb-uuid-001" ) );
   }
 
   void parseProfile_charging()
@@ -164,15 +156,6 @@ private slots:
     QCOMPARE( reparsed.chargingProfile,       original.chargingProfile );
     QCOMPARE( reparsed.chargeStartThreshold,  original.chargeStartThreshold );
     QCOMPARE( reparsed.chargeEndThreshold,    original.chargeEndThreshold );
-
-    // Fan tables survive the trip
-    QCOMPARE( static_cast< int >( reparsed.fan.tableCPU.size() ),
-              static_cast< int >( original.fan.tableCPU.size() ) );
-    for ( size_t i = 0; i < original.fan.tableCPU.size(); ++i )
-    {
-      QCOMPARE( reparsed.fan.tableCPU[i].temp,  original.fan.tableCPU[i].temp );
-      QCOMPARE( reparsed.fan.tableCPU[i].speed, original.fan.tableCPU[i].speed );
-    }
   }
 
   // ---- parseFanTableFromJSON() -----------------------------------------

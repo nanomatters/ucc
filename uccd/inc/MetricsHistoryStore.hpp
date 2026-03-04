@@ -44,6 +44,7 @@ enum class MetricId : uint8_t
   GpuFrequency,
   GpuVramFrequency,
   GpuCoreVoltage,
+  Fps,            ///< Frames per second from ucc-fps-layer
   Count  ///< Sentinel — must be last
 };
 
@@ -64,6 +65,7 @@ constexpr const char *metricName( MetricId id ) noexcept
     case MetricId::GpuFrequency:        return "gpuFrequency";
     case MetricId::GpuVramFrequency:    return "gpuVramFrequency";
     case MetricId::GpuCoreVoltage:      return "gpuCoreVoltage";
+    case MetricId::Fps:                 return "fps";
     default:                            return "unknown";
   }
 }

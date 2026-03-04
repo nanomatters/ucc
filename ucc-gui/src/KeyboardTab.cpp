@@ -81,8 +81,8 @@ void MainWindow::setupKeyboardBacklightPage()
   m_keyboardProfileCombo->setEditable( true );
   m_keyboardProfileCombo->setInsertPolicy( QComboBox::NoInsert );
 
-  // Add custom keyboard profiles from settings
-  for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+  // Add keyboard profiles from daemon
+  for ( const auto &v : m_profileManager->keyboardProfilesData() )
   {
     QJsonObject o = v.toObject();
     m_keyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
@@ -183,7 +183,7 @@ void MainWindow::reloadKeyboardProfiles()
     m_keyboardProfileCombo->blockSignals( true );
 
     m_keyboardProfileCombo->clear();
-    for ( const auto &v : m_profileManager->customKeyboardProfilesData() )
+    for ( const auto &v : m_profileManager->keyboardProfilesData() )
     {
       QJsonObject o = v.toObject();
       m_keyboardProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
@@ -214,9 +214,27 @@ void MainWindow::updateKeyboardProfileButtonStates()
   bool hasSelection = hasProfile || !m_keyboardProfileCombo->currentText().trimmed().isEmpty();
   bool canRemove = ( m_keyboardProfileCombo->count() > 1 ); // Keep at least one profile
 
+  // Check if current profile is editable (built-in profiles are not)
+  bool isEditable = true;
+  QString currentId = m_keyboardProfileCombo->currentData().toString();
+  if ( !currentId.isEmpty() )
+    isEditable = m_profileManager->isProfileEditable( currentId, m_profileManager->keyboardProfilesData() );
+
   m_copyKeyboardProfileButton->setEnabled( hasProfile );
-  m_saveKeyboardProfileButton->setEnabled( hasSelection );
-  m_removeKeyboardProfileButton->setEnabled( canRemove );
+  m_saveKeyboardProfileButton->setEnabled( hasSelection && isEditable );
+  m_removeKeyboardProfileButton->setEnabled( canRemove && isEditable );
+
+  // Make combo line edit read-only for built-in profiles (prevent renaming)
+  if ( m_keyboardProfileCombo->lineEdit() )
+    m_keyboardProfileCombo->lineEdit()->setReadOnly( !isEditable );
+
+  // Disable all editing controls for non-editable (built-in) profiles
+  if ( m_keyboardVisualizer )
+    m_keyboardVisualizer->setEnabled( isEditable );
+  if ( m_keyboardBrightnessSlider )
+    m_keyboardBrightnessSlider->setEnabled( isEditable );
+  if ( m_keyboardColorButton )
+    m_keyboardColorButton->setEnabled( isEditable );
 }
 
 void MainWindow::onKeyboardBrightnessChanged( int value )
@@ -431,7 +449,7 @@ void MainWindow::onCopyKeyboardProfileClicked()
   QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
   if ( not json.isEmpty() and m_profileManager->setKeyboardProfile( newId, name, json ) )
   {
-    // setKeyboardProfile emits customKeyboardProfilesChanged which triggers
+    // setKeyboardProfile emits keyboardProfilesChanged which triggers
     // reloadKeyboardProfiles(), so the combo is already rebuilt. Just select the new item.
     int newIdx = m_keyboardProfileCombo->findData( newId );
     if ( newIdx >= 0 )
@@ -453,6 +471,15 @@ void MainWindow::onSaveKeyboardProfileClicked()
 
   if ( currentName.isEmpty() )
     return;
+
+  // Check if it's a built-in profile (not editable)
+  if ( !currentId.isEmpty()
+       && !m_profileManager->isProfileEditable( currentId, m_profileManager->keyboardProfilesData() ) )
+  {
+    QMessageBox::information( this, "Cannot Save",
+                              "Built-in keyboard profiles cannot be overwritten." );
+    return;
+  }
 
   // If no existing profile is selected, create a new one with a fresh ID
   if ( currentId.isEmpty() )
@@ -495,6 +522,14 @@ void MainWindow::onRemoveKeyboardProfileClicked()
   QString currentId = m_keyboardProfileCombo->currentData().toString();
   QString currentName = m_keyboardProfileCombo->currentText();
 
+  // Check if it's a built-in profile (not editable)
+  if ( !m_profileManager->isProfileEditable( currentId, m_profileManager->keyboardProfilesData() ) )
+  {
+    QMessageBox::information( this, "Cannot Remove",
+                              "Built-in keyboard profiles cannot be removed." );
+    return;
+  }
+
   // Check if any system profiles reference this keyboard profile
   QStringList referencingProfiles;
   auto checkProfiles = [&]( const QJsonArray &profiles ) {
@@ -508,8 +543,7 @@ void MainWindow::onRemoveKeyboardProfileClicked()
         referencingProfiles << name;
     }
   };
-  checkProfiles( m_profileManager->defaultProfilesData() );
-  checkProfiles( m_profileManager->customProfilesData() );
+  checkProfiles( m_profileManager->allProfilesData() );
 
   // Build confirmation message
   QString confirmMessage;
@@ -534,7 +568,7 @@ void MainWindow::onRemoveKeyboardProfileClicked()
 
   if ( reply == QMessageBox::Yes )
   {
-    // Remove from persistent storage — this emits customKeyboardProfilesChanged
+    // Remove from persistent storage — this emits keyboardProfilesChanged
     // which rebuilds the combo automatically via reloadKeyboardProfiles()
     if ( not m_profileManager->deleteKeyboardProfile( currentId ) )
       QMessageBox::warning(this, "Remove Failed", "Failed to remove custom keyboard profile.");

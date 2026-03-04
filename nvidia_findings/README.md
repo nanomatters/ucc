@@ -67,6 +67,44 @@ This directory contains all research files, probes, and outputs from the compreh
 - GetPstates20 (legacy Maxwell/Kepler API)
 - CoolerInfo (laptop EC-controlled fans)
 
+## 2026-03 Update: Stability Telemetry Findings
+
+Additional investigation (read-only analysis + host symbol verification) found that
+`libnvidia-ml.so.1` exports several reliability and limiter APIs that were not yet
+integrated into UCC stability logic.
+
+### Host-verified NVML exports (candidate stability inputs)
+- `nvmlDeviceGetViolationStatus`
+- `nvmlDeviceGetCurrentClocksEventReasons`
+- `nvmlDeviceGetCurrentClocksThrottleReasons`
+- `nvmlDeviceGetTotalEnergyConsumption`
+- `nvmlDeviceGetFieldValues`
+- `nvmlDeviceGetRetiredPages`, `nvmlDeviceGetRetiredPages_v2`
+- `nvmlDeviceGetRemappedRows`
+- `nvmlDeviceGetRepairStatus`
+- `nvmlDeviceGetDetailedEccErrors`
+- `nvmlDeviceGetMemoryErrorCounter`
+- `nvmlDeviceGetSramEccErrorStatus`
+
+These were confirmed as exported symbols via `readelf -Ws` on this host. Exported
+does not automatically mean struct layouts/semantics are fully mapped in this repo.
+
+### Already reverse-validated in this folder (high confidence)
+- NVML: PerformanceModes, MarginTemperature, DynamicPstatesInfo, PowerMizerMode_v1
+- NvAPI: AllClockFrequencies (0xDCB616C3), Voltage (0x465F9BCF),
+	ClientPowerTopologyGetInfo (0x60DED2ED), PerfPoliciesGetStatus (0x3D358A0C)
+
+### Consistency notes and caveats
+- There are conflicting IDs across files for ClockBoost/VF table family:
+	- `GetClockBoostTable`: `0x23F1B133` vs `0x507B4B59`
+	- `GetVFPCurve`: `0x21537AD4` vs `0x7F5F90A7`
+- Thermal function consistency is mixed across outputs:
+	- Some notes describe Thermals (0x65FE3AAD) as usable
+	- `deep_nvapi_output.txt` shows `NVAPI_DATA_NOT_FOUND` in tested layouts
+
+Practical recommendation: keep capability probing and fallbacks at runtime rather
+than assuming uniform behavior across driver/GPU generations.
+
 ## Hardware / Environment
 
 - **Target**: RTX 5090 Laptop

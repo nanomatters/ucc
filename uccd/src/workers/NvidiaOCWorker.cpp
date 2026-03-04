@@ -390,13 +390,48 @@ bool NvidiaOCWorker::resetAll( unsigned int deviceIndex )
   if ( !isAvailable() )
     return false;
 
+  const auto state = m_nvml->getOCState( deviceIndex );
+  const bool offsetsSupported = state.has_value() && state->offsetsSupported;
+  const bool lockedClocksSupported = state.has_value() && state->lockedClocksSupported;
+  const bool powerLimitSupported = m_nvml->getPowerDefaultLimitW( deviceIndex ).has_value();
+
   bool ok = true;
-  if ( !m_nvml->resetAllClockOffsets( deviceIndex ) ) ok = false;
-  if ( !m_nvml->resetGpuLockedClocks( deviceIndex ) ) ok = false;
-  if ( !m_nvml->resetVramLockedClocks( deviceIndex ) ) ok = false;
-  if ( !m_nvml->resetPowerLimit( deviceIndex ) ) ok = false;
+  if ( offsetsSupported )
+  {
+    if ( !m_nvml->resetAllClockOffsets( deviceIndex ) )
+    {
+      ok = false;
+      log( "[GPU-RESET] Failed to reset clock offsets" );
+    }
+  }
+
+  if ( lockedClocksSupported )
+  {
+    if ( !m_nvml->resetGpuLockedClocks( deviceIndex ) )
+    {
+      ok = false;
+      log( "[GPU-RESET] Failed to reset GPU locked clocks" );
+    }
+
+    if ( !m_nvml->resetVramLockedClocks( deviceIndex ) )
+    {
+      ok = false;
+      log( "[GPU-RESET] Failed to reset VRAM locked clocks" );
+    }
+  }
+
+  if ( powerLimitSupported )
+  {
+    if ( !m_nvml->resetPowerLimit( deviceIndex ) )
+    {
+      ok = false;
+      log( "[GPU-RESET] Failed to reset power limit" );
+    }
+  }
+
   if ( ok )
     log( "Reset all GPU OC settings to defaults" );
+
   return ok;
 }
 

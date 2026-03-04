@@ -13,9 +13,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QSettings>
-#include <QDir>
-#include <QFile>
 #include <QDebug>
 
 #include <algorithm>
@@ -41,16 +38,10 @@ TrayBackend::TrayBackend( QObject *parent )
   // Daemon signals
   connect( m_client.get(), &ucc::UccdClient::profileChanged,
            this, &TrayBackend::onDaemonProfileChanged );
+  connect( m_client.get(), &ucc::UccdClient::profilesListChanged,
+           this, &TrayBackend::onProfilesListChanged );
   connect( m_client.get(), &ucc::UccdClient::connectionStatusChanged,
            this, &TrayBackend::onConnectionStatusChanged );
-
-  // Watch the shared settings file so we pick up changes from the GUI immediately
-  m_settingsWatcher = new QFileSystemWatcher( this );
-  QString uccrcPath = QDir::homePath() + "/.config/uccrc";
-  if ( QFile::exists( uccrcPath ) )
-    m_settingsWatcher->addPath( uccrcPath );
-  connect( m_settingsWatcher, &QFileSystemWatcher::fileChanged,
-           this, &TrayBackend::onSettingsFileChanged );
 
   // Initial data load
   loadCapabilities();
@@ -62,7 +53,6 @@ TrayBackend::TrayBackend( QObject *parent )
   }
 
   loadProfiles();
-  loadLocalProfiles();
   pollMetrics();
   pollSlowState();
 
@@ -330,23 +320,16 @@ void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
 
 void TrayBackend::setActiveKeyboardProfile( const QString &keyboardProfileId )
 {
-  auto it = std::ranges::find_if( m_keyboardProfilesData, [&]( const QJsonValue &val ) {
-    return val.toObject()[ "id" ].toString() == keyboardProfileId;
-  } );
-  if ( it != m_keyboardProfilesData.end() )
+  if ( auto profileData = m_client->getKeyboardProfileJSON( keyboardProfileId.toStdString() ) )
   {
-    auto profileData = it->toObject()[ "json" ].toString();
-    if ( !profileData.isEmpty() )
+    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *profileData ) );
+    if ( doc.isObject() )
     {
-      QJsonDocument doc = QJsonDocument::fromJson( profileData.toUtf8() );
-      if ( doc.isObject() )
-      {
-        QJsonObject obj = doc.object();
-        // Inject the keyboard profile ID so uccd can notify subscribers
-        obj[ "keyboardProfileId" ] = keyboardProfileId;
-        m_client->setKeyboardBacklight(
-          QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString() );
-      }
+      QJsonObject obj = doc.object();
+      // Inject the keyboard profile ID so uccd can notify subscribers
+      obj[ "keyboardProfileId" ] = keyboardProfileId;
+      m_client->setKeyboardBacklight(
+        QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString() );
     }
   }
   m_keyboardProfileOverride = true;
@@ -383,23 +366,7 @@ void TrayBackend::setActiveGpuProfile( const QString &gpuProfileId )
   }
   else
   {
-    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-    QByteArray gpuRaw = settings.value( "customGpuProfiles", "[]" ).toByteArray();
-    QJsonDocument doc = QJsonDocument::fromJson( gpuRaw );
-    if ( doc.isArray() )
-    {
-      for ( const auto &val : doc.array() )
-      {
-        const QJsonObject obj = val.toObject();
-        if ( obj.value( "id" ).toString() == gpuProfileId )
-        {
-          const QString profileJson = obj.value( "json" ).toString();
-          if ( !profileJson.isEmpty() )
-            applyWithProfileId( profileJson );
-          break;
-        }
-      }
-    }
+    qWarning() << "[TrayBackend] GPU profile not found on daemon:" << gpuProfileId;
   }
 
   m_gpuProfileOverride = true;
@@ -426,7 +393,6 @@ void TrayBackend::refreshAll()
 {
   loadCapabilities();
   loadProfiles();
-  loadLocalProfiles();
   pollMetrics();
   pollSlowState();
 }
@@ -503,79 +469,6 @@ void TrayBackend::pollMetrics()
 
 void TrayBackend::pollSlowState()
 {
-  // Active profile
-  if ( auto json = m_client->getActiveProfileJSON() )
-  {
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isObject() )
-    {
-      auto obj = doc.object();
-      auto newId = obj[ "id" ].toString();
-      bool profileSwitched = ( newId != m_activeProfileId );
-      m_activeProfileId = newId;
-      m_activeProfileName = obj[ "name" ].toString();
-      bool changed = profileSwitched;
-
-      // Reset overrides when the system profile itself changes
-      if ( profileSwitched )
-      {
-        m_fanProfileOverride = false;
-        m_keyboardProfileOverride = false;
-        m_gpuProfileOverride = false;
-        m_wcEnabledOverride = false;
-      }
-
-      // Extract fan profile reference — skip if user manually overrode it
-      auto fanObj = obj[ "fan" ].toObject();
-      auto fanId = fanObj[ "fanProfile" ].toString();
-
-      // Extract water cooler auto-control flag
-      bool autoWC = fanObj[ "autoControlWC" ].toBool( true );
-      if ( autoWC != m_wcAutoControl )
-      {
-        m_wcAutoControl = autoWC;
-        emit wcAutoControlChanged();
-      }
-
-      // Query daemon directly for the runtime water-cooler enable state
-      if ( !m_wcEnabledOverride )
-      {
-        bool wcEn = m_client->isWaterCoolerEnabled().value_or( m_wcEnabled );
-        if ( wcEn != m_wcEnabled )
-        {
-          m_wcEnabled = wcEn;
-          emit wcEnabledChanged();
-        }
-      }
-      if ( !m_fanProfileOverride && fanId != m_activeProfileFanId )
-      {
-        m_activeProfileFanId = fanId;
-        m_activeProfileFanName = resolveFanProfileName( fanId );
-        changed = true;
-      }
-
-      // Extract keyboard profile reference — skip if user manually overrode it
-      auto kbId = obj[ "selectedKeyboardProfile" ].toString();
-      if ( !m_keyboardProfileOverride && kbId != m_activeProfileKeyboardId )
-      {
-        m_activeProfileKeyboardId = kbId;
-        m_activeProfileKeyboardName = resolveKeyboardProfileName( kbId );
-        changed = true;
-      }
-
-      const QString gpuId = obj[ "gpuProfileId" ].toString();
-      if ( !m_gpuProfileOverride && gpuId != m_activeProfileGpuId )
-      {
-        m_activeProfileGpuId = gpuId;
-        m_activeProfileGpuName = resolveGpuProfileName( gpuId );
-        changed = true;
-      }
-
-      if ( changed )
-        emit activeProfileChanged();
-    }
-  }
-
   // Power state
   if ( auto ps = m_client->getPowerState() )
   {
@@ -674,22 +567,35 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
   if ( changed )
   {
     emit activeProfileChanged();
-    pollSlowState();
+
+    if ( auto json = m_client->getAppliedProfilesJSON() )
+    {
+      auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+      if ( doc.isObject() )
+      {
+        const auto obj = doc.object();
+        const bool autoWC = obj[ "wcAutoControl" ].toBool( true );
+        if ( autoWC != m_wcAutoControl )
+        {
+          m_wcAutoControl = autoWC;
+          emit wcAutoControlChanged();
+        }
+      }
+    }
   }
 }
 
-void TrayBackend::onSettingsFileChanged( const QString &path )
+void TrayBackend::onProfilesListChanged()
 {
-  // Some editors replace the file (delete + create) rather than writing in-place,
-  // which removes it from the watch list.  Re-add after a short delay.
-  QTimer::singleShot( 500, this, [this, path]() {
-    if ( QFile::exists( path ) && !m_settingsWatcher->files().contains( path ) )
-      m_settingsWatcher->addPath( path );
+  loadProfiles();
+}
 
-    fprintf( stderr, "[TrayBackend] Settings file changed, reloading profiles...\n" );
-    loadProfiles();
-    loadLocalProfiles();
-  } );
+void TrayBackend::onSettingsFileChanged( const QString & /*path*/ )
+{
+  // Legacy handler — no longer watching uccrc.
+  // All profile data comes from the daemon now.
+  fprintf( stderr, "[TrayBackend] Settings file changed (legacy) — reloading from daemon\n" );
+  loadProfiles();
 }
 
 void TrayBackend::onConnectionStatusChanged( bool connected )
@@ -701,7 +607,6 @@ void TrayBackend::onConnectionStatusChanged( bool connected )
     qInfo() << "[TrayBackend] Reconnected to uccd — refreshing all state";
     loadCapabilities();
     loadProfiles();
-    loadLocalProfiles();
     pollMetrics();
     pollSlowState();
 
@@ -723,11 +628,10 @@ void TrayBackend::onConnectionStatusChanged( bool connected )
 
 void TrayBackend::loadProfiles()
 {
-  // Default (built-in) profiles come from the daemon
+  // All profiles (built-in + custom) come from the daemon now
   QStringList names, ids;
 
-  // Built-in profiles from daemon
-  if ( auto json = m_client->getDefaultProfilesJSON() )
+  if ( auto json = m_client->getProfilesJSON() )
   {
     auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
     if ( doc.isArray() )
@@ -744,28 +648,6 @@ void TrayBackend::loadProfiles()
     }
   }
 
-  // Custom profiles are stored client-side in ~/.config/uccrc (same as GUI).
-  // The values are QByteArray-encoded JSON, so we must use toByteArray().
-  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-  QByteArray customRaw = settings.value( "customProfiles", "[]" ).toByteArray();
-  fprintf( stderr, "[TrayBackend] loadProfiles: uccrc exists=%d customProfiles bytes=%d\n",
-           QFile::exists( QDir::homePath() + "/.config/uccrc" ), (int)customRaw.size() );
-  auto customDoc = QJsonDocument::fromJson( customRaw );
-  fprintf( stderr, "[TrayBackend] customProfiles isArray=%d count=%d\n",
-           (int)customDoc.isArray(), customDoc.isArray() ? (int)customDoc.array().size() : 0 );
-  if ( customDoc.isArray() )
-  {
-    for ( const auto &val : customDoc.array() )
-    {
-      auto obj = val.toObject();
-      QString id   = obj[ "id" ].toString();
-      QString name = obj[ "name" ].toString();
-      if ( id.isEmpty() ) continue;
-      ids.append( id );
-      names.append( name );
-    }
-  }
-
   if ( ids != m_profileIds || names != m_profileNames )
   {
     m_profileIds   = ids;
@@ -775,14 +657,20 @@ void TrayBackend::loadProfiles()
   }
 
   // Active profile
-  if ( auto json = m_client->getActiveProfileJSON() )
+  if ( auto json = m_client->getAppliedProfilesJSON() )
   {
     auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
     if ( doc.isObject() )
     {
       auto obj = doc.object();
-      m_activeProfileId = obj[ "id" ].toString();
-      m_activeProfileName = obj[ "name" ].toString();
+      m_activeProfileId = obj[ "profileId" ].toString();
+      m_activeProfileName = obj[ "profileName" ].toString();
+      m_activeProfileFanId = obj[ "fanProfileId" ].toString();
+      m_activeProfileFanName = resolveFanProfileName( m_activeProfileFanId );
+      m_activeProfileKeyboardId = obj[ "keyboardProfileId" ].toString();
+      m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
+      m_activeProfileGpuId = obj[ "appliedGpuProfileId" ].toString();
+      m_activeProfileGpuName = resolveGpuProfileName( m_activeProfileGpuId );
       fprintf( stderr, "[TrayBackend] Active profile: %s / %s\n",
                qPrintable( m_activeProfileId ), qPrintable( m_activeProfileName ) );
       emit activeProfileChanged();
@@ -838,6 +726,39 @@ void TrayBackend::loadProfiles()
     }
   }
 
+  // Keyboard profiles from daemon
+  if ( auto json = m_client->getKeyboardProfilesJSON() )
+  {
+    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+    if ( doc.isArray() )
+    {
+      QStringList kpNames, kpIds;
+      for ( const auto &val : doc.array() )
+      {
+        auto obj = val.toObject();
+        QString id   = obj[ "id" ].toString();
+        QString name = obj[ "name" ].toString();
+        if ( id.isEmpty() ) continue;
+        kpIds.append( id );
+        kpNames.append( name );
+      }
+      if ( kpIds != m_keyboardProfileIds || kpNames != m_keyboardProfileNames )
+      {
+        m_keyboardProfileIds   = kpIds;
+        m_keyboardProfileNames = kpNames;
+        emit keyboardProfilesChanged();
+      }
+    }
+  }
+
+  // Re-resolve sub-profile display names
+  if ( !m_activeProfileFanId.isEmpty() )
+    m_activeProfileFanName = resolveFanProfileName( m_activeProfileFanId );
+  if ( !m_activeProfileKeyboardId.isEmpty() )
+    m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
+  if ( !m_activeProfileGpuId.isEmpty() )
+    m_activeProfileGpuName = resolveGpuProfileName( m_activeProfileGpuId );
+
   // ODM profiles
   if ( auto profs = m_client->getAvailableODMProfiles() )
   {
@@ -886,113 +807,6 @@ void TrayBackend::loadCapabilities()
       emit systemInfoChanged();
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Local settings loaders (custom fan + keyboard profiles from ~/.config/uccrc)
-// ---------------------------------------------------------------------------
-
-void TrayBackend::loadLocalProfiles()
-{
-  QString uccrcPath = QDir::homePath() + "/.config/uccrc";
-  bool fileExists = QFile::exists( uccrcPath );
-  fprintf( stderr, "[TrayBackend] loadLocalProfiles: path=%s exists=%d\n",
-           qPrintable( uccrcPath ), (int)fileExists );
-
-  QSettings settings( uccrcPath, QSettings::IniFormat );
-  fprintf( stderr, "[TrayBackend] QSettings keys: %s\n",
-           qPrintable( settings.allKeys().join(", ") ) );
-
-  // Merge custom fan profiles — append to the daemon-loaded lists (avoid duplicates on re-load)
-  {
-    m_customFanProfileNames.clear();
-    m_customFanProfileIds.clear();
-    QByteArray fanRaw = settings.value( "customFanProfiles", "[]" ).toByteArray();
-    auto doc = QJsonDocument::fromJson( fanRaw );
-    if ( doc.isArray() )
-    {
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() ) continue;
-        m_customFanProfileIds.append( id );
-        m_customFanProfileNames.append( name );
-        // Only append if not already present (built-ins already loaded by loadProfiles())
-        if ( !m_fanProfileIds.contains( id ) )
-        {
-          m_fanProfileIds.append( id );
-          m_fanProfileNames.append( name );
-        }
-      }
-    }
-    emit fanProfilesChanged();
-  }
-
-  // Re-resolve active fan profile name after loading local data
-  if ( !m_activeProfileFanId.isEmpty() )
-    m_activeProfileFanName = resolveFanProfileName( m_activeProfileFanId );
-
-  // Custom keyboard profiles from QSettings
-  {
-    QStringList kpNames, kpIds;
-    QJsonArray  kpData;
-    QByteArray kbRaw = settings.value( "customKeyboardProfiles", "[]" ).toByteArray();
-    auto doc = QJsonDocument::fromJson( kbRaw );
-    if ( doc.isArray() )
-    {
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() ) continue;
-        kpIds.append( id );
-        kpNames.append( name );
-        kpData.append( obj );
-      }
-    }
-
-    if ( kpIds != m_keyboardProfileIds || kpNames != m_keyboardProfileNames )
-    {
-      m_keyboardProfileIds   = kpIds;
-      m_keyboardProfileNames = kpNames;
-      m_keyboardProfilesData = kpData;
-      fprintf( stderr, "[TrayBackend] keyboardProfiles updated: %d entries — [%s]\n",
-               (int)kpIds.size(), qPrintable( kpNames.join(", ") ) );
-      emit keyboardProfilesChanged();
-    }
-  }
-
-  if ( !m_activeProfileKeyboardId.isEmpty() )
-    m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
-
-  // Merge custom GPU OC profiles from local settings
-  {
-    QByteArray gpuRaw = settings.value( "customGpuProfiles", "[]" ).toByteArray();
-    auto doc = QJsonDocument::fromJson( gpuRaw );
-    if ( doc.isArray() )
-    {
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() )
-          continue;
-        if ( !m_gpuProfileIds.contains( id ) )
-        {
-          m_gpuProfileIds.append( id );
-          m_gpuProfileNames.append( name );
-        }
-      }
-      emit gpuProfilesChanged();
-    }
-  }
-
-  if ( !m_activeProfileGpuId.isEmpty() )
-    m_activeProfileGpuName = resolveGpuProfileName( m_activeProfileGpuId );
 }
 
 // ---------------------------------------------------------------------------
