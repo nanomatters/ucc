@@ -4,7 +4,7 @@ cmake_minimum_required( VERSION 3.20 )
 
 project( ucc-gui
   VERSION ${CMAKE_PROJECT_VERSION}
-  DESCRIPTION "Uniwill Control Center GUI application"
+  DESCRIPTION "Unified Control Center GUI application"
   LANGUAGES CXX
 )
 

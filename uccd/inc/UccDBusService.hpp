@@ -54,6 +54,7 @@
 #include "MetricsHistoryStore.hpp"
 #include "FpsServer.hpp"
 #include "SystemInfo.hpp"
+#include "hal/HardwareManager.hpp"
 #include "tuxedo_io_lib/tuxedo_io_api.hh"
 
 // Forward declarations
@@ -160,6 +161,7 @@ public:
   std::atomic< bool > cTGPAdjustmentSupported;
   std::atomic< bool > deviceSupported{ false };
   std::atomic< int32_t > cpuFrequencyMHz;
+  std::string capabilitiesJSON{ "[]" };   // HAL capability flags as JSON array
 
   std::mutex dataMutex;
 
@@ -264,6 +266,7 @@ public slots:
   QString GetDeviceName();
   QString GetSystemInfoJSON();
   bool IsDeviceSupported();
+  QString GetCapabilitiesJSON();
   QString GetDisplayModesJSON();
   bool GetIsX11();
   bool TuxedoWmiAvailable();
@@ -618,6 +621,7 @@ private:
   static constexpr const char* INTERFACE_NAME = "com.uniwill.uccd";
   UccDBusData m_dbusData;
   TuxedoIOAPI m_io;
+  ucc::hal::HardwareManager m_hw;
   std::unique_ptr< UccDBusObject > m_dbusObject;  // The QObject registered on the D-Bus bus
   std::unique_ptr< UccDBusInterfaceAdaptor > m_adaptor;
   bool m_started;

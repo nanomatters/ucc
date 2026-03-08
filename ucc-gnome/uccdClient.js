@@ -206,6 +206,7 @@ export class UccdClient {
     getWaterCoolerSupported() { return this._call('GetWaterCoolerSupported') ?? false; }
     isWaterCoolerEnabled()    { return this._call('IsWaterCoolerEnabled') ?? false; }
     isDeviceSupported()       { return this._call('IsDeviceSupported') ?? false; }
+    getCapabilitiesJSON()     { return this._call('GetCapabilitiesJSON'); }
     getSystemInfoJSON()       { return this._call('GetSystemInfoJSON'); }
 
     getFanProfile(name) { return this._call('GetFanProfile', [name], 's'); }

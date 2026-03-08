@@ -1,5 +1,5 @@
 {
-  description = "Uniwill Control Center (UCC)";
+  description = "Unified Control Center (UCC)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

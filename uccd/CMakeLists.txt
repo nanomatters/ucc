@@ -18,6 +18,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")
 # Find required packages
 find_package(PkgConfig REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Core Bluetooth DBus)
+find_package(nlohmann_json REQUIRED)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -41,6 +42,14 @@ add_executable(uccd
   inc/workers/NvidiaOCWorker.hpp
   inc/workers/AutoOCWorker.hpp
   inc/workers/AutoUndervoltWorker.hpp
+  inc/hal/HwCapability.hpp
+  inc/hal/IFanProvider.hpp
+  inc/hal/ITempProvider.hpp
+  inc/hal/IPlatformProvider.hpp
+  inc/hal/HwmonFanProvider.hpp
+  inc/hal/HwmonTempProvider.hpp
+  inc/hal/TuxedoIOProviders.hpp
+  inc/hal/HardwareManager.hpp
   src/profiles/FanProfiles.cpp
   src/profiles/UccProfile.cpp
   src/profiles/DefaultProfiles.cpp
@@ -61,6 +70,7 @@ target_link_libraries(uccd PRIVATE
   Qt6::Core
   Qt6::Bluetooth
   Qt6::DBus
+  nlohmann_json::nlohmann_json
 )
 
 # Add compile options for stricter checking

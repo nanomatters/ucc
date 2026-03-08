@@ -51,6 +51,7 @@ public:
   // System Information
   std::optional< std::string > getSystemInfoJSON();
   std::optional< bool > isDeviceSupported();
+  std::optional< std::string > getCapabilitiesJSON();
 
   // Profile Management — unified API (profiles have "editable" flag)
   std::optional< std::string > getProfilesJSON();       // All profiles with editable flag

@@ -18,7 +18,7 @@
 #include "DaemonWorker.hpp"
 #include "../profiles/UccProfile.hpp"
 #include "../profiles/FanProfile.hpp"
-#include "tuxedo_io_lib/tuxedo_io_api.hh"
+#include "../hal/HardwareManager.hpp"
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -274,14 +274,14 @@ class FanControlWorker : public DaemonWorker
 {
 public:
   FanControlWorker(
-    TuxedoIOAPI &io,
+    ucc::hal::HardwareManager &hw,
     std::function< UccProfile() > getActiveProfile,
     std::function< bool() > getFanControlEnabled,
     std::function< void( size_t, int64_t, int ) > updateFanSpeed,
     std::function< void( size_t, int64_t, int ) > updateFanTemp
   )
     : DaemonWorker( std::chrono::milliseconds( 1000 ) )
-    , m_io( io )
+    , m_hw( hw )
     , m_getActiveProfile( getActiveProfile )
     , m_getFanControlEnabled( getFanControlEnabled )
     , m_updateFanSpeed( updateFanSpeed )
@@ -356,59 +356,56 @@ public:
 protected:
   void onStart() override
   {
-    int numberFans = 0;
-    bool fansDetected = m_io.getNumberFans( numberFans ) && numberFans > 0;
-
-    // If getNumberFans fails, try to detect fans by reading temperature from fan 0
-    if ( !fansDetected )
+    auto *fanProvider = m_hw.fanProvider();
+    if ( !fanProvider )
     {
-      int temp = -1;
-      if ( m_io.getFanTemperature( 0, temp ) && temp >= 0 )
-      {
-        // We can read from at least fan 0, assume we have CPU and GPU fans
-        numberFans = 2;
-        fansDetected = true;
-        syslog( LOG_INFO, "FanControlWorker: Detected fans by temperature reading (getNumberFans failed)" );
-      }
+      syslog( LOG_INFO, "FanControlWorker: No fan provider available" );
+      return;
     }
 
-    if ( fansDetected && numberFans > 0 )
-    {
-      // Initialize fan logic for each fan
-      for ( int i = 0; i < numberFans; ++i )
-      {
-        auto profile = m_getActiveProfile();
+    m_providerFans = fanProvider->enumerateFans();
+    const int numberFans = static_cast< int >( m_providerFans.size() );
 
-        // Fan 0 is CPU, others are GPU
-        FanLogicType type = ( i == 0 ) ? FanLogicType::CPU : FanLogicType::GPU;
-        // Resolve the named fan profile preset
-        FanProfile fp = getDefaultFanProfile( profile.fan.fanProfile );
-        m_fanLogics.emplace_back( fp, type );
-      }
-
-      // Get hardware fan limits
-      int minSpeed = 0;
-      bool fansOffAvailable = true;
-
-      if ( m_io.getFansMinSpeed( minSpeed ) )
-        m_fansMinSpeedHWLimit = minSpeed;
-
-      if ( m_io.getFansOffAvailable( fansOffAvailable ) )
-        m_fansOffAvailable = fansOffAvailable;
-
-      // Apply hardware limits to all fan logics
-      for ( auto &logic : m_fanLogics )
-      {
-        logic.setFansMinSpeedHWLimit( m_fansMinSpeedHWLimit );
-        logic.setFansOffAvailable( m_fansOffAvailable );
-      }
-
-      syslog( LOG_INFO, "FanControlWorker started with %d fans", numberFans );
-    }
-    else
+    if ( numberFans <= 0 )
     {
       syslog( LOG_INFO, "FanControlWorker: No fans detected" );
+      return;
     }
+
+    // Resolve the CPU and GPU temp sensors from HardwareManager
+    m_cpuTempSensor = m_hw.findCpuTempSensor();
+    m_gpuTempSensor = m_hw.findGpuTempSensor();
+
+    // Initialize fan logic for each fan
+    for ( int i = 0; i < numberFans; ++i )
+    {
+      auto profile = m_getActiveProfile();
+
+      // Fan 0 is CPU, others are GPU (legacy mapping)
+      FanLogicType type = ( i == 0 ) ? FanLogicType::CPU : FanLogicType::GPU;
+      FanProfile fp = getDefaultFanProfile( profile.fan.fanProfile );
+      m_fanLogics.emplace_back( fp, type );
+    }
+
+    // Get hardware fan limits from the provider
+    m_fansMinSpeedHWLimit = 0;
+    m_fansOffAvailable = true;
+
+    if ( !m_providerFans.empty() )
+    {
+      m_fansMinSpeedHWLimit = fanProvider->getMinSpeedPercent( m_providerFans[0] );
+      m_fansOffAvailable = fanProvider->canTurnOff( m_providerFans[0] );
+    }
+
+    // Apply hardware limits to all fan logics
+    for ( auto &logic : m_fanLogics )
+    {
+      logic.setFansMinSpeedHWLimit( m_fansMinSpeedHWLimit );
+      logic.setFansOffAvailable( m_fansOffAvailable );
+    }
+
+    syslog( LOG_INFO, "FanControlWorker started with %d fans (provider: %s)",
+            numberFans, fanProvider->name().c_str() );
   }
 
   void onWork() override
@@ -440,6 +437,10 @@ protected:
     const int64_t timestamp = std::chrono::duration_cast< std::chrono::milliseconds >(
       std::chrono::system_clock::now().time_since_epoch() ).count();
 
+    auto *fanProvider = m_hw.fanProvider();
+    if ( !fanProvider )
+      return;
+
     std::vector< int > fanTemps;
     std::vector< int > fanSpeedsSet;
     std::vector< bool > tempSensorAvailable;
@@ -448,7 +449,29 @@ protected:
     for ( size_t fanIndex = 0; fanIndex < m_fanLogics.size(); ++fanIndex )
     {
       int tempCelsius = -1;
-      bool tempReadSuccess = m_io.getFanTemperature( static_cast< int >( fanIndex ), tempCelsius );
+      bool tempReadSuccess = false;
+
+      // Determine which temp sensor to use for this fan
+      const ucc::hal::TempSensorInfo *sensor = ( fanIndex == 0 )
+        ? m_cpuTempSensor : m_gpuTempSensor;
+
+      if ( sensor )
+      {
+        auto val = m_hw.readTemp( *sensor );
+        if ( val.has_value() )
+        {
+          tempCelsius = static_cast< int >( std::round( val.value() ) );
+          tempReadSuccess = true;
+        }
+      }
+
+      // Fallback: if no HAL temp, try reading from TuxedoIO-style fallback
+      // (fan provider itself may expose per-fan temperature)
+      if ( !tempReadSuccess )
+      {
+        // TuxedoIOTempProvider is a separate temp provider — if it detected,
+        // sensors would already be in m_hw's temp providers. Nothing more to do.
+      }
 
       tempSensorAvailable.push_back( tempReadSuccess );
 
@@ -491,11 +514,8 @@ protected:
           fanSpeedsSet[fanIndex] = highestSpeed;
         }
 
-        // Log the temperature and speed we are about to set for debugging
-        //syslog( LOG_DEBUG, "FanControlWorker: fan %d temp=%d calculated=%d set=%d sameSpeed=%d",
-        //        static_cast< int >( fanIndex ), fanTemps[fanIndex], fanSpeedsSet[fanIndex], speedToSet, m_modeSameSpeed ? 1 : 0 );
-
-        m_io.setFanSpeedPercent( static_cast< int >( fanIndex ), speedToSet );
+        if ( fanIndex < m_providerFans.size() )
+          fanProvider->setFanSpeedPercent( m_providerFans[fanIndex], speedToSet );
       }
     }
 
@@ -517,7 +537,12 @@ protected:
       {
         // Report hardware speed when control is disabled
         int hwSpeed = -1;
-        m_io.getFanSpeedPercent( static_cast< int >( fanIndex ), hwSpeed );
+        if ( fanIndex < m_providerFans.size() )
+        {
+          auto pct = fanProvider->getFanSpeedPercent( m_providerFans[fanIndex] );
+          if ( pct.has_value() )
+            hwSpeed = pct.value();
+        }
         currentSpeed = hwSpeed;
       }
 
@@ -578,13 +603,16 @@ private:
     }
   }
 
-  TuxedoIOAPI &m_io;
+  ucc::hal::HardwareManager &m_hw;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< bool() > m_getFanControlEnabled;
   std::function< void( size_t, int64_t, int ) > m_updateFanSpeed;
   std::function< void( size_t, int64_t, int ) > m_updateFanTemp;
 
   std::vector< FanControlLogic > m_fanLogics;
+  std::vector< ucc::hal::FanInfo > m_providerFans; // cached from fanProvider
+  const ucc::hal::TempSensorInfo *m_cpuTempSensor = nullptr;
+  const ucc::hal::TempSensorInfo *m_gpuTempSensor = nullptr;
   bool m_modeSameSpeed;
   bool m_controlAvailableMessageShown;
   int m_fansMinSpeedHWLimit;

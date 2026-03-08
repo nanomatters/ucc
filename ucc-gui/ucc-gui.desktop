@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Uniwill Control Center
+Name=Unified Control Center
 Comment=System control application for Uniwill laptops
 Exec=ucc-gui
 Icon=ucc-gui

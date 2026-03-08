@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2026 Uniwill Control Center Contributors
+ * Copyright (C) 2026 Unified Control Center Contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -775,10 +775,14 @@ void TrayBackend::loadProfiles()
 
 void TrayBackend::loadCapabilities()
 {
-  if ( auto supported = m_client->isDeviceSupported() )
+  // Capability-based detection: the daemon always runs, capability flags
+  // determine what the UI shows.  deviceSupported is true if the HAL found
+  // *any* controllable hardware.
+  if ( auto caps = m_client->getCapabilitiesJSON() )
   {
+    bool hasAnyCaps = ( *caps != "[]" );
     bool was = m_deviceSupported;
-    m_deviceSupported = *supported;
+    m_deviceSupported = hasAnyCaps;
     if ( was != m_deviceSupported )
       emit deviceSupportedChanged();
   }

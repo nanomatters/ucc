@@ -34,8 +34,8 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
          qt6-qpa-plugins,
          plasma-workspace (>= 6.0),
          policykit-1
-Description: Uniwill Control Center
- Uniwill Control Center (UCC) is a comprehensive system control application
+Description: Unified Control Center
+ Unified Control Center (UCC) is a comprehensive system control application
  suite for Uniwill (Tuxedo, XMG etc.) computers. Includes the system daemon,
  graphical user interface, command-line tool and KDE Plasma system-tray applet.
  .

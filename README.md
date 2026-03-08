@@ -1,5 +1,5 @@
 
-# Uniwill Control Center (UCC)
+# Unified Control Center (UCC)
 
 Modern Qt6/KDE C++20 application suite for Uniwill laptop control.
 

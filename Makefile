@@ -30,7 +30,7 @@ TMPDIR := dist/$(DISTNAME)-tmp
 EXCLUDES := --exclude='build*' --exclude=dist --exclude=.git --exclude='$(TMPDIR)' --exclude='*.o' --exclude='*.a' --exclude='*.so*'
 
 help:
-	@echo "Uniwill Control Center - Build and Package Targets"
+	@echo "Unified Control Center - Build and Package Targets"
 	@echo ""
 	@echo "Build targets:"
 	@echo "  make build              Build the project locally"

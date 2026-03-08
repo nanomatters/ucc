@@ -279,6 +279,15 @@ std::optional< bool > UccdClient::isDeviceSupported()
   return callMethod< bool >( "IsDeviceSupported" );
 }
 
+std::optional< std::string > UccdClient::getCapabilitiesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetCapabilitiesJSON" ) )
+  {
+    return result->toStdString();
+  }
+  return std::nullopt;
+}
+
 // ---------------------------------------------------------------------------
 // Profile Management — unified API
 // ---------------------------------------------------------------------------
@@ -289,7 +298,6 @@ std::optional< std::string > UccdClient::getProfilesJSON()
     return result->toStdString();
   return std::nullopt;
 }
-
 std::optional< std::string > UccdClient::getDefaultProfilesJSON()
 {
   if ( auto result = callMethod< QString >( "GetDefaultProfilesJSON" ) )

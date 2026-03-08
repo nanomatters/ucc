@@ -16,6 +16,7 @@
 #pragma once
 
 #include "profiles/DefaultProfiles.hpp"
+#include "hal/HwCapability.hpp"
 #include <string>
 #include <optional>
 
@@ -45,14 +46,21 @@ struct SystemInfo
   std::string iGpuModel;          // e.g. "AMD Radeon 780M" or "" if absent
   std::string dGpuModel;          // e.g. "NVIDIA GeForce RTX 4070" or "" if absent
 
-  // Laptop
+  // System / Manufacturer
   LaptopManufacturer manufacturer = LaptopManufacturer::Unknown;
-  std::string manufacturerName;   // human-readable: "TUXEDO", "XMG", "Uniwill", …
-  std::string laptopModel;        // human-readable: "TUXEDO Stellaris 16 Intel Gen6 (2024)"
+  std::string manufacturerName;   // human-readable: "TUXEDO", "XMG", "ASUS", …
+  std::string systemModel;        // human-readable: "TUXEDO Stellaris 16 Intel Gen6 (2024)" or "ProArt X870E-CREATOR WIFI"
   std::string productSKU;         // raw DMI product_sku
   std::string boardName;          // raw DMI board_name
   std::string boardVendor;        // raw DMI board_vendor
   std::string sysVendor;          // raw DMI sys_vendor
+  std::string productName;        // raw DMI product_name
+
+  // Chassis / form factor
+  ucc::hal::ChassisType chassisType = ucc::hal::ChassisType::Unknown;
+
+  // Legacy alias — kept for backward compat in JSON (maps to systemModel)
+  std::string laptopModel;        // @deprecated use systemModel
 
   // Internal device ID (if matched)
   std::optional< UniwillDeviceID > deviceId;
@@ -67,8 +75,8 @@ struct SystemInfo
  * @brief Detect system hardware information
  *
  * Reads DMI data from /sys/class/dmi/id/, CPU model from /proc/cpuinfo,
- * and GPU models from the PCI sysfs tree.  Maps the detected UniwillDeviceID
- * to a human-readable laptop model name (brand + product line + year).
+ * GPU models from the PCI sysfs tree, and chassis type from DMI.
+ * Maps the detected UniwillDeviceID to a human-readable model name.
  *
  * @param deviceId  The already-identified UniwillDeviceID (or nullopt)
  * @return Populated SystemInfo struct

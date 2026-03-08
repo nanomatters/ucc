@@ -1,5 +1,5 @@
 [Unit]
-Description=Uniwill Control Center Daemon
+Description=Unified Control Center Daemon
 Documentation=man:uccd(8)
 After=dbus.service
 Requires=dbus.service

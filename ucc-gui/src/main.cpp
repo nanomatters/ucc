@@ -83,15 +83,14 @@ int main( int argc, char *argv[] )
 
   {
     ucc::UccdClient client;
-    auto supported = client.isDeviceSupported();
-    if ( !supported.has_value() || !supported.value() )
+    auto caps = client.getCapabilitiesJSON();
+    if ( !caps.has_value() || caps.value() == "[]" )
     {
-      QMessageBox::critical(
-        nullptr, "Unsupported Device",
-        "This laptop model is not supported by UCC.\n\n"
-        "Running UCC on untested hardware may cause\n"
-        "unexpected behavior, even damage." );
-      return 1;
+      QMessageBox::warning(
+        nullptr, "No Hardware Detected",
+        "UCC could not detect any controllable hardware.\n\n"
+        "The GUI will still open but some features\n"
+        "may not be available." );
     }
   }
 

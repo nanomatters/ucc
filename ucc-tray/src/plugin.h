@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 Uniwill Control Center Contributors
+ * SPDX-FileCopyrightText: 2026 Unified Control Center Contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 

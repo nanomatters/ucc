@@ -311,7 +311,7 @@ void print_usage( std::string_view program_name )
 void print_version()
 {
   std::cout << DAEMON_NAME << " version " << UCC_VERSION_FULL << "\n"
-            << "Daemon for Uniwill Control Center\n";
+            << "Daemon for Unified Control Center\n";
 }
 
 // Stop the running daemon via PID file

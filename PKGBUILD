@@ -3,7 +3,7 @@
 pkgname=ucc
 pkgver=0.2.0
 pkgrel=1
-pkgdesc='Uniwill Control Center - System daemon, GUI, CLI tool and Plasma applet for Uniwill laptops'
+pkgdesc='Unified Control Center - System daemon, GUI, CLI tool and Plasma applet for Uniwill laptops'
 arch=('x86_64')
 url='https://github.com/nanomatters/ucc'
 license=('GPL-3.0-or-later')

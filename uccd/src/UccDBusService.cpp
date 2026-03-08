@@ -531,6 +531,12 @@ bool UccDBusInterfaceAdaptor::IsDeviceSupported()
   return m_data.deviceSupported.load();
 }
 
+QString UccDBusInterfaceAdaptor::GetCapabilitiesJSON()
+{
+  std::lock_guard< std::mutex > lock( m_data.dataMutex );
+  return QString::fromStdString( m_data.capabilitiesJSON );
+}
+
 QString UccDBusInterfaceAdaptor::GetDisplayModesJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
@@ -2803,14 +2809,10 @@ UccDBusService::UccDBusService()
   m_systemInfo = detectSystemInfo( m_deviceId );
   m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
 
-  // Check device whitelist — unsupported machines get a functional D-Bus
-  // service (so clients can query IsDeviceSupported) but no hardware control.
-  m_dbusData.deviceSupported = ucc::isDeviceSupported();
-  if ( !m_dbusData.deviceSupported.load() )
-  {
-    syslog( LOG_WARNING, "[uccd] Device not in supported whitelist — running in passive mode" );
-    return;
-  }
+  // Hardware support is determined dynamically by the HAL provider registry.
+  // After m_hw.detect() completes, m_hw.capabilities() tells us exactly what
+  // this machine can do.  Clients query GetCapabilitiesJSON() to adapt their
+  // UI.  The old SKU-whitelist gate is gone — we always continue startup.
 
   // detect display session type and initialize display modes
   initializeDisplayModes();
@@ -2837,6 +2839,32 @@ UccDBusService::UccDBusService()
   // ProfileSettingsWorker so that NVML is initialised exactly once.
   m_nvml = std::make_shared< NvmlWrapper >();
   readHardwareCapabilities();
+
+  // --- HAL: register and detect hardware providers ---
+  // TuxedoIO-based providers (OEM, high priority; only available on Clevo/Uniwill)
+  m_hw.addFanProvider( std::make_unique< ucc::hal::TuxedoIOFanProvider >( m_io ) );
+  m_hw.addTempProvider( std::make_unique< ucc::hal::TuxedoIOTempProvider >( m_io ) );
+  m_hw.addPlatformProvider( std::make_unique< ucc::hal::TuxedoIOPlatformProvider >( m_io ) );
+  // Generic hwmon providers (work on any Linux machine)
+  m_hw.addFanProvider( std::make_unique< ucc::hal::HwmonFanProvider >() );
+  m_hw.addTempProvider( std::make_unique< ucc::hal::HwmonTempProvider >() );
+  // Probe all providers and select the best for each subsystem
+  m_hw.detect();
+
+  // Publish capabilities for D-Bus clients
+  m_dbusData.capabilitiesJSON = ucc::hal::capabilitiesToJSON( m_hw.capabilities() );
+  m_dbusData.deviceSupported = ( m_hw.capabilities() != ucc::hal::HwCapability::None );
+
+  // Resize fan data vector based on actual detected fans
+  {
+    const size_t nFans = m_hw.fans().size();
+    if ( nFans > 0 && nFans != m_dbusData.fans.size() )
+    {
+      m_dbusData.fans.resize( std::max( nFans, static_cast< size_t >( 3 ) ) );
+      syslog( LOG_INFO, "[uccd] HAL detected %zu fans, resized D-Bus fan data", nFans );
+    }
+    m_dbusData.fanHwmonAvailable = m_hw.hasFanControl();
+  }
 
   // initialize profiles first (safer, doesn't start threads)
   initializeProfiles();
@@ -2927,6 +2955,14 @@ UccDBusService::UccDBusService()
   // webcam monitoring via HardwareMonitorWorker (replaces former WebcamWorker)
   m_hardwareMonitorWorker->setWebcamCallbacks(
     [this]() -> std::pair< bool, bool > {
+      // Try platform provider first (HAL), fall back to raw m_io
+      auto *platform = m_hw.platformProvider();
+      if ( platform )
+      {
+        auto webcamOpt = platform->getWebcam();
+        if ( webcamOpt.has_value() )
+          return { true, webcamOpt.value() };
+      }
       bool status = false;
       bool available = m_io.getWebcam( status );
       return { available, status };
@@ -2948,7 +2984,7 @@ UccDBusService::UccDBusService()
 
   // initialize fan control worker
   m_fanControlWorker = std::make_unique< FanControlWorker >(
-    m_io,
+    m_hw,
     [this]() { return m_activeProfile; },
     [this]() { return m_settings.fanControlEnabled; },
     [this]( size_t fanIndex, int64_t timestamp, int speed )
@@ -3569,26 +3605,18 @@ void UccDBusService::setupGpuDataCallback()
 
 void UccDBusService::updateFanData()
 {
-  int numberFans = 0;
-  bool fansAvailable = m_io.getNumberFans( numberFans ) && numberFans > 0;
-
-  // If getNumberFans fails, try to detect fans by reading temperature from fan 0
-  if ( !fansAvailable )
-  {
-    int temp = -1;
-    if ( m_io.getFanTemperature( 0, temp ) && temp >= 0 )
-    {
-      // We can read from at least fan 0, assume fans are available
-      fansAvailable = true;
-      numberFans = 2; // Assume CPU and GPU fans
-      syslog( LOG_INFO, "UccDBusService: Detected fans by temperature reading (getNumberFans failed)" );
-    }
-  }
+  auto *fanProvider = m_hw.fanProvider();
+  const auto &fans = m_hw.fans();
+  const bool fansAvailable = ( fanProvider != nullptr && !fans.empty() );
 
   int minSpeed = 0;
   bool fansOffAvailable = false;
-  ( void ) m_io.getFansMinSpeed( minSpeed );
-  ( void ) m_io.getFansOffAvailable( fansOffAvailable );
+
+  if ( fanProvider && !fans.empty() )
+  {
+    minSpeed = fanProvider->getMinSpeedPercent( fans[0] );
+    fansOffAvailable = fanProvider->canTurnOff( fans[0] );
+  }
 
   const auto now = std::chrono::duration_cast< std::chrono::milliseconds >(
     std::chrono::system_clock::now().time_since_epoch() ).count();
@@ -3601,20 +3629,27 @@ void UccDBusService::updateFanData()
   if ( not fansAvailable )
     return;
 
-  const int maxFans = std::min( numberFans, static_cast< int >( m_dbusData.fans.size() ) );
-  for ( int fanIndex = 0; fanIndex < maxFans; ++fanIndex )
+  const size_t maxFans = std::min( fans.size(), m_dbusData.fans.size() );
+  for ( size_t fanIndex = 0; fanIndex < maxFans; ++fanIndex )
   {
-    int speedPercent = -1;
-    int tempCelsius = -1;
-
-    if ( m_io.getFanSpeedPercent( fanIndex, speedPercent ) )
+    auto speedOpt = fanProvider->getFanSpeedPercent( fans[fanIndex] );
+    if ( speedOpt.has_value() )
     {
-      m_dbusData.fans[ static_cast< size_t >( fanIndex ) ].speed.set( static_cast< int64_t >( now ), speedPercent );
+      m_dbusData.fans[fanIndex].speed.set( static_cast< int64_t >( now ), speedOpt.value() );
     }
 
-    if ( m_io.getFanTemperature( fanIndex, tempCelsius ) )
+    // For temperature, use the HardwareManager's temp sensor mapping
+    const ucc::hal::TempSensorInfo *sensor = ( fanIndex == 0 )
+      ? m_hw.findCpuTempSensor() : m_hw.findGpuTempSensor();
+    if ( sensor )
     {
-      m_dbusData.fans[ static_cast< size_t >( fanIndex ) ].temp.set( static_cast< int64_t >( now ), tempCelsius );
+      auto tempOpt = m_hw.readTemp( *sensor );
+      if ( tempOpt.has_value() )
+      {
+        m_dbusData.fans[fanIndex].temp.set(
+          static_cast< int64_t >( now ),
+          static_cast< int32_t >( std::lround( tempOpt.value() ) ) );
+      }
     }
   }
 }
@@ -3971,6 +4006,8 @@ void UccDBusService::onWork()
 
   // update tuxedo wmi availability (matches typescript implementation)
   m_dbusData.tuxedoWmiAvailable = m_io.wmiAvailable();
+  // update fan availability from HAL
+  m_dbusData.fanHwmonAvailable = m_hw.hasFanControl();
 
   // Periodic NVIDIA cTGP offset validation (every 5 ticks = 5 s)
   if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )
@@ -4196,6 +4233,9 @@ void UccDBusService::onExit()
   // Only do thread-safe work here — this runs on the DaemonWorker thread.
   // DBus cleanup happens in shutdown() on the main thread.
   saveAutosave();
+
+  // Restore all fans to auto/hardware control mode
+  m_hw.restoreAllFanAuto();
 }
 
 // profile management implementation

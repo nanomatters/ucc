@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 Uniwill Control Center Contributors
+ * SPDX-FileCopyrightText: 2026 Unified Control Center Contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -25,7 +25,7 @@ PlasmoidItem {
     Plasmoid.icon: "ucc-tray"
 
     toolTipMainText: trayBackend.deviceSupported
-                     ? (trayBackend.laptopModel || "Uniwill Control Center")
+                     ? (trayBackend.laptopModel || "Unified Control Center")
                      : i18n("Unsupported Device")
     toolTipSubText: {
         if (!trayBackend.deviceSupported)
@@ -75,14 +75,14 @@ PlasmoidItem {
         id: fullRep
 
         title: trayBackend.deviceSupported
-               ? (trayBackend.laptopModel || "Uniwill Control Center")
+               ? (trayBackend.laptopModel || "Unified Control Center")
                : i18n("Unsupported Device")
 
         Connections {
             target: trayBackend
             function onSystemInfoChanged() {
                 fullRep.title = trayBackend.deviceSupported
-                    ? (trayBackend.laptopModel || "Uniwill Control Center")
+                    ? (trayBackend.laptopModel || "Unified Control Center")
                     : i18n("Unsupported Device");
             }
         }

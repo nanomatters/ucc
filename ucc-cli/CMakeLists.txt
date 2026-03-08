@@ -4,7 +4,7 @@ cmake_minimum_required( VERSION 3.20 )
 
 project( ucc-cli
   VERSION ${CMAKE_PROJECT_VERSION}
-  DESCRIPTION "Uniwill Control Center command-line interface"
+  DESCRIPTION "Unified Control Center command-line interface"
   LANGUAGES CXX
 )
 

@@ -1,7 +1,7 @@
 /*
  * UCC GNOME Shell Extension
  *
- * System tray applet for the Uniwill Control Center daemon (uccd).
+ * System tray applet for the Unified Control Center daemon (uccd).
  * Provides monitoring, profile switching, hardware toggles, and
  * water cooler control — mirroring the KDE Plasma applet.
  *
@@ -845,8 +845,10 @@ class UccIndicator extends PanelMenu.Button {
     // -----------------------------------------------------------------------
 
     _loadCapabilities() {
-        if (!this._client.isDeviceSupported()) {
-            log('[UCC] Device not supported — hiding indicator');
+        const capsJson = this._client.getCapabilitiesJSON();
+        const caps = capsJson ? JSON.parse(capsJson) : [];
+        if (caps.length === 0) {
+            log('[UCC] No hardware capabilities detected — hiding indicator');
             this._stopTimers();
             this.visible = false;
             return;

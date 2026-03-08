@@ -110,7 +110,7 @@ MainWindow::MainWindow( QWidget *parent )
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     m_gpuDefaultPowerLimit = *gpuDefault;
 
-  setWindowTitle( "Uniwill Control Center" );
+  setWindowTitle( "Unified Control Center" );
   setGeometry( 100, 100, 900, 700 );
 
   setupUI();

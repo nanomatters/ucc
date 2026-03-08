@@ -15,6 +15,7 @@
 
 #include "SystemInfo.hpp"
 #include "SysfsNode.hpp"
+#include "hal/HwCapability.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -530,11 +531,14 @@ std::string SystemInfo::toJSON() const
       << "\"iGpuModel\":\"" << jsonEscapeValue( iGpuModel ) << "\","
       << "\"dGpuModel\":\"" << jsonEscapeValue( dGpuModel ) << "\","
       << "\"manufacturer\":\"" << jsonEscapeValue( manufacturerName ) << "\","
+      << "\"systemModel\":\"" << jsonEscapeValue( systemModel ) << "\","
       << "\"laptopModel\":\"" << jsonEscapeValue( laptopModel ) << "\","
       << "\"productSKU\":\"" << jsonEscapeValue( productSKU ) << "\","
       << "\"boardName\":\"" << jsonEscapeValue( boardName ) << "\","
       << "\"boardVendor\":\"" << jsonEscapeValue( boardVendor ) << "\","
-      << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\""
+      << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\","
+      << "\"productName\":\"" << jsonEscapeValue( productName ) << "\","
+      << "\"chassisType\":\"" << jsonEscapeValue( ucc::hal::chassisTypeToString( chassisType ) ) << "\""
       << "}";
   return oss.str();
 }
@@ -550,10 +554,21 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
   info.boardName   = readFile( dmiBase + "/board_name" );
   info.boardVendor = readFile( dmiBase + "/board_vendor" );
   info.sysVendor   = readFile( dmiBase + "/sys_vendor" );
+  info.productName = readFile( dmiBase + "/product_name" );
 
   syslog( LOG_INFO, "[SystemInfo] DMI: sku='%s' board='%s' boardVendor='%s' sysVendor='%s'",
           info.productSKU.c_str(), info.boardName.c_str(),
           info.boardVendor.c_str(), info.sysVendor.c_str() );
+
+  // Chassis type
+  {
+    std::string chassisStr = readFile( dmiBase + "/chassis_type" );
+    int chassisInt = 0;
+    try { chassisInt = std::stoi( chassisStr ); } catch ( ... ) {}
+    info.chassisType = ucc::hal::chassisTypeFromDmi( chassisInt );
+    syslog( LOG_INFO, "[SystemInfo] Chassis type: %s (DMI %d)",
+            ucc::hal::chassisTypeToString( info.chassisType ).c_str(), chassisInt );
+  }
 
   // CPU
   info.cpuModel = detectCpuModel();
@@ -568,11 +583,13 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
   info.manufacturer = classifyManufacturer( info.sysVendor, info.boardVendor );
   info.manufacturerName = manufacturerToString( info.manufacturer );
 
-  // Laptop model
-  info.laptopModel = buildLaptopModel( deviceId, info.manufacturer, info.sysVendor );
+  // System model (renamed from laptopModel for generality)
+  info.systemModel = buildLaptopModel( deviceId, info.manufacturer, info.sysVendor );
+  info.laptopModel = info.systemModel; // backward compat alias
 
-  syslog( LOG_INFO, "[SystemInfo] Laptop: %s (manufacturer: %s)",
-          info.laptopModel.c_str(), info.manufacturerName.c_str() );
+  syslog( LOG_INFO, "[SystemInfo] System: %s (manufacturer: %s, chassis: %s)",
+          info.systemModel.c_str(), info.manufacturerName.c_str(),
+          ucc::hal::chassisTypeToString( info.chassisType ).c_str() );
 
   return info;
 }

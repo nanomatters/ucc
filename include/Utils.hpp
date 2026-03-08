@@ -35,36 +35,22 @@ namespace ucc
 {
 
 // ---------------------------------------------------------------------------
-// Device support whitelist
+// Legacy device-support check (deprecated)
 //
-// Only devices listed here have been tested with uccd.  The daemon will still
-// run on unlisted hardware (so clients can query the status) but it will NOT
-// touch any hardware registers or start worker threads.
+// The old SKU whitelist has been removed.  Hardware support is now determined
+// dynamically by the HAL provider registry (HardwareManager).  Each provider
+// probes the system at startup and reports what it can control; the daemon
+// and clients inspect capability flags instead of a product-SKU list.
+//
+// isDeviceSupported() is kept as a trivial compat shim for any client code
+// that hasn't migrated yet — it always returns true.
 // ---------------------------------------------------------------------------
 
-/// DMI product_sku strings of tested / supported laptops.
-inline constexpr std::array kSupportedDeviceSKUs = {
-  "STELLARIS16A07",
-  "STELLARIS16I07",
-  "XNE16E25",
-  "XNE16A25",
-};
-
-/**
- * @brief Check whether the current machine is a supported (whitelisted) device.
- *
- * Reads /sys/class/dmi/id/product_sku and compares it against the
- * built-in whitelist.  Returns true if the SKU matches.
- */
+/// @deprecated Always returns true.  Use HardwareManager::capabilities() instead.
+[[deprecated( "Use HardwareManager::capabilities() for capability-based checks" )]]
 inline bool isDeviceSupported()
 {
-  const auto sku = SysfsNode< std::string >( "/sys/class/dmi/id/product_sku" ).read();
-  if ( !sku.has_value() )
-    return false;
-
-  return std::find( kSupportedDeviceSKUs.begin(),
-                    kSupportedDeviceSKUs.end(),
-                    *sku ) != kSupportedDeviceSKUs.end();
+  return true;
 }
 
 /**

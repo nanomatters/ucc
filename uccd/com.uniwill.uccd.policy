@@ -4,7 +4,7 @@
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
 
-  <vendor>Uniwill Control Center</vendor>
+  <vendor>Unified Control Center</vendor>
   <vendor_url>https://github.com/nanomatters/ucc</vendor_url>
 
   <!--

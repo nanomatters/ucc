@@ -21,7 +21,7 @@ let
 in
 {
   options.services.uccd = {
-    enable = lib.mkEnableOption "Uniwill Control Center daemon (uccd)";
+    enable = lib.mkEnableOption "Unified Control Center daemon (uccd)";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -71,7 +71,7 @@ in
     ];
 
     systemd.services.uccd = {
-      description = "Uniwill Control Center Daemon";
+      description = "Unified Control Center Daemon";
       documentation = [ "man:uccd(8)" ];
       after = [ "dbus.service" ];
       requires = [ "dbus.service" ];
@@ -104,7 +104,7 @@ in
     };
 
     systemd.services.uccd-sleep = lib.mkIf cfg.enableSleepHandler {
-      description = "Uniwill Control Center Daemon Sleep Handler";
+      description = "Unified Control Center Daemon Sleep Handler";
       documentation = [ "man:uccd(8)" ];
       after = [
         "suspend.target"

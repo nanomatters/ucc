@@ -229,6 +229,30 @@ namespace DefaultFanProfileIDs
   inline constexpr const char *Freezy   = "fan-freezy";
 }
 
+/**
+ * @brief Binds a fan to a temperature sensor and a fan curve.
+ *
+ * In the legacy model every fan was implicitly bound: fan 0 → CPU table,
+ * fan 1+ → GPU table.  The FanBinding struct decouples that by naming the
+ * fan and sensor explicitly, making it work on any hardware layout.
+ *
+ * When no explicit bindings exist, the legacy mapping is synthesised by
+ * FanControlWorker::buildDefaultBindings().
+ */
+struct FanBinding
+{
+  std::string fanId;          ///< IFanProvider FanInfo::id (e.g. "hwmon3_fan2")
+  std::string tempSensorId;   ///< ITempProvider TempSensorInfo::id (e.g. "hwmon4_temp1")
+  std::vector< FanTableEntry > curve; ///< temp→speed curve (override). Empty = use profile default.
+
+  FanBinding() = default;
+  FanBinding( const std::string &fan, const std::string &sensor )
+    : fanId( fan ), tempSensorId( sensor ) {}
+  FanBinding( const std::string &fan, const std::string &sensor,
+              const std::vector< FanTableEntry > &c )
+    : fanId( fan ), tempSensorId( sensor ), curve( c ) {}
+};
+
 // default fan profile presets
 extern const std::vector< FanProfile > defaultFanProfiles;
 

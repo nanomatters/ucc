@@ -133,6 +133,18 @@ struct UccProfileFanControl
   bool autoControlWC; // when true, automatically control water cooler based on system temperature
   bool enableWaterCooler; // when true, water cooler BLE scanning/connection is enabled
 
+  // Embedded fan curve tables (populated when profile JSON includes them)
+  std::vector< FanTableEntry > tableCPU;
+  std::vector< FanTableEntry > tableGPU;
+  std::vector< FanTableEntry > tablePump;
+  std::vector< FanTableEntry > tableWaterCoolerFan;
+
+  // HAL fan bindings — sensor-bound fan curves for arbitrary hardware.
+  // When non-empty, these take precedence over the legacy tableCPU/tableGPU.
+  // When empty, FanControlWorker synthesises default bindings from the
+  // legacy tables and the HardwareManager's detected fans/sensors.
+  std::vector< FanBinding > fanBindings;
+
   UccProfileFanControl()
     : useControl( true ),
       fanProfile( "fan-balanced" ),

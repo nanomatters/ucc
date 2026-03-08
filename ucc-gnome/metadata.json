@@ -1,6 +1,6 @@
 {
     "uuid": "ucc@uniwill.com",
-    "name": "Uniwill Control Center",
+    "name": "Unified Control Center",
     "description": "Monitor and control Uniwill laptop hardware — fan control, keyboard backlight, display settings, CPU power management, and water cooler control.",
     "shell-version": ["47", "48", "49", "50"],
     "version": 1,

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# ucc-tray — KDE Plasma system-tray applet for Uniwill Control Center
+# ucc-tray — KDE Plasma system-tray applet for Unified Control Center
 #
 # Structure (following plasma-pa pattern):
 #   src/     — QML extension module (com.uniwill.ucc.private) providing TrayBackend
@@ -16,7 +16,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(
     ucc-tray
     VERSION 0.2.0
-    DESCRIPTION "Uniwill Control Center tray"
+    DESCRIPTION "Unified Control Center tray"
     LANGUAGES CXX
   )
 

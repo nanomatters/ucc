@@ -3,7 +3,7 @@
 Name:           ucc
 Version:        0.2.0
 Release:        1%{?dist}
-Summary:        Uniwill Control Center - System control application suite
+Summary:        Unified Control Center - System control application suite
 License:        GPL-3.0-or-later
 
 URL:            https://github.com/tuxedocomputers/uniwill-control-center
@@ -39,7 +39,7 @@ Requires(preun): systemd
 Requires(postun): systemd
 
 %description
-Uniwill Control Center (UCC) is a comprehensive system control application 
+Unified Control Center (UCC) is a comprehensive system control application 
 suite for Uniwill computers. It provides:
 
 - Daemon (uccd): Background service for system control and monitoring

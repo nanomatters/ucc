@@ -3,7 +3,7 @@
     "KPlugin": {
         "Authors": [
             {
-                "Name": "Uniwill Control Center Contributors"
+                "Name": "Unified Control Center Contributors"
             }
         ],
         "Category": "Hardware",
@@ -12,7 +12,7 @@
         "Icon": "ucc-tray",
         "Id": "com.uniwill.ucc",
         "License": "GPL-3.0-or-later",
-        "Name": "Uniwill Control Center"
+        "Name": "Unified Control Center"
     },
     "X-Plasma-API-Minimum-Version": "6.0",
     "X-Plasma-NotificationAreaCategory": "Hardware"

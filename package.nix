@@ -99,7 +99,7 @@ stdenv.mkDerivation {
   '';
 
   meta = with lib; {
-    description = "Uniwill Control Center - System control application suite (daemon, GUI, CLI, Plasma applet)";
+    description = "Unified Control Center - System control application suite (daemon, GUI, CLI, Plasma applet)";
     homepage = "https://github.com/nanomatters/ucc";
     license = licenses.gpl3Plus;
     platforms = platforms.linux;

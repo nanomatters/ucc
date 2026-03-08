@@ -4,7 +4,7 @@ cmake_minimum_required( VERSION 3.20 )
 
 project( ucc
   VERSION 0.2.0
-  DESCRIPTION "Uniwill Control Center - Qt/KDE application suite"
+  DESCRIPTION "Unified Control Center - Qt/KDE application suite"
   LANGUAGES CXX
 )
 
@@ -80,8 +80,17 @@ find_package( Qt6 REQUIRED COMPONENTS
 )
 
 find_package( ECM REQUIRED NO_MODULE )
-set( CMAKE_MODULE_PATH ${ECM_MODULE_PATH} )# GNUInstallDirs must come before KDEInstallDirs to avoid variable propagation
+set( CMAKE_MODULE_PATH ${ECM_MODULE_PATH} ) # GNUInstallDirs must come before KDEInstallDirs to avoid variable propagation
 include( GNUInstallDirs )
+
+# If the user or another module set `CMAKE_INSTALL_SYSCONFDIR` before
+# including KDEInstallDirs, KDEInstallDirs reports a warning. Provide an
+# explicit KDE_INSTALL_SYSCONFDIR fallback so the warning is suppressed when
+# no KDE-specific value was configured.
+if( NOT DEFINED KDE_INSTALL_SYSCONFDIR )
+  set( KDE_INSTALL_SYSCONFDIR "${CMAKE_INSTALL_SYSCONFDIR}" CACHE INTERNAL "KDE install sysconfdir" )
+endif()
+
 include( KDEInstallDirs )
 include( KDECMakeSettings )
 include( ECMQmlModule )
@@ -182,7 +191,7 @@ install(FILES icons/ucc-tray_128.png DESTINATION share/icons/hicolor/128x128/app
 
 # Summary
 message(STATUS "")
-message(STATUS "=== Uniwill Control Center Build Configuration ===")
+message(STATUS "=== Unified Control Center Build Configuration ===")
 message(STATUS "  Version:          ${UCC_VERSION_FULL}")
 message(STATUS "  Build type:       ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard:     ${CMAKE_CXX_STANDARD}")
