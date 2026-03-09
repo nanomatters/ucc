@@ -121,6 +121,7 @@ namespace ucc
     QLabel *m_gpuClockOffsetLabel = nullptr;
     QWidget *m_dGpuExtraRow  = nullptr;
     QFrame  *m_dGpuExtraHSep = nullptr;
+    QWidget *m_dGpuBottomCaps = nullptr;
     QLabel *m_waterCoolerFanSpeedLabel = nullptr;
     QLabel *m_waterCoolerPumpLabel = nullptr;
     QGridLayout *m_waterCoolerGrid = nullptr;
