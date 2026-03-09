@@ -405,6 +405,20 @@ std::optional< std::string > UccdClient::getFanProfilesJSON()
   return std::nullopt;
 }
 
+std::optional< std::string > UccdClient::getThermalSourcesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetThermalSourcesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getFanZonesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetFanZonesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
 std::optional< std::string > UccdClient::getFanProfileJSON( const std::string &fanProfileId )
 {
   if ( auto result = callMethod< QString >( "GetFanProfileJSON", QString::fromStdString( fanProfileId ) ) )
@@ -819,6 +833,11 @@ std::optional< int > UccdClient::getNVIDIAPowerOffset()
 std::optional< int > UccdClient::getNVIDIAPowerCTRLMaxPowerLimit()
 {
   return callMethod< int >( "GetNVIDIAPowerCTRLMaxPowerLimit" );
+}
+
+std::optional< int > UccdClient::getNVIDIAPowerCTRLMinPowerLimit()
+{
+  return callMethod< int >( "GetNVIDIAPowerCTRLMinPowerLimit" );
 }
 
 std::optional< int > UccdClient::getNVIDIAPowerCTRLDefaultPowerLimit()

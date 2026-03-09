@@ -13,7 +13,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "workers/LCTWaterCoolerWorker.hpp"
+#include "platform/uniwill/LCTWaterCoolerWorker.hpp"
 #include "UccDBusService.hpp"
 #include "workers/DaemonWorker.hpp" // for ucc::wDebug
 

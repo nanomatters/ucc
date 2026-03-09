@@ -28,10 +28,16 @@ constexpr uint32_t NVAPI_PERF_POLICIES_STATUS_ID = 0x3D358A0C;
 constexpr uint32_t NVAPI_CLIENT_POWER_TOPOLOGY_ID = 0x60DED2ED;
 constexpr uint32_t NVAPI_OK = 0;
 constexpr nvml::nvmlReturn_t NVML_ERROR_NO_PERMISSION = 4;
+constexpr nvml::nvmlReturn_t NVML_ERROR_RESET_REQUIRED = 16;
 
 inline bool isExpectedOcWriteRejection( nvml::nvmlReturn_t ret )
 {
   return ret == nvml::NVML_ERROR_NOT_SUPPORTED || ret == NVML_ERROR_NO_PERMISSION;
+}
+
+inline bool isResetRequired( nvml::nvmlReturn_t ret )
+{
+  return ret == NVML_ERROR_RESET_REQUIRED;
 }
 
 inline int offsetKey( nvml::nvmlClockType_t clockType, nvml::nvmlPstates_t pstate )
@@ -145,9 +151,15 @@ void NvmlWrapper::cacheSupportedPstates()
     nvml::nvmlPstates_t pstateArr[nvml::NVML_MAX_GPU_PERF_PSTATES];
     std::memset( pstateArr, 0xFF, sizeof( pstateArr ) );
 
-    if ( m_getSupportedPstates( *devOpt, pstateArr, nvml::NVML_MAX_GPU_PERF_PSTATES )
-         != nvml::NVML_SUCCESS )
+    auto ret = m_getSupportedPstates( *devOpt, pstateArr, nvml::NVML_MAX_GPU_PERF_PSTATES );
+    if ( ret != nvml::NVML_SUCCESS )
+    {
+      std::cerr << "[NvmlWrapper] cacheSupportedPstates: failed for GPU " << deviceIndex
+                << " (error " << ret << ")"
+                << ( isResetRequired( ret ) ? " — GPU requires reset!" : "" )
+                << std::endl;
       continue;
+    }
 
     auto &cached = m_supportedPstates[deviceIndex];
     cached.clear();
@@ -291,6 +303,9 @@ std::optional< NvmlOCState > NvmlWrapper::getOCState( unsigned int deviceIndex )
     if ( m_getName( device, name, sizeof( name ) ) == nvml::NVML_SUCCESS )
       state.gpuName = name;
   }
+
+  // Check for reset-required state early
+  state.resetRequired = needsReset( deviceIndex );
 
   // Temperature
   if ( m_getTemperature )
@@ -505,6 +520,14 @@ bool NvmlWrapper::setClockOffset( unsigned int deviceIndex,
     return true;
   }
 
+  if ( isResetRequired( ret ) )
+  {
+    std::cerr << "[NvmlWrapper] setClockOffset: GPU requires reset (error " << ret
+              << ") for type=" << clockType << " pstate=" << pstate
+              << " offset=" << offsetMHz << std::endl;
+    return false;
+  }
+
   if ( isExpectedOcWriteRejection( ret ) )
     return offsetMHz == 0;
 
@@ -547,6 +570,15 @@ bool NvmlWrapper::setGpuLockedClocks( unsigned int deviceIndex,
     return true;
   }
 
+  if ( isResetRequired( ret ) )
+  {
+    std::cerr << "[NvmlWrapper] setGpuLockedClocks: GPU requires reset (error " << ret
+              << "), attempting to undo locked clocks" << std::endl;
+    if ( m_resetGpuLockedClocks )
+      m_resetGpuLockedClocks( *devOpt );
+    return false;
+  }
+
   if ( isExpectedOcWriteRejection( ret ) )
     return false;
 
@@ -570,6 +602,20 @@ bool NvmlWrapper::setVramLockedClocks( unsigned int deviceIndex,
   {
     m_appliedVramLockedClocks[deviceIndex] = { minMHz, maxMHz };
     return true;
+  }
+
+  if ( isResetRequired( ret ) )
+  {
+    std::cerr << "[NvmlWrapper] setVramLockedClocks: GPU requires reset (error " << ret
+              << "), attempting to undo all locked clocks" << std::endl;
+    // Try to undo both GPU and VRAM locked clocks to recover
+    if ( m_resetMemLockedClocks )
+      m_resetMemLockedClocks( *devOpt );
+    if ( m_resetGpuLockedClocks )
+      m_resetGpuLockedClocks( *devOpt );
+    m_appliedGpuLockedClocks.erase( deviceIndex );
+    m_appliedVramLockedClocks.erase( deviceIndex );
+    return false;
   }
 
   if ( isExpectedOcWriteRejection( ret ) )
@@ -734,6 +780,16 @@ std::optional< double > NvmlWrapper::getPowerMaxLimitW( unsigned int deviceIndex
   return static_cast< double >( maxMw ) / 1000.0;
 }
 
+std::optional< double > NvmlWrapper::getPowerMinLimitW( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_getPowerLimitConstraints ) return std::nullopt;
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt ) return std::nullopt;
+  unsigned int minMw = 0, maxMw = 0;
+  if ( m_getPowerLimitConstraints( *devOpt, &minMw, &maxMw ) != nvml::NVML_SUCCESS ) return std::nullopt;
+  return static_cast< double >( minMw ) / 1000.0;
+}
+
 std::optional< double > NvmlWrapper::getPowerDefaultLimitW( unsigned int deviceIndex ) const noexcept
 {
   if ( !m_getPowerLimitDefault ) return std::nullopt;
@@ -742,6 +798,20 @@ std::optional< double > NvmlWrapper::getPowerDefaultLimitW( unsigned int deviceI
   unsigned int mw = 0;
   if ( m_getPowerLimitDefault( *devOpt, &mw ) != nvml::NVML_SUCCESS ) return std::nullopt;
   return static_cast< double >( mw ) / 1000.0;
+}
+
+bool NvmlWrapper::needsReset( unsigned int deviceIndex ) const noexcept
+{
+  if ( !m_initialized || !m_getClockInfo )
+    return false;
+
+  auto devOpt = getDevice( deviceIndex );
+  if ( !devOpt )
+    return false;
+
+  unsigned int clk = 0;
+  auto ret = m_getClockInfo( *devOpt, 0, &clk );
+  return ret == NVML_ERROR_RESET_REQUIRED;
 }
 
 std::optional< unsigned int > NvmlWrapper::getGpuClockMHz( unsigned int deviceIndex ) const noexcept

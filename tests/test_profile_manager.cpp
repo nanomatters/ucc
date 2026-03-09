@@ -158,13 +158,13 @@ private slots:
     QCOMPARE( reparsed.chargeEndThreshold,    original.chargeEndThreshold );
   }
 
-  // ---- parseFanTableFromJSON() -----------------------------------------
+  // ---- parseFanCurveFromJSON() ------------------------------------------
 
   void parseFanTable_valid()
   {
-    // parseFanTableFromJSON expects a bare JSON array of {temp, speed} objects
+    // parseFanCurveFromJSON expects a bare JSON array of {temp, speed} objects
     std::string json = R"([{"temp":30,"speed":20},{"temp":50,"speed":40}])";
-    auto table = ProfileManager::parseFanTableFromJSON( json );
+    auto table = ProfileManager::parseFanCurveFromJSON( json );
     QCOMPARE( static_cast< int >( table.size() ), 2 );
     QCOMPARE( table[0].temp, 30 );
     QCOMPARE( table[1].speed, 40 );
@@ -173,7 +173,7 @@ private slots:
   void parseFanTable_empty()
   {
     std::string json = R"([])";
-    auto table = ProfileManager::parseFanTableFromJSON( json );
+    auto table = ProfileManager::parseFanCurveFromJSON( json );
     QVERIFY( table.empty() );
   }
 };

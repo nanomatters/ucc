@@ -201,6 +201,7 @@ struct NvmlOCState
 
   bool offsetsSupported = false;
   bool lockedClocksSupported = false;
+  bool resetRequired = false;  ///< GPU is in a state that requires a reboot or nvidia-smi -r
 };
 
 /**
@@ -308,6 +309,9 @@ public:
   /** @brief Maximum allowed power limit in watts. */
   [[nodiscard]] std::optional< double > getPowerMaxLimitW( unsigned int deviceIndex ) const noexcept;
 
+  /** @brief Minimum allowed power limit in watts. */
+  [[nodiscard]] std::optional< double > getPowerMinLimitW( unsigned int deviceIndex ) const noexcept;
+
   /** @brief Default (factory) power limit in watts. */
   [[nodiscard]] std::optional< double > getPowerDefaultLimitW( unsigned int deviceIndex ) const noexcept;
 
@@ -384,6 +388,16 @@ public:
 
   /** @brief Returns true if the NVML library was loaded and initialized. */
   bool isInitialized() const { return m_initialized; }
+
+  /**
+   * @brief Check if a GPU is in a reset-required state.
+   *
+   * After certain failed operations (e.g. setting VRAM locked clocks on
+   * unsupported hardware), the GPU can enter a state where NVML functions
+   * return NVML_ERROR_RESET_REQUIRED (16).  A system reboot or
+   * `nvidia-smi -r` is needed to recover.
+   */
+  [[nodiscard]] bool needsReset( unsigned int deviceIndex ) const noexcept;
 
 private:
   struct NvApiVoltage

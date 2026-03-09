@@ -18,6 +18,8 @@
 #include "hal/ITempProvider.hpp"
 #include "SysfsNode.hpp"
 
+#include <optional>
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>

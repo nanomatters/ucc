@@ -119,52 +119,12 @@ void FanControlTab::setupUI()
   separator->setFrameShape( QFrame::HLine );
   mainLayout->addWidget( separator );
 
-  // ── Sub-tabs ──
-  QTabWidget *subTabs = new QTabWidget();
-  subTabs->setStyleSheet(
-    "QTabWidget::pane { border: none; }"
-    "QTabBar::tab { padding: 6px 18px; }" );
-
-  // ── Sub-tab 1: System (CPU / GPU) ──
-  {
-    QWidget *systemWidget = new QWidget();
-    QScrollArea *scroll = new QScrollArea();
-    scroll->setWidgetResizable( true );
-    QVBoxLayout *layout = new QVBoxLayout( systemWidget );
-    layout->setContentsMargins( 10, 10, 10, 10 );
-    layout->setSpacing( 8 );
-
-    QVBoxLayout *cpuLayout = new QVBoxLayout();
-    cpuLayout->setSpacing( 0 );
-    m_cpuFanCurveEditor = new FanCurveEditorWidget();
-    m_cpuFanCurveEditor->setTitle( tr( "CPU Fan Curve" ) );
-    cpuLayout->addWidget( m_cpuFanCurveEditor );
-    layout->addLayout( cpuLayout );
-
-    QVBoxLayout *gpuLayout = new QVBoxLayout();
-    gpuLayout->setSpacing( 0 );
-    m_gpuFanCurveEditor = new FanCurveEditorWidget();
-    m_gpuFanCurveEditor->setTitle( tr( "GPU Fan Curve" ) );
-    gpuLayout->addWidget( m_gpuFanCurveEditor );
-    layout->addLayout( gpuLayout );
-
-    scroll->setWidget( systemWidget );
-    subTabs->addTab( scroll, "System (CPU / GPU)" );
-  }
-
-  // ── Sub-tab 2: Water Cooler (only if water cooler supported) ──
+  // ── Water cooler hardware controls (compact bar above zone tabs) ──
   if ( m_waterCoolerSupported )
   {
-    QWidget *wcWidget = new QWidget();
-    QScrollArea *scroll = new QScrollArea();
-    scroll->setWidgetResizable( true );
-    QVBoxLayout *layout = new QVBoxLayout( wcWidget );
-    layout->setContentsMargins( 5, 5, 5, 5 );
-    layout->setSpacing( 8 );
-
-    // ── Water cooler hardware controls ──
-    QHBoxLayout *wcHw = new QHBoxLayout();
-    wcHw->setContentsMargins( 0, 0, 0, 0 );
+    m_wcHardwareWidget = new QWidget();
+    QHBoxLayout *wcHw = new QHBoxLayout( m_wcHardwareWidget );
+    wcHw->setContentsMargins( 5, 2, 5, 2 );
     wcHw->setSpacing( 4 );
 
     m_waterCoolerEnableCheckBox = new QPushButton( "Enable" );
@@ -174,7 +134,6 @@ void FanControlTab::setupUI()
     m_waterCoolerEnableCheckBox->setFixedHeight( 24 );
     m_waterCoolerEnableCheckBox->setStyleSheet([
       ]() {
-        // Use green/red for enabled/disabled states instead of theme highlight
         const QString enabledColor = QStringLiteral("#4caf50");
         const QString disabledColor = QStringLiteral("#d32f2f");
         return QStringLiteral("QPushButton { font-size: 11px; padding: 2px 12px; border: 1px solid palette(mid); border-radius: 4px; background-color: %1; }"
@@ -189,10 +148,6 @@ void FanControlTab::setupUI()
     m_pumpVoltageCombo->addItem( "7V",  QVariant::fromValue( PumpVoltage::V7  ) );
     m_pumpVoltageCombo->addItem( "8V",  QVariant::fromValue( PumpVoltage::V8  ) );
     m_pumpVoltageCombo->addItem( "11V", QVariant::fromValue( PumpVoltage::V11 ) );
-
-    // 12V option is intentionally omitted for safety of the pump.
-    // m_pumpVoltageCombo->addItem( "12V", QVariant::fromValue( PumpVoltage::V12 ) );
-
     m_pumpVoltageCombo->setCurrentIndex( 0 );
     m_pumpVoltageCombo->setEnabled( false );
     m_pumpVoltageCombo->setMaximumWidth( 70 );
@@ -205,7 +160,6 @@ void FanControlTab::setupUI()
     m_fanSpeedSlider->setMaximum( 100 );
     m_fanSpeedSlider->setValue( 0 );
     m_fanSpeedSlider->setEnabled( false );
-
     wcHw->addWidget( fanSpeedLabel );
     wcHw->addWidget( m_fanSpeedSlider );
 
@@ -231,34 +185,18 @@ void FanControlTab::setupUI()
     wcHw->addWidget( ledModeLabel );
     wcHw->addWidget( m_ledModeCombo );
 
-    // Set initial color button state
     updateColorButtonState();
 
-    QWidget *waterCoolerWidget = new QWidget();
-    waterCoolerWidget->setLayout( wcHw );
-    layout->addWidget( waterCoolerWidget );
-
-    // ── Water cooler fan curve editor ──
-    QVBoxLayout *wcFanLayout = new QVBoxLayout();
-    wcFanLayout->setSpacing( 0 );
-    m_waterCoolerFanCurveEditor = new FanCurveEditorWidget();
-    m_waterCoolerFanCurveEditor->setTitle( tr( "Water Cooler Fan Curve" ) );
-    wcFanLayout->addWidget( m_waterCoolerFanCurveEditor );
-    layout->addLayout( wcFanLayout );
-
-    // ── Pump voltage curve editor ──
-    QVBoxLayout *pumpLayout = new QVBoxLayout();
-    pumpLayout->setSpacing( 0 );
-    m_pumpCurveEditor = new PumpCurveEditorWidget();
-    m_pumpCurveEditor->setTitle( tr( "Pump Voltage Curve" ) );
-    pumpLayout->addWidget( m_pumpCurveEditor );
-    layout->addLayout( pumpLayout );
-
-    scroll->setWidget( wcWidget );
-    subTabs->addTab( scroll, "Water Cooler" );
+    mainLayout->addWidget( m_wcHardwareWidget );
   }
 
-  mainLayout->addWidget( subTabs );
+  // ── Sub-tabs (one per zone, populated by buildZoneEditors()) ──
+  m_subTabs = new QTabWidget();
+  m_subTabs->setStyleSheet(
+    "QTabWidget::pane { border: none; }"
+    "QTabBar::tab { padding: 6px 18px; }" );
+
+  mainLayout->addWidget( m_subTabs );
 }
 
 // ── Signal wiring ───────────────────────────────────────────────────
@@ -276,19 +214,8 @@ void FanControlTab::connectSignals()
   connect( m_fanProfileCombo->lineEdit(), &QLineEdit::editingFinished,
            this, &FanControlTab::onFanProfileComboRenamed );
 
-  // Curve editors → signals
-  connect( m_cpuFanCurveEditor, &FanCurveEditorWidget::pointsChanged,
-           this, &FanControlTab::cpuPointsChanged );
-  connect( m_gpuFanCurveEditor, &FanCurveEditorWidget::pointsChanged,
-           this, &FanControlTab::gpuPointsChanged );
-
-  if ( m_waterCoolerSupported )
-  {
-    connect( m_waterCoolerFanCurveEditor, &FanCurveEditorWidget::pointsChanged,
-             this, &FanControlTab::wcFanPointsChanged );
-    connect( m_pumpCurveEditor, &PumpCurveEditorWidget::pointsChanged,
-             this, &FanControlTab::pumpPointsChanged );
-  }
+  // NOTE: zone editor → signal connections are wired dynamically in
+  //       buildZoneEditors() so they keep in sync with the zone set.
 
   // Action buttons → signals
   connect( m_applyFanProfilesButton, &QPushButton::clicked,
@@ -368,10 +295,12 @@ void FanControlTab::updateButtonStates( bool uccdConnected )
 
 void FanControlTab::setEditorsEditable( bool editable )
 {
-  if ( m_cpuFanCurveEditor )             m_cpuFanCurveEditor->setEditable( editable );
-  if ( m_gpuFanCurveEditor )             m_gpuFanCurveEditor->setEditable( editable );
-  if ( m_waterCoolerFanCurveEditor )     m_waterCoolerFanCurveEditor->setEditable( editable );
-  if ( m_pumpCurveEditor )               m_pumpCurveEditor->setEditable( editable );
+  for ( auto *e : m_fanEditors )
+    if ( e ) e->setEditable( editable );
+  for ( auto *e : m_pumpEditors )
+    if ( e ) e->setEditable( editable );
+  for ( auto *c : m_thermalSourceCombos )
+    if ( c ) c->setEnabled( editable );
 }
 
 void FanControlTab::onFanProfileComboRenamed()
@@ -648,6 +577,128 @@ void FanControlTab::updateColorButtonState()
   bool isLEDEnabled = m_ledOnOffCheckBox ? m_ledOnOffCheckBox->isChecked() : false;
 
   m_colorPickerButton->setEnabled( isStaticMode && isLEDEnabled );
+}
+
+// ── Dynamic zone editor construction ────────────────────────────────
+
+FanCurveEditorWidget *FanControlTab::fanEditor( const QString &zoneId ) const
+{
+  return m_fanEditors.value( zoneId, nullptr );
+}
+
+PumpCurveEditorWidget *FanControlTab::pumpEditor( const QString &zoneId ) const
+{
+  return m_pumpEditors.value( zoneId, nullptr );
+}
+
+void FanControlTab::buildZoneEditors( const QJsonArray &zones, const QJsonArray &thermalSources )
+{
+  // Clear editor maps — old widgets are children of the tab pages
+  // which will be destroyed when we remove tabs below.
+  m_fanEditors.clear();
+  m_pumpEditors.clear();
+  m_thermalSourceCombos.clear();
+
+  // Remove all existing zone tabs.
+  while ( m_subTabs->count() > 0 )
+  {
+    QWidget *w = m_subTabs->widget( 0 );
+    m_subTabs->removeTab( 0 );
+    w->deleteLater();
+  }
+
+  // Create one sub-tab per zone.
+  for ( const QJsonValue &zv : zones )
+  {
+    QJsonObject zone = zv.toObject();
+    QString id = zone[QStringLiteral( "id" )].toString();
+    QString name = zone[QStringLiteral( "name" )].toString();
+    QString devType = zone[QStringLiteral( "deviceType" )].toString();
+    QString tsId = zone[QStringLiteral( "thermalSourceId" )].toString();
+
+    // Container: thermal source selector bar + editor
+    auto *page = new QWidget();
+    auto *pageLayout = new QVBoxLayout( page );
+    pageLayout->setContentsMargins( 4, 4, 4, 4 );
+    pageLayout->setSpacing( 4 );
+
+    // Thermal source combo
+    auto *tsBar = new QHBoxLayout();
+    tsBar->setContentsMargins( 0, 0, 0, 0 );
+    auto *tsLabel = new QLabel( QStringLiteral( "Temperature Source:" ) );
+    auto *tsCombo = new QComboBox();
+    for ( const QJsonValue &sv : thermalSources )
+    {
+      QJsonObject src = sv.toObject();
+      tsCombo->addItem( src[QStringLiteral( "label" )].toString(),
+                        src[QStringLiteral( "id" )].toString() );
+    }
+    // Select the zone's current thermal source
+    for ( int i = 0; i < tsCombo->count(); ++i )
+    {
+      if ( tsCombo->itemData( i ).toString() == tsId )
+      {
+        tsCombo->setCurrentIndex( i );
+        break;
+      }
+    }
+    tsBar->addWidget( tsLabel );
+    tsBar->addWidget( tsCombo, 1 );
+    pageLayout->addLayout( tsBar );
+    m_thermalSourceCombos[id] = tsCombo;
+
+    connect( tsCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
+             [this, zoneId = id, tsCombo]( int ) {
+               emit thermalSourceChanged( zoneId, tsCombo->currentData().toString() );
+             } );
+
+    if ( devType == QStringLiteral( "stagedPump" ) )
+    {
+      auto *editor = new PumpCurveEditorWidget();
+      m_pumpEditors[id] = editor;
+      connect( editor, &PumpCurveEditorWidget::pointsChanged, this,
+               [this, zoneId = id]( const QVector< PumpCurveEditorWidget::Point > &pts ) {
+                 emit pumpCurveChanged( zoneId, pts );
+               } );
+      pageLayout->addWidget( editor, 1 );
+    }
+    else
+    {
+      auto *editor = new FanCurveEditorWidget();
+      m_fanEditors[id] = editor;
+      connect( editor, &FanCurveEditorWidget::pointsChanged, this,
+               [this, zoneId = id]( const QVector< FanCurveEditorWidget::Point > &pts ) {
+                 emit fanCurveChanged( zoneId, pts );
+               } );
+      pageLayout->addWidget( editor, 1 );
+    }
+
+    m_subTabs->addTab( page, name );
+  }
+}
+
+QString FanControlTab::thermalSourceForZone( const QString &zoneId ) const
+{
+  auto it = m_thermalSourceCombos.find( zoneId );
+  if ( it != m_thermalSourceCombos.end() && it.value() )
+    return it.value()->currentData().toString();
+  return {};
+}
+
+void FanControlTab::setThermalSourceForZone( const QString &zoneId, const QString &thermalSourceId )
+{
+  auto it = m_thermalSourceCombos.find( zoneId );
+  if ( it == m_thermalSourceCombos.end() || !it.value() )
+    return;
+  QComboBox *combo = it.value();
+  for ( int i = 0; i < combo->count(); ++i )
+  {
+    if ( combo->itemData( i ).toString() == thermalSourceId )
+    {
+      combo->setCurrentIndex( i );
+      return;
+    }
+  }
 }
 
 } // namespace ucc

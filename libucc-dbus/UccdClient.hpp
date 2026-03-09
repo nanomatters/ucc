@@ -72,6 +72,10 @@ public:
   bool saveCustomProfile( const std::string &profileJSON );   // Backward-compat → saveProfile
   bool deleteCustomProfile( const std::string &profileId );   // Backward-compat → deleteProfile
 
+  // Hardware zone model
+  std::optional< std::string > getThermalSourcesJSON();
+  std::optional< std::string > getFanZonesJSON();
+
   // Fan sub-profiles (built-in + custom, with editable flag)
   std::optional< std::string > getFanProfilesJSON();
   std::optional< std::string > getFanProfileJSON( const std::string &fanProfileId );
@@ -149,6 +153,7 @@ public:
   bool setNVIDIAPowerOffset( int offset );
   std::optional< int > getNVIDIAPowerOffset();
   std::optional< int > getNVIDIAPowerCTRLMaxPowerLimit();
+  std::optional< int > getNVIDIAPowerCTRLMinPowerLimit();
   std::optional< int > getNVIDIAPowerCTRLDefaultPowerLimit();
   std::optional< bool > getNVIDIAPowerCTRLAvailable();
   bool setPrimeProfile( const std::string &profile );

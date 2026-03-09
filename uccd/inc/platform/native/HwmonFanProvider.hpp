@@ -18,6 +18,8 @@
 #include "hal/IFanProvider.hpp"
 #include "SysfsNode.hpp"
 
+#include <map>
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -94,6 +96,9 @@ public:
         {
           fi.label = chipName + " Fan " + std::to_string( i );
         }
+
+        // Classify the device type based on label heuristics
+        fi.deviceType = classifyFanByLabel( fi.label );
 
         m_fans.push_back( std::move( fi ) );
       }
@@ -243,6 +248,22 @@ private:
     while ( !line.empty() && ( line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ) )
       line.pop_back();
     return line;
+  }
+
+  /// Classify fan device type from its label string.
+  static FanDeviceType classifyFanByLabel( const std::string &label )
+  {
+    // Case-insensitive substring match
+    auto contains = []( const std::string &hay, const char *needle ) {
+      std::string lower = hay;
+      for ( auto &c : lower ) c = static_cast< char >( std::tolower( static_cast< unsigned char >( c ) ) );
+      return lower.find( needle ) != std::string::npos;
+    };
+
+    if ( contains( label, "pump" ) )
+      return FanDeviceType::Pump;
+
+    return FanDeviceType::Fan;
   }
 };
 

@@ -17,42 +17,32 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
-#include <cmath>
-#include <iostream>
 
-#include "CommonTypes.hpp"
+#include "hal/FanZone.hpp"
 
 /**
- * @brief Fan table entry
+ * @brief Fan profile — a named collection of per-zone fan curves.
  *
- * Represents a single temperature/speed mapping point in a fan curve.
- */
-struct FanTableEntry
-{
-  int32_t temp;   // temperature in degrees Celsius
-  int32_t speed;  // fan speed in percentage (0-100)
-
-  FanTableEntry() : temp( 0 ), speed( 0 ) {}
-
-  FanTableEntry( int32_t t, int32_t s ) : temp( t ), speed( s ) {}
-};
-
-/**
- * @brief Fan profile
+ * Each zone curve maps a zone ID to a temp→speed% curve.  The full zone
+ * topology (fanIds, device type, name) lives in HardwareManager; the
+ * profile only supplies curves, hysteresis, enable flags, and optional
+ * thermal-source overrides.
  *
- * Contains temperature-to-fan-speed mapping tables for CPU, GPU, and pump fans.
- * Mirrors the ITccFanProfile TypeScript interface.
+ * Built-in profiles (Silent, Quiet, Balanced, Cool, Freezy) define
+ * curves for the standard zone IDs produced by auto-zone:
+ *   zone-cpu, zone-gpu, zone-case, zone-pump, zone-misc, wc-fan, wc-pump.
+ *
+ * Custom profiles are created by the user and may contain an arbitrary
+ * set of zone curves matching the hardware they were created on.
  */
 class FanProfile
 {
 public:
   std::string id;
   std::string name;
-  std::vector< FanTableEntry > tableCPU;
-  std::vector< FanTableEntry > tableGPU;
-  std::vector< FanTableEntry > tablePump;
-  std::vector< FanTableEntry > tableWaterCoolerFan;
+  std::vector< ucc::hal::FanZoneCurve > zoneCurves;
 
   FanProfile() = default;
 
@@ -65,157 +55,56 @@ public:
 
   FanProfile( const std::string &profileId,
               const std::string &profileName,
-              const std::vector< FanTableEntry > &cpu,
-              const std::vector< FanTableEntry > &gpu )
+              std::vector< ucc::hal::FanZoneCurve > zc )
     : id( profileId ),
       name( profileName ),
-      tableCPU( cpu ),
-      tableGPU( gpu )
-  {
-  }
-
-  FanProfile( const std::string &profileId,
-              const std::string &profileName,
-              const std::vector< FanTableEntry > &cpu,
-              const std::vector< FanTableEntry > &gpu,
-              const std::vector< FanTableEntry > &pump )
-    : id( profileId ),
-      name( profileName ),
-      tableCPU( cpu ),
-      tableGPU( gpu ),
-      tablePump( pump )
-  {
-  }
-
-  FanProfile( const std::string &profileId,
-              const std::string &profileName,
-              const std::vector< FanTableEntry > &cpu,
-              const std::vector< FanTableEntry > &gpu,
-              const std::vector< FanTableEntry > &pump,
-              const std::vector< FanTableEntry > &wcFan )
-    : id( profileId ),
-      name( profileName ),
-      tableCPU( cpu ),
-      tableGPU( gpu ),
-      tablePump( pump ),
-      tableWaterCoolerFan( wcFan )
+      zoneCurves( std::move( zc ) )
   {
   }
 
   /**
-   * @brief Check if profile has valid data
-   * @return true if both CPU and GPU tables are populated
+   * @brief Check if profile has at least one zone curve
    */
   [[nodiscard]] bool isValid() const noexcept
   {
-    return not tableCPU.empty() and not tableGPU.empty();
+    return !zoneCurves.empty();
   }
 
   /**
-   * @brief Get fan speed for a given temperature
-   *
-   * @param temp Temperature in degrees Celsius
-   * @param useCPU true to use CPU table, false for GPU table
-   * @return Fan speed percentage (0-100), or -1 if not found
+   * @brief Find a zone curve by zone ID
+   * @return Pointer to the zone curve or nullptr
    */
-  [[nodiscard]] int32_t getSpeedForTemp( int32_t temp, bool useCPU = true ) const noexcept
+  [[nodiscard]] const ucc::hal::FanZoneCurve *findZoneCurve( const std::string &zoneId ) const noexcept
   {
-    const auto &table = useCPU ? tableCPU : tableGPU;
+    for ( const auto &zc : zoneCurves )
+      if ( zc.zoneId == zoneId )
+        return &zc;
+    return nullptr;
+  }
 
-    if ( table.empty() )
+  /**
+   * @brief Find a mutable zone curve by zone ID
+   * @return Pointer to the zone curve or nullptr
+   */
+  [[nodiscard]] ucc::hal::FanZoneCurve *findZoneCurve( const std::string &zoneId ) noexcept
+  {
+    for ( auto &zc : zoneCurves )
+      if ( zc.zoneId == zoneId )
+        return &zc;
+    return nullptr;
+  }
+
+  /**
+   * @brief Get interpolated fan speed for a zone at a given temperature
+   * @return Speed 0–100, or -1 if zone not found or curve empty
+   */
+  [[nodiscard]] int32_t getSpeedForZone( int32_t temp,
+                                         const std::string &zoneId ) const noexcept
+  {
+    const auto *zc = findZoneCurve( zoneId );
+    if ( !zc )
       return -1;
-
-    // If temp is at or below first entry, return first speed
-    if ( temp <= table.front().temp )
-      return table.front().speed;
-
-    // find exact match or interpolate
-    for ( size_t i = 1; i < table.size(); ++i )
-    {
-      const auto &prev = table[i-1];
-      const auto &entry = table[i];
-
-      if ( entry.temp == temp ) return entry.speed;
-
-      if ( temp > prev.temp && temp < entry.temp )
-      {
-        int32_t tempDiff = entry.temp - prev.temp;
-        if ( tempDiff == 0 ) return prev.speed;
-        double frac = static_cast<double>( temp - prev.temp ) / static_cast<double>( tempDiff );
-        return static_cast<int32_t>( std::lround( prev.speed + frac * ( entry.speed - prev.speed ) ) );
-      }
-    }
-
-    // temperature is beyond the table, return last speed
-    return table.back().speed;
-  }
-
-  /**
-   * @brief Get water cooler fan speed for a given temperature
-   *
-   * Uses the water cooler fan table with interpolation, falling back to
-   * max(cpu,gpu) if the table is empty.
-   *
-   * @param temp Temperature in degrees Celsius
-   * @return Fan speed percentage (0-100)
-   */
-  [[nodiscard]] int32_t getWaterCoolerFanSpeedForTemp( int32_t temp ) const noexcept
-  {
-    if ( tableWaterCoolerFan.empty() )
-    {
-      // Fallback: use max of CPU and GPU speed
-      int32_t cpuSpeed = getSpeedForTemp( temp, true );
-      int32_t gpuSpeed = getSpeedForTemp( temp, false );
-      return std::max( cpuSpeed, gpuSpeed );
-    }
-
-    const auto &table = tableWaterCoolerFan;
-
-    if ( temp <= table.front().temp )
-      return table.front().speed;
-
-    for ( size_t i = 1; i < table.size(); ++i )
-    {
-      const auto &prev = table[i-1];
-      const auto &entry = table[i];
-      if ( entry.temp == temp ) return entry.speed;
-      if ( temp > prev.temp && temp < entry.temp )
-      {
-        int32_t tempDiff = entry.temp - prev.temp;
-        if ( tempDiff == 0 ) return prev.speed;
-        double frac = static_cast<double>( temp - prev.temp ) / static_cast<double>( tempDiff );
-        return static_cast<int32_t>( std::lround( prev.speed + frac * ( entry.speed - prev.speed ) ) );
-      }
-    }
-
-    return table.back().speed;
-  }
-
-  /**
-   * @brief Get pump speed value for a given temperature from tablePump
-   *
-   * Uses step-wise (floor) lookup rather than interpolation, since pump speed
-   * values are discrete voltage levels (0=Off, 1=V7, 2=V8, 3=V11, 4=V12).
-   *
-   * @param temp Temperature in degrees Celsius
-   * @return Pump speed value (0-3), or -1 if pump table is empty
-   */
-  [[nodiscard]] ucc::PumpVoltage getPumpSpeedForTemp( int32_t temp ) const noexcept
-  {
-    static constexpr ucc::PumpVoltage pumpSpeedToVoltage[] = { ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-                                                               ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-    ucc::PumpVoltage result = ucc::PumpVoltage::Off;
-
-    for ( const auto &[ entryTemp, speed ] : tablePump )
-    {
-      // std::cout << "[FanProfile] Checking pump table entry: temp=" << entryTemp << "°C, speed=" << speed << std::endl;
-      if ( temp >= entryTemp )
-        result = pumpSpeedToVoltage[ std::min( speed, 4 ) ];
-      else
-        break;
-    }
-
-    return result;
+    return ucc::hal::interpolateCurve( zc->curve, temp );
   }
 };
 
@@ -229,34 +118,27 @@ namespace DefaultFanProfileIDs
   inline constexpr const char *Freezy   = "fan-freezy";
 }
 
-/**
- * @brief Binds a fan to a temperature sensor and a fan curve.
- *
- * In the legacy model every fan was implicitly bound: fan 0 → CPU table,
- * fan 1+ → GPU table.  The FanBinding struct decouples that by naming the
- * fan and sensor explicitly, making it work on any hardware layout.
- *
- * When no explicit bindings exist, the legacy mapping is synthesised by
- * FanControlWorker::buildDefaultBindings().
- */
-struct FanBinding
+// Well-known zone IDs used by built-in profiles and auto-zone
+namespace WellKnownZoneIDs
 {
-  std::string fanId;          ///< IFanProvider FanInfo::id (e.g. "hwmon3_fan2")
-  std::string tempSensorId;   ///< ITempProvider TempSensorInfo::id (e.g. "hwmon4_temp1")
-  std::vector< FanTableEntry > curve; ///< temp→speed curve (override). Empty = use profile default.
-
-  FanBinding() = default;
-  FanBinding( const std::string &fan, const std::string &sensor )
-    : fanId( fan ), tempSensorId( sensor ) {}
-  FanBinding( const std::string &fan, const std::string &sensor,
-              const std::vector< FanTableEntry > &c )
-    : fanId( fan ), tempSensorId( sensor ), curve( c ) {}
-};
+  inline constexpr const char *CPU     = "zone-cpu";
+  inline constexpr const char *GPU     = "zone-gpu";
+  inline constexpr const char *Case    = "zone-case";
+  inline constexpr const char *Pump    = "zone-pump";
+  inline constexpr const char *Misc    = "zone-misc";
+  inline constexpr const char *WCFan   = "wc-fan";
+  inline constexpr const char *WCPump  = "wc-pump";
+}
 
 // default fan profile presets
 extern const std::vector< FanProfile > defaultFanProfiles;
 
-std::string getFanProfileJson( const std::string &idOrName );
+/// Serialise a built-in fan profile to JSON.
+/// @param hwDeviceTypes  Optional map of zoneId → device-type string from
+///                      HardwareManager so that the JSON reflects the actual
+///                      hardware rather than hard-coded defaults.
+std::string getFanProfileJson( const std::string &idOrName,
+                               const std::unordered_map< std::string, std::string > &hwDeviceTypes = {} );
 bool setFanProfileJson( const std::string &idOrName, const std::string &json );
 
 /// Return a FanProfile by ID or name from the built-in presets.

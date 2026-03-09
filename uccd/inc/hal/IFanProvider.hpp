@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "FanZone.hpp"
 #include <optional>
 #include <string>
 #include <vector>
@@ -33,6 +34,7 @@ struct FanInfo
   int index = 0;          // fan number within the provider
   bool canRead = false;   // can read RPM
   bool canControl = false;// can write PWM
+  FanDeviceType deviceType = FanDeviceType::Fan; // physical device classification
 };
 
 /**

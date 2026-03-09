@@ -123,6 +123,7 @@ private:
   // GPU info labels
   QLabel *m_gpuNameLabel = nullptr;
   QLabel *m_tempLabel = nullptr;
+  QLabel *m_coreFreqLabel = nullptr;
   QLabel *m_powerDrawLabel = nullptr;
   QLabel *m_currentPstateLabel = nullptr;
 
@@ -160,6 +161,7 @@ private:
   // Power limit
   QSlider *m_powerLimitSlider = nullptr;
   QLabel *m_powerLimitValue = nullptr;
+  QLabel *m_powerLimitLabel = nullptr;
   double m_powerMinW = 0.0;
   double m_powerMaxW = 0.0;
   double m_powerDefaultW = 0.0;

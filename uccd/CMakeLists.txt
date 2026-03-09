@@ -33,11 +33,12 @@ add_executable(uccd
   src/workers/AutoOCWorker.cpp
   src/workers/AutoUndervoltWorker.cpp
   src/FpsServer.cpp
-  src/workers/LCTWaterCoolerWorker.cpp
+  src/platform/uniwill/LCTWaterCoolerWorker.cpp
+  src/platform/gpu/nvidia/NvidiaGpuPowerProvider.cpp
   src/workers/DisplayWorker.cpp
   src/workers/HardwareMonitorWorker.cpp
   inc/UccDBusService.hpp
-  inc/workers/LCTWaterCoolerWorker.hpp
+  inc/platform/uniwill/LCTWaterCoolerWorker.hpp
   inc/workers/DaemonWorker.hpp
   inc/workers/NvidiaOCWorker.hpp
   inc/workers/AutoOCWorker.hpp
@@ -46,10 +47,17 @@ add_executable(uccd
   inc/hal/IFanProvider.hpp
   inc/hal/ITempProvider.hpp
   inc/hal/IPlatformProvider.hpp
-  inc/hal/HwmonFanProvider.hpp
-  inc/hal/HwmonTempProvider.hpp
-  inc/hal/TuxedoIOProviders.hpp
+  inc/hal/FanZone.hpp
+  inc/platform/native/HwmonFanProvider.hpp
+  inc/platform/native/HwmonTempProvider.hpp
+  inc/platform/native/GenericProfileProvider.hpp
+  inc/platform/uniwill/TuxedoIOProviders.hpp
+  inc/platform/uniwill/UniwillProfileProvider.hpp
+  inc/platform/gpu/nvidia/NvidiaGpuPowerProvider.hpp
+  inc/platform/cpu/amd/AmdSmu.hpp
+  inc/platform/cpu/amd/AmdCpuPlatformProvider.hpp
   inc/hal/HardwareManager.hpp
+  inc/hal/IProfileProvider.hpp
   src/profiles/FanProfiles.cpp
   src/profiles/UccProfile.cpp
   src/profiles/DefaultProfiles.cpp
@@ -90,7 +98,6 @@ target_compile_options(uccd PRIVATE
   -fexceptions
   # Security hardening
   -fstack-protector-strong
-  -D_FORTIFY_SOURCE=2
   -fPIE
 )
 

@@ -30,7 +30,7 @@
 #include <vector>
 
 // Forward declaration
-class TuxedoIOAPI;
+namespace ucc::hal { class HardwareManager; }
 
 namespace fs = std::filesystem;
 
@@ -59,7 +59,7 @@ class ProfileSettingsWorker
 {
 public:
   ProfileSettingsWorker(
-    TuxedoIOAPI &ioApi,
+    ucc::hal::HardwareManager &hw,
     std::shared_ptr< NvmlWrapper > nvml,
     std::function< UccProfile() > getActiveProfileCallback,
     std::function< void( const std::vector< std::string > & ) > setOdmProfilesAvailableCallback,
@@ -71,7 +71,7 @@ public:
     std::atomic< bool > &nvidiaPowerCTRLAvailable,
     std::atomic< bool > &cTGPAdjustmentSupported,
     bool skipAcpiPlatformProfile = false )
-    : m_ioApi( ioApi ),
+    : m_hw( hw ),
       m_nvml( std::move( nvml ) ),
       m_getActiveProfile( std::move( getActiveProfileCallback ) ),
       m_setOdmProfilesAvailable( std::move( setOdmProfilesAvailableCallback ) ),
@@ -149,7 +149,7 @@ private:
     TuxedoIOAPI
   };
 
-  TuxedoIOAPI &m_ioApi;
+  ucc::hal::HardwareManager &m_hw;
   std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< void( const std::vector< std::string > & ) > m_setOdmProfilesAvailable;

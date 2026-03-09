@@ -23,8 +23,11 @@
 #include <QLabel>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QScrollArea>
 #include <QDBusInterface>
 #include <QTimer>
+#include <QJsonArray>
+#include <QMap>
 
 #include "FanCurveEditorWidget.hpp"
 #include "PumpCurveEditorWidget.hpp"
@@ -39,10 +42,13 @@ namespace ucc
 /**
  * @brief Fan control tab widget.
  *
- * Contains the fan profile selection bar, two sub-tabs
- * ("System CPU/GPU" and "Water Cooler"), all fan curve editors,
- * the pump voltage curve editor, and the hardware water-cooler
- * controls (enable, pump manual, LED, colour).
+ * Contains the fan profile selection bar, dynamic sub-tabs for system
+ * and water-cooler zones, all fan curve editors, pump voltage curve
+ * editors, and the hardware water-cooler controls (enable, pump manual,
+ * LED, colour).
+ *
+ * Zone editors are created dynamically from profile data via
+ * buildZoneEditors().
  */
 class FanControlTab : public QWidget
 {
@@ -58,10 +64,20 @@ public:
   // ── Accessors used by MainWindow ──
   QComboBox *fanProfileCombo() const { return m_fanProfileCombo; }
 
-  FanCurveEditorWidget *cpuEditor()  const { return m_cpuFanCurveEditor; }
-  FanCurveEditorWidget *gpuEditor()  const { return m_gpuFanCurveEditor; }
-  FanCurveEditorWidget *wcFanEditor() const { return m_waterCoolerFanCurveEditor; }
-  PumpCurveEditorWidget *pumpEditor() const { return m_pumpCurveEditor; }
+  // Dynamic zone editor accessors (return nullptr if zone not present)
+  FanCurveEditorWidget *fanEditor( const QString &zoneId ) const;
+  PumpCurveEditorWidget *pumpEditor( const QString &zoneId ) const;
+  const QMap< QString, FanCurveEditorWidget * > &fanEditors() const { return m_fanEditors; }
+  const QMap< QString, PumpCurveEditorWidget * > &pumpEditors() const { return m_pumpEditors; }
+
+  /** Build/rebuild zone editors from profile zone metadata. */
+  void buildZoneEditors( const QJsonArray &zones, const QJsonArray &thermalSources );
+
+  /** Return the currently selected thermal source ID for a zone. */
+  QString thermalSourceForZone( const QString &zoneId ) const;
+
+  /** Set the thermal source combo for a zone (used when loading profile overrides). */
+  void setThermalSourceForZone( const QString &zoneId, const QString &thermalSourceId );
 
   QPushButton *applyButton()  const { return m_applyFanProfilesButton; }
   QPushButton *saveButton()   const { return m_saveFanProfilesButton; }
@@ -100,10 +116,9 @@ signals:
   void removeRequested();
   void fanProfileChanged( const QString &fanProfileId );
   void fanProfileRenamed( const QString &oldName, const QString &newName );
-  void cpuPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );
-  void gpuPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );
-  void wcFanPointsChanged( const QVector<FanCurveEditorWidget::Point> &points );
-  void pumpPointsChanged( const QVector<PumpCurveEditorWidget::Point> &points );
+  void fanCurveChanged( const QString &zoneId, const QVector<FanCurveEditorWidget::Point> &points );
+  void pumpCurveChanged( const QString &zoneId, const QVector<PumpCurveEditorWidget::Point> &points );
+  void thermalSourceChanged( const QString &zoneId, const QString &thermalSourceId );
   void waterCoolerEnableChanged( bool enabled );
 
 private slots:
@@ -136,11 +151,13 @@ private:
   QPushButton *m_removeFanProfileButton = nullptr;
   QString m_currentFanProfile;
 
-  // Fan curve editors
-  FanCurveEditorWidget *m_cpuFanCurveEditor = nullptr;
-  FanCurveEditorWidget *m_gpuFanCurveEditor = nullptr;
-  FanCurveEditorWidget *m_waterCoolerFanCurveEditor = nullptr;
-  PumpCurveEditorWidget *m_pumpCurveEditor = nullptr;
+  // Dynamic zone editors (created by buildZoneEditors)
+  QMap< QString, FanCurveEditorWidget * > m_fanEditors;
+  QMap< QString, PumpCurveEditorWidget * > m_pumpEditors;
+  QMap< QString, QComboBox * > m_thermalSourceCombos;
+
+  // Sub-tab infrastructure (one tab per zone, created by buildZoneEditors)
+  QTabWidget *m_subTabs = nullptr;
 
   // Water cooler hardware controls (moved from HardwareTab)
   QDBusInterface *m_waterCoolerDbus = nullptr;
@@ -159,6 +176,7 @@ private:
   bool m_autoControl = true;
   bool m_manualControlInitialized = false;
   bool m_waterCoolerSupported = false;
+  QWidget *m_wcHardwareWidget = nullptr;
 };
 
 } // namespace ucc

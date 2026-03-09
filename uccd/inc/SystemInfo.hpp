@@ -19,6 +19,21 @@
 #include "hal/HwCapability.hpp"
 #include <string>
 #include <optional>
+#include <vector>
+
+struct MemoryModuleInfo
+{
+  std::string locator;             // e.g. "DIMM_A1"
+  std::string bankLocator;         // e.g. "BANK 0"
+  std::string type;                // e.g. "DDR5"
+  std::string manufacturer;        // e.g. "Kingston"
+  std::string partNumber;          // e.g. "KF560C36-16"
+  std::string serialNumber;        // SMBIOS serial (if provided)
+  int sizeMiB = 0;                 // module capacity
+  int configuredSpeedMTs = 0;      // configured speed in MT/s
+  int maxSpeedMTs = 0;             // max/rated speed in MT/s
+  int configuredVoltageMv = 0;     // configured voltage in millivolts
+};
 
 /**
  * @brief Laptop manufacturer / brand
@@ -58,6 +73,14 @@ struct SystemInfo
 
   // Chassis / form factor
   ucc::hal::ChassisType chassisType = ucc::hal::ChassisType::Unknown;
+
+  // DRAM summary
+  int ramTotalMiB = 0;
+  int ramAvailableMiB = 0;
+  int ramUsedMiB = 0;
+
+  // DRAM module inventory (static SMBIOS Type 17 data)
+  std::vector< MemoryModuleInfo > ramModules;
 
   // Legacy alias — kept for backward compat in JSON (maps to systemModel)
   std::string laptopModel;        // @deprecated use systemModel

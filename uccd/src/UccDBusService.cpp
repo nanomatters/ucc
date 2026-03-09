@@ -23,6 +23,13 @@
 #include "StateUtils.hpp"
 #include "Utils.hpp"
 #include "SysfsNode.hpp"
+#include "platform/native/HwmonFanProvider.hpp"
+#include "platform/native/HwmonTempProvider.hpp"
+#include "platform/native/GenericProfileProvider.hpp"
+#include "platform/gpu/nvidia/NvidiaGpuPowerProvider.hpp"
+#include "platform/cpu/amd/AmdCpuPlatformProvider.hpp"
+#include "platform/uniwill/TuxedoIOProviders.hpp"
+#include "platform/uniwill/UniwillProfileProvider.hpp"
 #include <sstream>
 #include <iomanip>
 #include <map>
@@ -744,9 +751,9 @@ bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
 
   try
   {
-    auto table = ProfileManager::parseFanTableFromJSON( json );
-    std::cerr << "[DBus] Parsed table size: " << table.size() << std::endl;
-    if ( table.size() != 17 )
+    auto curve = ProfileManager::parseFanCurveFromJSON( json );
+    std::cerr << "[DBus] Parsed curve size: " << curve.size() << std::endl;
+    if ( curve.size() != 17 )
       return false;
 
     UccProfile profile = m_service->getCurrentProfile();
@@ -761,10 +768,12 @@ bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
     if ( !editable )
       return false;
 
-    // Apply as temporary table (do not persist in daemon profiles)
+    // Apply as temporary zone curve (do not persist in daemon profiles)
     if ( m_service->m_fanControlWorker )
     {
-      m_service->m_fanControlWorker->applyTemporaryFanCurves( table, {} );
+      std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
+      zoneCurves[WellKnownZoneIDs::CPU] = curve;
+      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
       return true;
     }
     return false;
@@ -786,9 +795,9 @@ bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const QString &pointsJSON )
 
   try
   {
-    auto table = ProfileManager::parseFanTableFromJSON( json );
-    std::cerr << "[DBus] Parsed table size: " << table.size() << std::endl;
-    if ( table.size() != 17 )
+    auto curve = ProfileManager::parseFanCurveFromJSON( json );
+    std::cerr << "[DBus] Parsed curve size: " << curve.size() << std::endl;
+    if ( curve.size() != 17 )
       return false;
 
     UccProfile profile = m_service->getCurrentProfile();
@@ -803,10 +812,12 @@ bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const QString &pointsJSON )
     if ( !editable )
       return false;
 
-    // Apply as temporary table (do not persist in daemon profiles)
+    // Apply as temporary zone curve (do not persist in daemon profiles)
     if ( m_service->m_fanControlWorker )
     {
-      m_service->m_fanControlWorker->applyTemporaryFanCurves( {}, table );
+      std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
+      zoneCurves[WellKnownZoneIDs::GPU] = curve;
+      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
       return true;
     }
     return false;
@@ -845,24 +856,47 @@ bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq 
       return {};
     };
 
-    auto parseTable = [&]( const std::string &key ) -> std::vector< FanTableEntry > {
+    auto parseCurve = [&]( const std::string &key ) -> std::vector< ucc::hal::FanCurvePoint > {
       std::string json = extractArray( key );
       if ( json.empty() ) return {};
-      auto table = ProfileManager::parseFanTableFromJSON( json );
-      std::cerr << "[DBus] Parsed " << key << " table size: " << table.size() << std::endl;
-      return table;
+      auto curve = ProfileManager::parseFanCurveFromJSON( json );
+      std::cerr << "[DBus] Parsed " << key << " curve size: " << curve.size() << std::endl;
+      return curve;
     };
 
-    auto cpuTable            = parseTable( "cpu" );
-    auto gpuTable            = parseTable( "gpu" );
-    auto waterCoolerFanTable = parseTable( "waterCoolerFan" );
-    auto pumpTable           = parseTable( "pump" );
+    // Build zone curves map from the JSON
+    std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
 
-    // Apply the temporary fan curves
-    if ( m_service->m_fanControlWorker )
+    // Support both legacy keys (cpu/gpu/waterCoolerFan/pump) and new zone keys
+    auto cpuCurve  = parseCurve( "cpu" );
+    auto gpuCurve  = parseCurve( "gpu" );
+    auto wcFanCurve = parseCurve( "waterCoolerFan" );
+    auto pumpCurve  = parseCurve( "pump" );
+
+    if ( !cpuCurve.empty() )   zoneCurves[WellKnownZoneIDs::CPU]    = std::move( cpuCurve );
+    if ( !gpuCurve.empty() )   zoneCurves[WellKnownZoneIDs::GPU]    = std::move( gpuCurve );
+    if ( !wcFanCurve.empty() ) zoneCurves[WellKnownZoneIDs::WCFan]  = std::move( wcFanCurve );
+    if ( !pumpCurve.empty() )  zoneCurves[WellKnownZoneIDs::WCPump] = std::move( pumpCurve );
+
+    // Also support zone-based keys if present
+    // Parse "zones" array if provided (new format)
+    auto zonesJson = extractArray( "zones" );
+    if ( !zonesJson.empty() )
     {
-      m_service->m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, waterCoolerFanTable, pumpTable );
-      std::cerr << "[DBus] Applied temporary fan profiles" << std::endl;
+      auto zoneProfile = ProfileManager::parseFanProfileJSON(
+        "{\"zones\":" + zonesJson + "}" );
+      for ( const auto &zc : zoneProfile.zoneCurves )
+      {
+        if ( !zc.curve.empty() )
+          zoneCurves[zc.zoneId] = zc.curve;
+      }
+    }
+
+    // Apply the temporary zone curves
+    if ( m_service->m_fanControlWorker && !zoneCurves.empty() )
+    {
+      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
+      std::cerr << "[DBus] Applied temporary zone curves (" << zoneCurves.size() << " zones)" << std::endl;
     }
 
     // If the caller provided a fan profile ID, update the active profile
@@ -1288,6 +1322,54 @@ QString UccDBusInterfaceAdaptor::GetFanProfilesJSON()
   return QString::fromStdString( json );
 }
 
+QString UccDBusInterfaceAdaptor::GetThermalSourcesJSON()
+{
+  if ( !m_service )
+    return QStringLiteral( "[]" );
+
+  const auto &sources = m_service->m_hw.thermalSources();
+  std::string json = "[";
+  for ( size_t i = 0; i < sources.size(); ++i )
+  {
+    const auto &ts = sources[i];
+    if ( i > 0 ) json += ',';
+    json += "{\"id\":\"" + ts.id + "\"";
+    json += ",\"label\":\"" + ts.label + "\"";
+    json += ",\"strategy\":\"" + ucc::hal::thermalStrategyToString( ts.strategy ) + "\"";
+    json += "}";
+  }
+  json += "]";
+  return QString::fromStdString( json );
+}
+
+QString UccDBusInterfaceAdaptor::GetFanZonesJSON()
+{
+  if ( !m_service )
+    return QStringLiteral( "[]" );
+
+  const auto &zones = m_service->m_hw.defaultFanZones();
+  std::string json = "[";
+  for ( size_t i = 0; i < zones.size(); ++i )
+  {
+    const auto &z = zones[i];
+    if ( i > 0 ) json += ',';
+    json += "{\"id\":\"" + z.id + "\"";
+    json += ",\"name\":\"" + z.name + "\"";
+    json += ",\"deviceType\":\"" + ucc::hal::fanDeviceTypeToString( z.defaultType ) + "\"";
+    json += ",\"thermalSourceId\":\"" + z.thermalSourceId + "\"";
+    json += ",\"fanIds\":[";
+    for ( size_t f = 0; f < z.fanIds.size(); ++f )
+    {
+      if ( f > 0 ) json += ',';
+      json += "\"" + z.fanIds[f] + "\"";
+    }
+    json += "]";
+    json += "}";
+  }
+  json += "]";
+  return QString::fromStdString( json );
+}
+
 QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
 {
   const std::string requestedId = id.toStdString();
@@ -1302,8 +1384,16 @@ QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
     }
   }
 
+  // Build hardware device type map so the JSON reflects the actual hardware
+  std::unordered_map< std::string, std::string > hwTypes;
+  if ( m_service )
+  {
+    for ( const auto &zone : m_service->m_hw.defaultFanZones() )
+      hwTypes[zone.id] = ucc::hal::fanDeviceTypeToString( zone.defaultType );
+  }
+
   // Fall back to built-in fan profiles
-  return QString::fromStdString( getFanProfileJson( requestedId ) );
+  return QString::fromStdString( getFanProfileJson( requestedId, hwTypes ) );
 }
 
 bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &name, const QString &json )
@@ -1839,8 +1929,12 @@ QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
   if ( !m_service )
     return QStringLiteral( "[]" );
 
-  int nrTDPs = 0;
-  if ( !m_service->m_io.getNumberTDPs( nrTDPs ) || nrTDPs <= 0 )
+  auto *platform = m_service->m_hw.tdpProvider();
+  if ( !platform )
+    return QStringLiteral( "[]" );
+
+  const int nrTDPs = platform->getNumberTDPs();
+  if ( nrTDPs <= 0 )
     return QStringLiteral( "[]" );
 
   std::ostringstream jsonStream;
@@ -1848,10 +1942,9 @@ QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
 
   for ( int i = 0; i < nrTDPs; ++i )
   {
-    int current = 0, min = 0, max = 0;
-    m_service->m_io.getTDPMin( i, min );
-    m_service->m_io.getTDPMax( i, max );
-    m_service->m_io.getTDP( i, current );
+    const int current = platform->getTDP( i ).value_or( 0 );
+    const int min     = platform->getTDPMin( i ).value_or( 0 );
+    const int max     = platform->getTDPMax( i ).value_or( 0 );
 
     if ( i > 0 )
       jsonStream << ",";
@@ -2108,12 +2201,13 @@ void UccDBusInterfaceAdaptor::SetDGpuD0Metrics( bool status )
 
 int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLDefaultPowerLimit()
 {
-  if ( m_service && m_service->m_nvml && m_service->m_nvml->isAvailable() && m_service->m_nvml->deviceCount() > 0 )
+  if ( m_service )
   {
-    if ( auto v = m_service->m_nvml->getPowerDefaultLimitW( 0 ) )
+    const ucc::hal::NvidiaGpuPowerProvider powerProvider( m_service->m_nvml.get() );
+    if ( auto v = powerProvider.getDefaultLimitW( 0 ) )
     {
       m_data.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
-      return static_cast< int >( *v );
+      return *v;
     }
   }
   return m_data.nvidiaPowerCTRLDefaultPowerLimit;
@@ -2121,15 +2215,30 @@ int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLDefaultPowerLimit()
 
 int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLMaxPowerLimit()
 {
-  if ( m_service && m_service->m_nvml && m_service->m_nvml->isAvailable() && m_service->m_nvml->deviceCount() > 0 )
+  if ( m_service )
   {
-    if ( auto v = m_service->m_nvml->getPowerMaxLimitW( 0 ) )
+    const ucc::hal::NvidiaGpuPowerProvider powerProvider( m_service->m_nvml.get() );
+    if ( auto v = powerProvider.getMaxLimitW( 0 ) )
     {
       m_data.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
-      return static_cast< int >( *v );
+      return *v;
     }
   }
   return m_data.nvidiaPowerCTRLMaxPowerLimit;
+}
+
+int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLMinPowerLimit()
+{
+  if ( m_service )
+  {
+    const ucc::hal::NvidiaGpuPowerProvider powerProvider( m_service->m_nvml.get() );
+    if ( auto v = powerProvider.getMinLimitW( 0 ) )
+    {
+      m_data.nvidiaPowerCTRLMinPowerLimit = static_cast< int32_t >( *v );
+      return *v;
+    }
+  }
+  return m_data.nvidiaPowerCTRLMinPowerLimit;
 }
 
 bool UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLAvailable()
@@ -2138,17 +2247,33 @@ bool UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLAvailable()
       "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
 
   std::error_code ec;
-  const bool available = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
-                      && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
-  m_data.nvidiaPowerCTRLAvailable = available;
-  return available;
+  const bool ctgpAvailable = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
+                          && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+
+  bool genericNvmlAvailable = false;
+  if ( m_service )
+  {
+    const ucc::hal::NvidiaGpuPowerProvider powerProvider( m_service->m_nvml.get() );
+    genericNvmlAvailable = powerProvider.isAvailable( 0 );
+
+    if ( auto v = powerProvider.getDefaultLimitW( 0 ) )
+      m_data.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+    if ( auto v = powerProvider.getMinLimitW( 0 ) )
+      m_data.nvidiaPowerCTRLMinPowerLimit = static_cast< int32_t >( *v );
+    if ( auto v = powerProvider.getMaxLimitW( 0 ) )
+      m_data.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+  }
+
+  // Keep DBusData flag semantics: this one tracks cTGP sysfs availability only.
+  m_data.nvidiaPowerCTRLAvailable = ctgpAvailable;
+  return ctgpAvailable || genericNvmlAvailable;
 }
 
 int UccDBusInterfaceAdaptor::GetNVIDIAPowerOffset()
 {
   if ( !m_service || !m_service->m_profileSettingsWorker )
     return 0;
-  if ( !GetNVIDIAPowerCTRLAvailable() )
+  if ( !m_data.cTGPAdjustmentSupported.load() || !m_data.nvidiaPowerCTRLAvailable.load() )
     return 0;
 
   // Read the actual current cTGP offset from sysfs so callers always see
@@ -2169,7 +2294,8 @@ bool UccDBusInterfaceAdaptor::SetNVIDIAPowerOffset( int offset )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_profileSettingsWorker ) return false;
-  if ( !GetNVIDIAPowerCTRLAvailable() ) return false;
+  if ( !m_data.cTGPAdjustmentSupported.load() || !m_data.nvidiaPowerCTRLAvailable.load() )
+    return false;
 
   return m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( offset );
 }
@@ -2234,10 +2360,18 @@ bool UccDBusInterfaceAdaptor::GetWaterCoolerConnected()
 }
 
 int UccDBusInterfaceAdaptor::GetWaterCoolerFanSpeed()
-{ return m_service ? static_cast< int >( m_service->m_waterCoolerWorker->getLastFanSpeed() ) : -1; }
+{
+  if ( !m_service ) return -1;
+  auto *wc = m_service->m_waterCoolerWorker.get();
+  return wc ? static_cast< int >( wc->getLastFanSpeed() ) : -1;
+}
 
 int UccDBusInterfaceAdaptor::GetWaterCoolerPumpLevel()
-{ return m_service ? static_cast< int >( m_service->m_waterCoolerWorker->getLastPumpVoltage() ) : -1; }
+{
+  if ( !m_service ) return -1;
+  auto *wc = m_service->m_waterCoolerWorker.get();
+  return wc ? static_cast< int >( wc->getLastPumpVoltage() ) : -1;
+}
 
 bool UccDBusInterfaceAdaptor::EnableWaterCooler( bool enable )
 {
@@ -2276,8 +2410,12 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerFanSpeed( int dutyCyclePercent )
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( dutyCyclePercent < 0 || dutyCyclePercent > 100 )
     return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-    return m_service->m_waterCoolerWorker->setFanSpeed( dutyCyclePercent );
+  if ( m_service )
+  {
+    auto *wc = m_service->m_waterCoolerWorker.get();
+    if ( wc )
+      return wc->setFanSpeed( dutyCyclePercent );
+  }
 
   return false;
 }
@@ -2288,8 +2426,12 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int voltage )
   // V12(1) is reserved and V1bis excluded. Valid: {0, 2, 3, 4}
   if ( voltage != 0 && voltage != 2 && voltage != 3 && voltage != 4 )
     return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-    return m_service->m_waterCoolerWorker->setPumpVoltage( voltage );
+  if ( m_service )
+  {
+    auto *wc = m_service->m_waterCoolerWorker.get();
+    if ( wc )
+      return wc->setPumpVoltage( voltage );
+  }
 
   return false;
 }
@@ -2297,7 +2439,7 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int voltage )
 bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int red, int green, int blue, int mode )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
+  if ( m_service )
   {
     m_service->m_waterCoolerLedMode.store( mode );
 
@@ -2306,7 +2448,9 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int red, int green, int bl
                              ? static_cast< int >( ucc::RGBState::Static )
                              : mode;
 
-    return m_service->m_waterCoolerWorker->setLEDColor( red, green, blue, hwMode );
+    auto *wc = m_service->m_waterCoolerWorker.get();
+    if ( wc )
+      return wc->setLEDColor( red, green, blue, hwMode );
   }
   return false;
 }
@@ -2314,9 +2458,11 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int red, int green, int bl
 bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerLED()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
+  if ( m_service )
   {
-    return m_service->m_waterCoolerWorker->turnOffLED();
+    auto *wc = m_service->m_waterCoolerWorker.get();
+    if ( wc )
+      return wc->turnOffLED();
   }
   return false;
 }
@@ -2324,9 +2470,11 @@ bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerLED()
 bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerFan()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
+  if ( m_service )
   {
-    return m_service->m_waterCoolerWorker->turnOffFan();
+    auto *wc = m_service->m_waterCoolerWorker.get();
+    if ( wc )
+      return wc->turnOffFan();
   }
   return false;
 }
@@ -2334,9 +2482,11 @@ bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerFan()
 bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerPump()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
+  if ( m_service )
   {
-    return m_service->m_waterCoolerWorker->turnOffPump();
+    auto *wc = m_service->m_waterCoolerWorker.get();
+    if ( wc )
+      return wc->turnOffPump();
   }
   return false;
 }
@@ -2549,14 +2699,34 @@ bool UccDBusInterfaceAdaptor::ApplyNvidiaGpuOCProfile( const QString &profileJSO
   if ( !m_service || !m_service->m_nvidiaOCWorker ) return false;
 
   const std::string profileJsonStd = profileJSON.toStdString();
+
+  // When the Uniwill/Tuxedo cTGP sysfs interface is available, power limiting
+  // is handled via that path (below).  Strip the NVML powerLimitW field so
+  // applyGpuOCProfile() does not also call nvmlDeviceSetPowerManagementLimit,
+  // which would conflict.  On desktop GPUs without cTGP, the NVML path is the
+  // only option — leave powerLimitW in place.
+  std::string filteredJson = profileJsonStd;
+  const bool ctgpAvailable = m_service->m_dbusData.cTGPAdjustmentSupported.load()
+                          && m_service->m_dbusData.nvidiaPowerCTRLAvailable.load();
+  if ( ctgpAvailable )
+  {
+    QJsonDocument tmpDoc = QJsonDocument::fromJson( QByteArray::fromStdString( profileJsonStd ) );
+    if ( tmpDoc.isObject() )
+    {
+      QJsonObject tmpObj = tmpDoc.object();
+      tmpObj.remove( "powerLimitW" );
+      filteredJson = QJsonDocument( tmpObj ).toJson( QJsonDocument::Compact ).toStdString();
+    }
+  }
+
   const bool result = m_service->m_nvidiaOCWorker->applyGpuOCProfile(
-      profileJsonStd, static_cast< unsigned int >( deviceIndex ) );
+      filteredJson, static_cast< unsigned int >( deviceIndex ) );
 
   if ( !result )
     return false;
 
   // Apply cTGP offset from GPU profile payload (GPU-profile path only)
-  if ( m_service->m_profileSettingsWorker && m_service->m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  if ( m_service->m_profileSettingsWorker && ctgpAvailable )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( profileJsonStd ) );
     if ( doc.isObject() )
@@ -2605,9 +2775,14 @@ bool UccDBusInterfaceAdaptor::ResetNvidiaGpuOCAll( int deviceIndex )
   if ( !m_service || !m_service->m_nvidiaOCWorker || !m_service->m_profileSettingsWorker ) return false;
 
   const bool ocResetOk = m_service->m_nvidiaOCWorker->resetAll( static_cast< unsigned int >( deviceIndex ) );
-  const bool ctgpResetOk = m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( 0 );
-  if ( !ctgpResetOk )
-    syslog( LOG_WARNING, "[GPU-RESET] Failed to reset NVIDIA cTGP offset to 0" );
+  bool ctgpResetOk = true;
+  if ( m_service->m_dbusData.cTGPAdjustmentSupported.load()
+       && m_service->m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  {
+    ctgpResetOk = m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( 0 );
+    if ( !ctgpResetOk )
+      syslog( LOG_WARNING, "[GPU-RESET] Failed to reset NVIDIA cTGP offset to 0" );
+  }
 
   return ocResetOk && ctgpResetOk;
 }
@@ -2790,7 +2965,8 @@ UccDBusService::UccDBusService()
   // set daemon version
   m_dbusData.uccdVersion = "2.1.21";
 
-  // identify and set device
+  // Early device identification for pre-HAL code that needs it.
+  // After m_hw.detect(), m_deviceId is updated from the UniwillProfileProvider.
   auto device = identifyDevice();
   m_deviceId = device;
   if ( device.has_value() )
@@ -2801,9 +2977,6 @@ UccDBusService::UccDBusService()
   {
     m_dbusData.device = "";
   }
-
-  // compute device-specific feature flags (aquaris, cTGP)
-  computeDeviceCapabilities();
 
   // detect system hardware info (CPU, GPU, laptop model)
   m_systemInfo = detectSystemInfo( m_deviceId );
@@ -2816,9 +2989,6 @@ UccDBusService::UccDBusService()
 
   // detect display session type and initialize display modes
   initializeDisplayModes();
-
-  // check tuxedo wmi availability
-  m_dbusData.tuxedoWmiAvailable = m_io.wmiAvailable();
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
@@ -2838,7 +3008,6 @@ UccDBusService::UccDBusService()
   // readHardwareCapabilities(), HardwareMonitorWorker, NvidiaOCWorker, and
   // ProfileSettingsWorker so that NVML is initialised exactly once.
   m_nvml = std::make_shared< NvmlWrapper >();
-  readHardwareCapabilities();
 
   // --- HAL: register and detect hardware providers ---
   // TuxedoIO-based providers (OEM, high priority; only available on Clevo/Uniwill)
@@ -2848,12 +3017,35 @@ UccDBusService::UccDBusService()
   // Generic hwmon providers (work on any Linux machine)
   m_hw.addFanProvider( std::make_unique< ucc::hal::HwmonFanProvider >() );
   m_hw.addTempProvider( std::make_unique< ucc::hal::HwmonTempProvider >() );
+  // CPU-specific platform providers (AMD via RyzenAdj/SMU, Intel TBD)
+  m_hw.addPlatformProvider( std::make_unique< ucc::hal::AmdCpuPlatformProvider >() );
+  // Profile providers — Uniwill-specific (high priority) and generic fallback
+  m_hw.addProfileProvider( std::make_unique< ucc::hal::UniwillProfileProvider >( m_io ) );
+  m_hw.addProfileProvider( std::make_unique< ucc::hal::GenericProfileProvider >() );
   // Probe all providers and select the best for each subsystem
   m_hw.detect();
+
+  // Wire the HAL profile provider into the ProfileManager
+  m_profileManager.setProfileProvider( m_hw.profileProvider() );
+
+  // Update device ID from the UniwillProfileProvider if it detected a device
+  if ( auto *uwProvider = dynamic_cast< ucc::hal::UniwillProfileProvider * >( m_hw.profileProvider() ) )
+  {
+    m_deviceId = uwProvider->deviceId();
+    if ( m_deviceId.has_value() )
+      m_dbusData.device = std::to_string( static_cast< int >( *m_deviceId ) );
+  }
+
+  // Compute device-specific feature flags (aquaris, cTGP) — needs HAL profile provider
+  computeDeviceCapabilities();
+
+  // Read hardware capabilities using the HAL (TDP, NVIDIA, charging, etc.)
+  readHardwareCapabilities();
 
   // Publish capabilities for D-Bus clients
   m_dbusData.capabilitiesJSON = ucc::hal::capabilitiesToJSON( m_hw.capabilities() );
   m_dbusData.deviceSupported = ( m_hw.capabilities() != ucc::hal::HwCapability::None );
+  m_dbusData.tuxedoWmiAvailable = ( m_hw.platformProvider() != nullptr );
 
   // Resize fan data vector based on actual detected fans
   {
@@ -2910,7 +3102,7 @@ UccDBusService::UccDBusService()
       m_deviceId.value() == UniwillDeviceID::IBM15A10 );
 
   m_profileSettingsWorker = std::make_unique< ProfileSettingsWorker >(
-    m_io,
+    m_hw,
     m_nvml,
     [this]() -> UccProfile { return m_activeProfile; },
     [this]( const std::vector< std::string > &profiles ) {
@@ -2955,7 +3147,6 @@ UccDBusService::UccDBusService()
   // webcam monitoring via HardwareMonitorWorker (replaces former WebcamWorker)
   m_hardwareMonitorWorker->setWebcamCallbacks(
     [this]() -> std::pair< bool, bool > {
-      // Try platform provider first (HAL), fall back to raw m_io
       auto *platform = m_hw.platformProvider();
       if ( platform )
       {
@@ -2963,9 +3154,7 @@ UccDBusService::UccDBusService()
         if ( webcamOpt.has_value() )
           return { true, webcamOpt.value() };
       }
-      bool status = false;
-      bool available = m_io.getWebcam( status );
-      return { available, status };
+      return { false, false };
     },
     [this]( bool available, bool status ) {
       m_dbusData.webcamSwitchAvailable = available;
@@ -3037,29 +3226,36 @@ UccDBusService::UccDBusService()
           const std::string &fpName = m_activeProfile.fan.fanProfile;
           FanProfile fp = resolveFanProfile( fpName );
 
-          // Overlay water cooler fan table from temporary curves if active
+          // Overlay water cooler fan curve from temporary curves if active
           if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
           {
-            const auto &wcTable = m_fanControlWorker->tempWaterCoolerFanTable();
-            if ( !wcTable.empty() )
+            const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
+            auto wcFanIt = tempCurves.find( WellKnownZoneIDs::WCFan );
+            if ( wcFanIt != tempCurves.end() && !wcFanIt->second.empty() )
             {
-              fp.tableWaterCoolerFan = wcTable;
+              auto *wcFanZone = fp.findZoneCurve( WellKnownZoneIDs::WCFan );
+              if ( wcFanZone )
+                wcFanZone->curve = wcFanIt->second;
             }
           }
 
-          // Overlay pump table from temporary curves if active
+          // Overlay pump curve from temporary curves if active
           if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
           {
-            const auto &pTable = m_fanControlWorker->tempPumpTable();
-            if ( !pTable.empty() )
+            const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
+            auto wcPumpIt = tempCurves.find( WellKnownZoneIDs::WCPump );
+            if ( wcPumpIt != tempCurves.end() && !wcPumpIt->second.empty() )
             {
-              fp.tablePump = pTable;
+              auto *wcPumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+              if ( wcPumpZone )
+                wcPumpZone->curve = wcPumpIt->second;
             }
           }
 
           const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
-          const int wcFanSpeed = fp.getWaterCoolerFanSpeedForTemp( snappedTemp );
-          m_waterCoolerWorker->setFanSpeed( wcFanSpeed );
+          const int wcFanSpeed = fp.getSpeedForZone( snappedTemp, WellKnownZoneIDs::WCFan );
+          if ( m_waterCoolerWorker )
+            m_waterCoolerWorker->setFanSpeed( std::max( wcFanSpeed, 0 ) );
 
           // Temperature LED mode: compute gradient color from fan speed
           if ( m_waterCoolerLedMode.load() == static_cast< int32_t >( ucc::RGBState::Temperature ) )
@@ -3068,8 +3264,9 @@ UccDBusService::UccDBusService()
             const int ledR = static_cast< int >( t * 255.0f );
             const int ledG = 0;
             const int ledB = static_cast< int >( ( 1.0f - t ) * 255.0f );
-            m_waterCoolerWorker->setLEDColor( ledR, ledG, ledB,
-              static_cast< int >( ucc::RGBState::Static ) );
+            if ( m_waterCoolerWorker )
+              m_waterCoolerWorker->setLEDColor( ledR, ledG, ledB,
+                static_cast< int >( ucc::RGBState::Static ) );
           }
 
           // Auto-control pump voltage with hysteresis.
@@ -3080,11 +3277,16 @@ UccDBusService::UccDBusService()
               ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
               ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
 
+          // Read pump curve from the wc-pump zone
+          const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
           int rawIdx = 0;
-          for ( const auto &[t, s] : fp.tablePump )
+          if ( pumpZone )
           {
-            if ( wcTemp >= t ) rawIdx = std::min( s, 4 );
-            else               break;
+            for ( const auto &pt : pumpZone->curve )
+            {
+              if ( wcTemp >= pt.temp ) rawIdx = std::min( pt.speed, 4 );
+              else                     break;
+            }
           }
 
           if ( rawIdx > m_pumpHysSpeedIdx )
@@ -3092,8 +3294,9 @@ UccDBusService::UccDBusService()
             // Temperature rising – apply new level and record its table threshold.
             m_pumpHysSpeedIdx = rawIdx;
             m_pumpHysThreshold = 0;
-            for ( const auto &[t, s] : fp.tablePump )
-              if ( std::min( s, 4 ) == rawIdx ) { m_pumpHysThreshold = t; break; }
+            if ( pumpZone )
+              for ( const auto &pt : pumpZone->curve )
+                if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
           }
           else if ( rawIdx < m_pumpHysSpeedIdx )
           {
@@ -3102,14 +3305,16 @@ UccDBusService::UccDBusService()
             {
               m_pumpHysSpeedIdx = rawIdx;
               m_pumpHysThreshold = 0;
-              for ( const auto &[t, s] : fp.tablePump )
-                if ( std::min( s, 4 ) == rawIdx ) { m_pumpHysThreshold = t; break; }
+              if ( pumpZone )
+                for ( const auto &pt : pumpZone->curve )
+                  if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
             }
           }
 
           const ucc::PumpVoltage pumpSpeedValue =
               pumpIdxToVoltage[ std::clamp( m_pumpHysSpeedIdx, 0, 4 ) ];
-          m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
+          if ( m_waterCoolerWorker )
+            m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
 
           // std::cout << "[Auto WC] Temp: " << temp << "°C, Fan: " << wcFanSpeed
           //           << "%, Pump Voltage: " << static_cast<int>(pumpSpeedValue) << std::endl;
@@ -3355,17 +3560,17 @@ void UccDBusService::readHardwareCapabilities()
   syslog( LOG_INFO, "[uccd] Reading hardware capabilities directly" );
 
   // ---- ODM Power Limits (TDP) ----
-  // Read from TuxedoIOAPI — identical logic to ProfileSettingsWorker::getTDPInfo()
+  // Read from HAL platform provider
   {
-    int nrTDPs = 0;
-    if ( m_io.getNumberTDPs( nrTDPs ) and nrTDPs > 0 )
+    auto *platform = m_hw.tdpProvider();
+    const int nrTDPs = platform ? platform->getNumberTDPs() : 0;
+    if ( nrTDPs > 0 )
     {
       for ( int i = 0; i < nrTDPs; ++i )
       {
-        int current = 0, min = 0, max = 0;
-        m_io.getTDPMin( i, min );
-        m_io.getTDPMax( i, max );
-        m_io.getTDP( i, current );
+        const int current = platform->getTDP( i ).value_or( 0 );
+        const int min     = platform->getTDPMin( i ).value_or( 0 );
+        const int max     = platform->getTDPMax( i ).value_or( 0 );
 
         syslog( LOG_INFO, "[uccd] TDP[%d]: min=%d, max=%d, current=%d", i, min, max, current );
       }
@@ -3381,36 +3586,38 @@ void UccDBusService::readHardwareCapabilities()
     static const std::string NVIDIA_CTGP_OFFSET =
       "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
 
+    const ucc::hal::NvidiaGpuPowerProvider powerProvider( m_nvml.get() );
+
     std::error_code ec;
-    const bool nvAvailable = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
-                          && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
-    m_dbusData.nvidiaPowerCTRLAvailable = nvAvailable;
+    const bool ctgpAvailable = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
+                            && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+    m_dbusData.nvidiaPowerCTRLAvailable = ctgpAvailable;
 
-    if ( nvAvailable )
+    if ( !m_nvidiaPowerLimitsInitialized )
     {
-      if ( !m_nvidiaPowerLimitsInitialized )
-      {
-        // Query power limits via the shared NVML instance only once per daemon startup.
-        // readHardwareCapabilities() is also called after profile apply/reapply.
-        if ( m_nvml && m_nvml->isAvailable() && m_nvml->deviceCount() > 0 )
-        {
-          if ( auto v = m_nvml->getPowerDefaultLimitW( 0 ) )
-            m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
-          if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
-            m_dbusData.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
-        }
+      // Query power limits once per daemon startup via generic NVML provider.
+      if ( auto v = powerProvider.getDefaultLimitW( 0 ) )
+        m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+      if ( auto v = powerProvider.getMaxLimitW( 0 ) )
+        m_dbusData.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
 
-        m_nvidiaPowerLimitsInitialized = true;
-      }
+      m_nvidiaPowerLimitsInitialized = true;
+    }
 
-      syslog( LOG_INFO, "[uccd] NVIDIA power limits — Default: %dW, Max: %dW",
+    if ( powerProvider.isAvailable( 0 ) )
+    {
+      syslog( LOG_INFO, "[uccd] NVIDIA NVML power limits — Default: %dW, Max: %dW",
               m_dbusData.nvidiaPowerCTRLDefaultPowerLimit.load(),
               m_dbusData.nvidiaPowerCTRLMaxPowerLimit.load() );
     }
+
+    if ( ctgpAvailable )
+    {
+      syslog( LOG_INFO, "[uccd] NVIDIA cTGP control available" );
+    }
     else
     {
-      m_nvidiaPowerLimitsInitialized = false;
-      syslog( LOG_INFO, "[uccd] NVIDIA power control not available" );
+      syslog( LOG_INFO, "[uccd] NVIDIA cTGP control not available" );
     }
   }
 
@@ -4004,13 +4211,15 @@ void UccDBusService::onWork()
   if ( !m_dbusData.deviceSupported.load() )
     return;
 
-  // update tuxedo wmi availability (matches typescript implementation)
-  m_dbusData.tuxedoWmiAvailable = m_io.wmiAvailable();
+  // update tuxedo wmi availability (derived from HAL platform provider)
+  m_dbusData.tuxedoWmiAvailable = ( m_hw.platformProvider() != nullptr );
   // update fan availability from HAL
   m_dbusData.fanHwmonAvailable = m_hw.hasFanControl();
 
   // Periodic NVIDIA cTGP offset validation (every 5 ticks = 5 s)
-  if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )
+    if ( m_dbusData.cTGPAdjustmentSupported.load()
+      && m_dbusData.nvidiaPowerCTRLAvailable.load()
+      && m_profileSettingsWorker )
   {
     ++m_nvidiaValidationCounter;
     if ( m_nvidiaValidationCounter >= 5 )
@@ -4244,12 +4453,11 @@ void UccDBusService::loadProfiles()
 {
   std::cout << "[ProfileManager] Loading profiles..." << std::endl;
 
-  // identify device for device-specific profiles
-  auto device = identifyDevice();
-
-  // load default profiles
-  m_defaultProfiles = m_profileManager.getDefaultProfiles( device );
-  std::cout << "[ProfileManager] Loaded " << m_defaultProfiles.size() << " default profiles" << std::endl;
+  // Load default profiles from the HAL profile provider (or legacy device lookup)
+  m_defaultProfiles = m_profileManager.getDefaultProfiles( m_deviceId );
+  std::cout << "[ProfileManager] Loaded " << m_defaultProfiles.size() << " default profiles"
+            << " (provider: " << ( m_hw.profileProvider() ? m_hw.profileProvider()->name() : "none" ) << ")"
+            << std::endl;
 
   // Fill device-specific defaults (TDP values, etc.) after loading profiles
   fillDeviceSpecificDefaults( m_defaultProfiles );
@@ -4555,52 +4763,52 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
     }
     catch ( ... ) { /* ignore */ }
 
-    // Try to resolve and apply fan curves: prefer embedded tables, fallback to named fan profile
+    // Try to resolve and apply fan curves from named fan profile
     try
     {
-      std::vector< FanTableEntry > cpuTable;
-      std::vector< FanTableEntry > gpuTable;
-      std::vector< FanTableEntry > wcFanTable;
-      std::vector< FanTableEntry > pumpTable;
-
-      // Always resolve fan profile by ID
       FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
       if ( fp.isValid() )
       {
-        cpuTable = fp.tableCPU;
-        gpuTable = fp.tableGPU;
-        wcFanTable = fp.tableWaterCoolerFan;
-        pumpTable = fp.tablePump;
-        std::cout << "[Profile] Using fan tables from profile '" << profile.fan.fanProfile << "'" << std::endl;
-      }
+        std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
+        for ( const auto &zc : fp.zoneCurves )
+          if ( !zc.curve.empty() )
+            zoneCurves[zc.zoneId] = zc.curve;
 
-      if ( m_fanControlWorker && !cpuTable.empty() )
-      {
-        m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
-        std::cout << "[Profile] Applied fan curves (CPU=" << cpuTable.size()
-                  << " GPU=" << gpuTable.size()
-                  << " WCFan=" << wcFanTable.size()
-                  << " Pump=" << pumpTable.size() << ")" << std::endl;
-      }
+        std::cout << "[Profile] Using fan zones from profile '" << profile.fan.fanProfile << "'" << std::endl;
 
-      // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-           && !pumpTable.empty() )
-      {
-        int maxTemp = 0;
+        if ( m_fanControlWorker && !zoneCurves.empty() )
         {
-          std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-          for ( const auto &fan : m_dbusData.fans )
-            maxTemp = std::max( maxTemp, fan.temp.data );
+          m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
+          std::cout << "[Profile] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
         }
-        FanProfile tempFp;
-        tempFp.tablePump = pumpTable;
-        // Reset hysteresis before a one-shot profile apply so the continuous
-        // loop re-initialises to the correct level on the next tick.
-        m_pumpHysSpeedIdx = 0;
-        m_pumpHysThreshold = 0;
-        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
-        std::cout << "[Profile] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+
+        // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
+        const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+        if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+             && pumpZone && !pumpZone->curve.empty() )
+        {
+          int maxTemp = 0;
+          {
+            std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+            for ( const auto &fan : m_dbusData.fans )
+              maxTemp = std::max( maxTemp, fan.temp.data );
+          }
+          // Lookup pump voltage from the wc-pump zone curve
+          int pumpIdx = 0;
+          for ( const auto &pt : pumpZone->curve )
+          {
+            if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
+            else                      break;
+          }
+          // Reset hysteresis before a one-shot profile apply
+          m_pumpHysSpeedIdx = 0;
+          m_pumpHysThreshold = 0;
+          static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
+            ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
+            ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
+          m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
+          std::cout << "[Profile] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+        }
       }
     }
     catch ( ... ) { /* ignore parse errors and continue applying other profile settings */ }
@@ -5024,42 +5232,17 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
 
 void UccDBusService::computeDeviceCapabilities()
 {
-  // Aquaris (LCT water cooler) is supported only on specific devices
-  static const std::set< UniwillDeviceID > waterCoolerDevices =
+  // Delegate to UniwillProfileProvider when available
+  if ( auto *uwProvider = dynamic_cast< ucc::hal::UniwillProfileProvider * >( m_hw.profileProvider() ) )
   {
-    UniwillDeviceID::STELLARIS1XI04,
-    UniwillDeviceID::STEPOL1XA04,
-    UniwillDeviceID::STELLARIS1XI05,
-    UniwillDeviceID::STELLARIS16I06,
-    UniwillDeviceID::STELLARIS17I06,
-    UniwillDeviceID::STELLARIS16A07,
-    UniwillDeviceID::XNE16A25,
-    UniwillDeviceID::XNE16E25,
-    UniwillDeviceID::STELLARIS16I07,
-  };
-
-  // cTGP adjustment is hidden for the IBP series (undefined behaviour despite nvidia-smi reporting support)
-  static const std::set< UniwillDeviceID > cTGPHiddenDevices =
-  {
-    UniwillDeviceID::IBP14G6_TUX,
-    UniwillDeviceID::IBP14G6_TRX,
-    UniwillDeviceID::IBP14G6_TQF,
-    UniwillDeviceID::IBP14G7_AQF_ARX,
-    UniwillDeviceID::IBPG8,
-    UniwillDeviceID::IBPG10AMD,
-  };
-
-  if ( m_deviceId.has_value() )
-  {
-    m_dbusData.waterCoolerSupported = waterCoolerDevices.count( m_deviceId.value() ) > 0;
-    m_dbusData.cTGPAdjustmentSupported = cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
+    m_dbusData.waterCoolerSupported = uwProvider->supportsWaterCooler();
+    m_dbusData.cTGPAdjustmentSupported = uwProvider->supportsCTGPAdjustment();
   }
   else
   {
-    // Unknown device: water cooler not available, cTGP defers to hardware detection
+    // Generic / non-Uniwill device: no water cooler, cTGP depends on sysfs
     m_dbusData.waterCoolerSupported = false;
 
-    // For unknown devices, check if the hardware file exists (like TCC does)
     std::error_code ec;
     const std::string ctgpPath = "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
     bool hardwareExists = std::filesystem::exists( ctgpPath, ec ) &&
@@ -5317,52 +5500,50 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
   if ( m_fanControlWorker )
     m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
 
-  // Resolve and apply fan curves: prefer embedded tables, fallback to named profile
+  // Resolve and apply fan curves from named profile
   try
   {
-    std::vector< FanTableEntry > cpuTable;
-    std::vector< FanTableEntry > gpuTable;
-    std::vector< FanTableEntry > wcFanTable;
-    std::vector< FanTableEntry > pumpTable;
-
-    // Always resolve fan profile by ID — no more embedded tables
     FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
     if ( fp.isValid() )
     {
-      cpuTable = fp.tableCPU;
-      gpuTable = fp.tableGPU;
-      wcFanTable = fp.tableWaterCoolerFan;
-      pumpTable = fp.tablePump;
-      std::cout << "[FanPump] Using fan tables from profile '" << profile.fan.fanProfile << "'" << std::endl;
-    }
+      std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
+      for ( const auto &zc : fp.zoneCurves )
+        if ( !zc.curve.empty() )
+          zoneCurves[zc.zoneId] = zc.curve;
 
-    if ( m_fanControlWorker && !cpuTable.empty() )
-    {
-      m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
-      std::cout << "[FanPump] Applied fan curves (CPU=" << cpuTable.size()
-                << " GPU=" << gpuTable.size()
-                << " WCFan=" << wcFanTable.size()
-                << " Pump=" << pumpTable.size() << ")" << std::endl;
-    }
+      std::cout << "[FanPump] Using fan zones from profile '" << profile.fan.fanProfile << "'" << std::endl;
 
-    // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-    if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-         && !pumpTable.empty() )
-    {
-      int maxTemp = 0;
+      if ( m_fanControlWorker && !zoneCurves.empty() )
       {
-        std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-        for ( const auto &fan : m_dbusData.fans )
-          maxTemp = std::max( maxTemp, fan.temp.data );
+        m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
+        std::cout << "[FanPump] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
       }
-      FanProfile tempFp;
-      tempFp.tablePump = pumpTable;
-      // Reset hysteresis before a one-shot profile apply so the continuous
-      // loop re-initialises to the correct level on the next tick.
-      m_pumpHysSpeedIdx = 0;
-      m_pumpHysThreshold = 0;
-      m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
-      std::cout << "[FanPump] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+
+      // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
+      const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+           && pumpZone && !pumpZone->curve.empty() )
+      {
+        int maxTemp = 0;
+        {
+          std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+          for ( const auto &fan : m_dbusData.fans )
+            maxTemp = std::max( maxTemp, fan.temp.data );
+        }
+        int pumpIdx = 0;
+        for ( const auto &pt : pumpZone->curve )
+        {
+          if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
+          else                      break;
+        }
+        m_pumpHysSpeedIdx = 0;
+        m_pumpHysThreshold = 0;
+        static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
+          ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
+          ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
+        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
+        std::cout << "[FanPump] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+      }
     }
   }
   catch ( const std::exception &e )
@@ -5385,8 +5566,13 @@ void UccDBusService::applyGpuOCFromProfile( const UccProfile &profile )
     return;
   }
 
-  // Extract and apply cTGP offset from GPU profile data
-  if ( m_profileSettingsWorker && m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  // Extract and apply cTGP offset from GPU profile data.
+  // When cTGP is available, strip powerLimitW so the NVML path does not
+  // also fire — cTGP handles power via its own sysfs interface.
+  const bool ctgpActive = m_profileSettingsWorker
+                       && m_dbusData.cTGPAdjustmentSupported.load()
+                       && m_dbusData.nvidiaPowerCTRLAvailable.load();
+  if ( ctgpActive )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( gpuData ) );
     if ( doc.isObject() )
@@ -5398,6 +5584,9 @@ void UccDBusService::applyGpuOCFromProfile( const UccProfile &profile )
         std::cout << "[GpuOC] Applying cTGP offset from profile: " << ctgpOffset << std::endl;
         m_profileSettingsWorker->applyNVIDIAPowerOffset( ctgpOffset );
       }
+      // Remove powerLimitW so the OC worker does not also set NVML power limit
+      obj.remove( "powerLimitW" );
+      gpuData = QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString();
     }
   }
 
@@ -5535,52 +5724,50 @@ void UccDBusService::applyProfileForCurrentState()
       m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
     }
 
-    // Resolve and apply fan curves: prefer embedded tables, fallback to named profile
+    // Resolve and apply fan curves from named profile
     try
     {
-      std::vector< FanTableEntry > cpuTable;
-      std::vector< FanTableEntry > gpuTable;
-      std::vector< FanTableEntry > wcFanTable;
-      std::vector< FanTableEntry > pumpTable;
-
-      // Always resolve fan profile by ID
       FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
       if ( fp.isValid() )
       {
-        cpuTable = fp.tableCPU;
-        gpuTable = fp.tableGPU;
-        wcFanTable = fp.tableWaterCoolerFan;
-        pumpTable = fp.tablePump;
-        std::cout << "[State] Using fan tables from profile '" << profile.fan.fanProfile << "'" << std::endl;
-      }
+        std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
+        for ( const auto &zc : fp.zoneCurves )
+          if ( !zc.curve.empty() )
+            zoneCurves[zc.zoneId] = zc.curve;
 
-      if ( m_fanControlWorker && !cpuTable.empty() )
-      {
-        m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
-        std::cout << "[State] Applied fan curves (CPU=" << cpuTable.size()
-                  << " GPU=" << gpuTable.size()
-                  << " WCFan=" << wcFanTable.size()
-                  << " Pump=" << pumpTable.size() << ")" << std::endl;
-      }
+        std::cout << "[State] Using fan zones from profile '" << profile.fan.fanProfile << "'" << std::endl;
 
-      // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-           && !pumpTable.empty() )
-      {
-        int maxTemp = 0;
+        if ( m_fanControlWorker && !zoneCurves.empty() )
         {
-          std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-          for ( const auto &fan : m_dbusData.fans )
-            maxTemp = std::max( maxTemp, fan.temp.data );
+          m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
+          std::cout << "[State] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
         }
-        FanProfile tempFp;
-        tempFp.tablePump = pumpTable;
-        // Reset hysteresis before a one-shot profile apply so the continuous
-        // loop re-initialises to the correct level on the next tick.
-        m_pumpHysSpeedIdx = 0;
-        m_pumpHysThreshold = 0;
-        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
-        std::cout << "[State] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+
+        // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
+        const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+        if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+             && pumpZone && !pumpZone->curve.empty() )
+        {
+          int maxTemp = 0;
+          {
+            std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+            for ( const auto &fan : m_dbusData.fans )
+              maxTemp = std::max( maxTemp, fan.temp.data );
+          }
+          int pumpIdx = 0;
+          for ( const auto &pt : pumpZone->curve )
+          {
+            if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
+            else                      break;
+          }
+          m_pumpHysSpeedIdx = 0;
+          m_pumpHysThreshold = 0;
+          static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
+            ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
+            ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
+          m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
+          std::cout << "[State] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+        }
       }
     }
     catch ( const std::exception &e )
@@ -5729,14 +5916,14 @@ void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &prof
   const int32_t cpuMinFreq = getCpuMinFrequency();
   const int32_t cpuMaxFreq = getCpuMaxFrequency();
 
-  // Get TDP info directly from hardware I/O
+  // Get TDP info from HAL TDP provider
   std::vector< TDPInfo > tdpInfo;
   {
-    int nrTDPs = 0;
-    if ( m_io.getNumberTDPs( nrTDPs ) and nrTDPs > 0 )
+    auto *platform = m_hw.tdpProvider();
+    const int nrTDPs = platform ? platform->getNumberTDPs() : 0;
+    if ( nrTDPs > 0 )
     {
-      std::vector< std::string > descriptors;
-      m_io.getTDPDescriptors( descriptors );
+      const auto descriptors = platform->getTDPDescriptors();
 
       for ( int i = 0; i < nrTDPs; ++i )
       {
@@ -5748,9 +5935,9 @@ void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &prof
                             ? descriptors[ static_cast< size_t >( i ) ]
                             : "";
 
-        m_io.getTDPMin( i, reinterpret_cast< int & >( info.min ) );
-        m_io.getTDPMax( i, reinterpret_cast< int & >( info.max ) );
-        m_io.getTDP( i, reinterpret_cast< int & >( info.current ) );
+        if ( auto v = platform->getTDPMin( i ) ) info.min = static_cast< uint32_t >( *v );
+        if ( auto v = platform->getTDPMax( i ) ) info.max = static_cast< uint32_t >( *v );
+        if ( auto v = platform->getTDP( i ) )    info.current = static_cast< uint32_t >( *v );
 
         tdpInfo.push_back( info );
       }

@@ -17,6 +17,7 @@
 
 #include "profiles/UccProfile.hpp"
 #include "profiles/DefaultProfiles.hpp"
+#include "hal/IProfileProvider.hpp"
 #include "CommonTypes.hpp"
 #include "StateUtils.hpp"
 #include <nlohmann/json.hpp>
@@ -41,15 +42,14 @@
 class ProfileManager
 {
 public:
-  /**
-   * @brief Construct profile manager with default paths
-   */
   ProfileManager() = default;
 
-  /**
-   * @brief Get default custom profiles (template for new profiles)
-   * @return Vector containing the default custom profile
-   */
+  /// Set the HAL profile provider (call after HardwareManager::detect()).
+  void setProfileProvider( ucc::hal::IProfileProvider *provider ) noexcept
+  {
+    m_profileProvider = provider;
+  }
+
   [[nodiscard]] std::vector< UccProfile > getDefaultCustomProfiles() const noexcept
   {
     std::vector< UccProfile > profiles;
@@ -57,23 +57,21 @@ public:
     return profiles;
   }
 
-  /**
-   * @brief Get all default (hardcoded) profiles for a specific device
-   * @param device Optional device identifier for device-specific profiles
-   * @return Vector of default profiles
-   */
   [[nodiscard]] std::vector< UccProfile > getDefaultProfiles( std::optional< UniwillDeviceID > device = std::nullopt ) const noexcept
   {
+    // Prefer HAL profile provider when available
+    if ( m_profileProvider )
+      return m_profileProvider->getDefaultProfiles();
+
+    // Legacy fallback: direct device-profile lookup
     std::vector< UccProfile > result;
 
-    // If device is specified, check for device-specific profiles
     if ( device.has_value() )
     {
       if ( auto it = deviceProfiles.find( *device ); it != deviceProfiles.end() )
         return it->second;
     }
 
-    // Fallback to the current generic default profile set for unknown/undetected devices.
     result = { maxEnergySave, silent, office, highPerformance };
     syslog( LOG_INFO, "Device not found. Loading %zu generic default profiles", result.size() );
     return result;
@@ -142,19 +140,29 @@ public:
   }
 
   /**
-   * @brief Public wrapper to parse a fan table JSON array into entries
-   * @param json JSON array string containing fan table entries
-   * @return Vector of FanTableEntry parsed from JSON
+   * @brief Public wrapper to parse a fan curve JSON array into points
+   * @param json JSON array string containing {temp,speed} entries
+   * @return Vector of FanCurvePoint parsed from JSON
    */
-  [[nodiscard]] static std::vector< FanTableEntry > parseFanTableFromJSON( const std::string &json )
+  [[nodiscard]] static std::vector< ucc::hal::FanCurvePoint > parseFanCurveFromJSON( const std::string &json )
   {
-    return parseFanTable( json );
+    return parseFanCurve( json );
   }
 
   /**
-   * @brief Parse a fan profile JSON string into a FanProfile struct
-   * @param json JSON string with tableCPU, tableGPU, tablePump, tableWaterCoolerFan arrays
-   * @return FanProfile populated from the JSON
+   * @brief Parse a fan profile JSON string into a FanProfile struct.
+   *
+   * Expected format:
+   * {
+   *   "id": "...",
+   *   "name": "...",
+   *   "zones": [
+   *     { "id": "zone-cpu", "name": "CPU", "deviceType": "Fan",
+   *       "hysteresisDeg": 3, "enabled": true,
+   *       "curve": [{"temp":20,"speed":0}, ...] },
+   *     ...
+   *   ]
+   * }
    */
   [[nodiscard]] static FanProfile parseFanProfileJSON( const std::string &json )
   {
@@ -162,21 +170,46 @@ public:
     fp.id = extractString( json, "id" );
     fp.name = extractString( json, "name" );
 
-    std::string tableCPUJson = extractArray( json, "tableCPU" );
-    if ( !tableCPUJson.empty() )
-      fp.tableCPU = parseFanTable( tableCPUJson );
+    std::string zonesArrayJson = extractArray( json, "zones" );
+    if ( !zonesArrayJson.empty() )
+    {
+      // Walk zone objects inside the array
+      size_t depth = 0;
+      size_t start = 0;
+      for ( size_t i = 0; i < zonesArrayJson.length(); ++i )
+      {
+        char c = zonesArrayJson[i];
+        if ( c == '{' )
+        {
+          if ( depth == 0 ) start = i;
+          ++depth;
+        }
+        else if ( c == '}' )
+        {
+          --depth;
+          if ( depth == 0 )
+          {
+            std::string zoneJson = zonesArrayJson.substr( start, i - start + 1 );
+            ucc::hal::FanZoneCurve zc;
+            zc.zoneId = extractString( zoneJson, "id" );
 
-    std::string tableGPUJson = extractArray( json, "tableGPU" );
-    if ( !tableGPUJson.empty() )
-      fp.tableGPU = parseFanTable( tableGPUJson );
+            // name and deviceType are ignored on deserialization —
+            // they are derived from the zone ID during serialization.
 
-    std::string tablePumpJson = extractArray( json, "tablePump" );
-    if ( !tablePumpJson.empty() )
-      fp.tablePump = parseFanTable( tablePumpJson );
+            zc.hysteresisDeg = extractInt( zoneJson, "hysteresisDeg", 3 );
+            zc.enabled = extractBool( zoneJson, "enabled", true );
+            zc.thermalSourceId = extractString( zoneJson, "thermalSourceId" );
 
-    std::string tableWCFanJson = extractArray( json, "tableWaterCoolerFan" );
-    if ( !tableWCFanJson.empty() )
-      fp.tableWaterCoolerFan = parseFanTable( tableWCFanJson );
+            std::string curveJson = extractArray( zoneJson, "curve" );
+            if ( !curveJson.empty() )
+              zc.curve = parseFanCurve( curveJson );
+
+            if ( !zc.zoneId.empty() )
+              fp.zoneCurves.push_back( std::move( zc ) );
+          }
+        }
+      }
+    }
 
     return fp;
   }
@@ -315,16 +348,19 @@ public:
   /**
    * @brief Get the default custom profile template
    */
-  [[nodiscard]] static UccProfile getDefaultCustomProfile() noexcept
+  [[nodiscard]] UccProfile getDefaultCustomProfile() const noexcept
   {
+    if ( m_profileProvider )
+      return m_profileProvider->getDefaultCustomProfile();
+
     UccProfile profile;
     profile.id = "__default_custom_profile__";
     profile.name = "TUXEDO Defaults";
     profile.description = "Edit profile to change behaviour";
-
-    // All fields already have sensible defaults from constructors
     return profile;
   }
+
+  ucc::hal::IProfileProvider *m_profileProvider = nullptr;
 
   /**
    * @brief Parse JSON array of profiles
@@ -508,14 +544,14 @@ private:
     return modified;
   }
 
-  // Fan tables can be embedded in profiles or supplied as named presets via GetFanProfile.
+  // Fan curves are embedded in zones or supplied via GetFanProfile.
 
   /**
-   * @brief Parse fan table from JSON array
+   * @brief Parse fan curve from JSON array of {temp,speed} objects
    */
-  [[nodiscard]] static std::vector< FanTableEntry > parseFanTable( const std::string &json )
+  [[nodiscard]] static std::vector< ucc::hal::FanCurvePoint > parseFanCurve( const std::string &json )
   {
-    std::vector< FanTableEntry > table;
+    std::vector< ucc::hal::FanCurvePoint > curve;
 
     size_t depth = 0;
     size_t start = 0;
@@ -538,15 +574,15 @@ private:
         if ( depth == 0 )
         {
           std::string entryJson = json.substr( start, i - start + 1 );
-          FanTableEntry entry;
-          entry.temp = extractInt( entryJson, "temp", 0 );
-          entry.speed = extractInt( entryJson, "speed", 0 );
-          table.push_back( entry );
+          ucc::hal::FanCurvePoint pt;
+          pt.temp = extractInt( entryJson, "temp", 0 );
+          pt.speed = extractInt( entryJson, "speed", 0 );
+          curve.push_back( pt );
         }
       }
     }
 
-    return table;
+    return curve;
   }
 
   /**
@@ -675,19 +711,19 @@ public:
 
 
   /**
-   * @brief Serialize fan table to JSON
+   * @brief Serialize fan curve to JSON
    */
-  [[nodiscard]] static std::string fanTableToJSON( const std::vector< FanTableEntry > &table )
+  [[nodiscard]] static std::string fanCurveToJSON( const std::vector< ucc::hal::FanCurvePoint > &curve )
   {
     std::ostringstream oss;
     oss << "[";
 
-    for ( size_t i = 0; i < table.size(); ++i )
+    for ( size_t i = 0; i < curve.size(); ++i )
     {
       if ( i > 0 ) oss << ",";
       oss << "{"
-          << "\"temp\":" << table[ i ].temp << ","
-          << "\"speed\":" << table[ i ].speed
+          << "\"temp\":" << curve[ i ].temp << ","
+          << "\"speed\":" << curve[ i ].speed
           << "}";
     }
 

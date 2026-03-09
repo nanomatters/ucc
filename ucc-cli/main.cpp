@@ -808,17 +808,19 @@ static int cmdFanGet( ucc::UccdClient &c, const char *fanProfileId )
   std::printf( "=== Fan Profile: %s ===\n", displayName.toStdString().c_str() );
   std::printf( "  %-24s %s\n", "ID:", displayId.toStdString().c_str() );
 
-  if ( obj.contains( "tableCPU" ) && obj["tableCPU"].isArray() )
-    printFanCurve( "CPU fan curve", obj["tableCPU"].toArray() );
-
-  if ( obj.contains( "tableGPU" ) && obj["tableGPU"].isArray() )
-    printFanCurve( "GPU fan curve", obj["tableGPU"].toArray() );
-
-  if ( obj.contains( "tablePump" ) && obj["tablePump"].isArray() )
-    printFanCurve( "Pump curve", obj["tablePump"].toArray() );
-
-  if ( obj.contains( "tableWaterCoolerFan" ) && obj["tableWaterCoolerFan"].isArray() )
-    printFanCurve( "Water cooler fan curve", obj["tableWaterCoolerFan"].toArray() );
+  // Print zone curves from the zones array
+  if ( obj.contains( "zones" ) && obj["zones"].isArray() )
+  {
+    QJsonArray zones = obj["zones"].toArray();
+    for ( const QJsonValue &zv : zones )
+    {
+      QJsonObject zone = zv.toObject();
+      QString zoneLabel = zone["name"].toString();
+      if ( zoneLabel.isEmpty() ) zoneLabel = zone["id"].toString();
+      if ( zone.contains( "curve" ) && zone["curve"].isArray() )
+        printFanCurve( zoneLabel.toStdString().c_str(), zone["curve"].toArray() );
+    }
+  }
 
   return 0;
 }
@@ -852,7 +854,7 @@ static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
     return 1;
   }
 
-  // Remap keys: tableCPU→cpu, tableGPU→gpu, etc. (same as TrayBackend)
+  // Remap zone curves to the apply format expected by daemon
   QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
   if ( !doc.isObject() )
   {
@@ -861,10 +863,26 @@ static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
   }
   QJsonObject src = doc.object();
   QJsonObject dst;
-  if ( src.contains( "tableCPU" ) )            dst["cpu"]            = src["tableCPU"];
-  if ( src.contains( "tableGPU" ) )            dst["gpu"]            = src["tableGPU"];
-  if ( src.contains( "tablePump" ) )           dst["pump"]           = src["tablePump"];
-  if ( src.contains( "tableWaterCoolerFan" ) ) dst["waterCoolerFan"] = src["tableWaterCoolerFan"];
+
+  // New zone format: extract per-zone curves into the classic keys for ApplyFanProfiles
+  if ( src.contains( "zones" ) && src["zones"].isArray() )
+  {
+    QJsonArray zones = src["zones"].toArray();
+    for ( const QJsonValue &zv : zones )
+    {
+      QJsonObject zone = zv.toObject();
+      QString id = zone["id"].toString();
+      if ( id == "zone-cpu" )  dst["cpu"]            = zone["curve"];
+      else if ( id == "zone-gpu" )  dst["gpu"]            = zone["curve"];
+      else if ( id == "wc-pump" )   dst["pump"]           = zone["curve"];
+      else if ( id == "wc-fan" )    dst["waterCoolerFan"] = zone["curve"];
+    }
+  }
+
+  // Also pass through the zones array directly (new format)
+  if ( src.contains( "zones" ) )
+    dst["zones"] = src["zones"];
+
   // Pass through if already in apply-format
   if ( src.contains( "cpu" ) )            dst["cpu"]            = src["cpu"];
   if ( src.contains( "gpu" ) )            dst["gpu"]            = src["gpu"];

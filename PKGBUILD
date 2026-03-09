@@ -68,7 +68,7 @@ build() {
     -S "${pkgname}-${pkgver}"
     -G Ninja
     -Wno-dev
-    -DCMAKE_BUILD_TYPE=None
+    -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_PREFIX=/usr
     -DCMAKE_INSTALL_LIBDIR=lib
     -DBUILD_GUI=ON

@@ -64,6 +64,8 @@ ProfileManager::ProfileManager( QObject *parent )
       loadFanProfilesFromDaemon();
       loadGpuProfilesFromDaemon();
       loadKeyboardProfilesFromDaemon();
+      loadThermalSourcesFromDaemon();
+      loadFanZonesFromDaemon();
     }
     emit connectedChanged();
   } );
@@ -75,6 +77,8 @@ ProfileManager::ProfileManager( QObject *parent )
     loadFanProfilesFromDaemon();
     loadGpuProfilesFromDaemon();
     loadKeyboardProfilesFromDaemon();
+    loadThermalSourcesFromDaemon();
+    loadFanZonesFromDaemon();
   }
 
   emit connectedChanged();
@@ -142,6 +146,30 @@ void ProfileManager::loadKeyboardProfilesFromDaemon()
   }
 
   emit keyboardProfilesChanged();
+}
+
+void ProfileManager::loadThermalSourcesFromDaemon()
+{
+  m_thermalSourcesData = QJsonArray();
+
+  if ( auto json = m_client->getThermalSourcesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_thermalSourcesData = doc.array();
+  }
+}
+
+void ProfileManager::loadFanZonesFromDaemon()
+{
+  m_fanZonesData = QJsonArray();
+
+  if ( auto json = m_client->getFanZonesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_fanZonesData = doc.array();
+  }
 }
 
 // ---------------------------------------------------------------------------

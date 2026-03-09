@@ -110,6 +110,23 @@ MainWindow::MainWindow( QWidget *parent )
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     m_gpuDefaultPowerLimit = *gpuDefault;
 
+  // Check for MultiplePowerStates capability (battery present)
+  if ( auto capsJson = m_UccdClient->getCapabilitiesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *capsJson ).toUtf8() );
+    if ( doc.isArray() )
+    {
+      for ( const auto &val : doc.array() )
+      {
+        if ( val.toString() == QStringLiteral( "multiplePowerStates" ) )
+        {
+          m_hasMultiplePowerStates = true;
+          break;
+        }
+      }
+    }
+  }
+
   setWindowTitle( "Unified Control Center" );
   setGeometry( 100, 100, 900, 700 );
 
@@ -180,6 +197,8 @@ void MainWindow::setupUI()
 
   // Fetch system hardware info from daemon and pass to DashboardTab
   QString laptopModel, cpuModel, dGpuModel, iGpuModel;
+  QString ramSummaryText;
+  QString ramModulesText;
   if ( auto sysInfoJson = m_UccdClient->getSystemInfoJSON() )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfoJson ) );
@@ -190,12 +209,44 @@ void MainWindow::setupUI()
       cpuModel    = obj.value( "cpuModel" ).toString();
       dGpuModel   = obj.value( "dGpuModel" ).toString();
       iGpuModel   = obj.value( "iGpuModel" ).toString();
+
+      const int ramTotalMiB = obj.value( "ramTotalMiB" ).toInt( 0 );
+      const int ramUsedMiB = obj.value( "ramUsedMiB" ).toInt( 0 );
+      const int ramAvailableMiB = obj.value( "ramAvailableMiB" ).toInt( 0 );
+      if ( ramTotalMiB > 0 )
+      {
+        const double totalGiB = static_cast< double >( ramTotalMiB ) / 1024.0;
+        const double usedGiB = static_cast< double >( ramUsedMiB ) / 1024.0;
+        const double availGiB = static_cast< double >( ramAvailableMiB ) / 1024.0;
+        ramSummaryText = QString( "Total %1 GiB | Used %2 GiB | Available %3 GiB" )
+                           .arg( QString::number( totalGiB, 'f', 1 ) )
+                           .arg( QString::number( usedGiB, 'f', 1 ) )
+                           .arg( QString::number( availGiB, 'f', 1 ) );
+      }
+
+      const QJsonArray modules = obj.value( "ramModules" ).toArray();
+      QStringList moduleLines;
+      for ( int i = 0; i < modules.size(); ++i )
+      {
+        const QJsonObject m = modules[i].toObject();
+        const int sizeMiB = m.value( "sizeMiB" ).toInt( 0 );
+        const int speed = m.value( "configuredSpeedMTs" ).toInt( 0 );
+        const int voltageMv = m.value( "configuredVoltageMv" ).toInt( 0 );
+
+        QString line = QString( "%1 GiB" )
+                         .arg( QString::number( static_cast< double >( sizeMiB ) / 1024.0, 'f', 1 ) );
+        if ( speed > 0 ) line += QString( " @ %1 MT/s" ).arg( speed );
+        if ( voltageMv > 0 ) line += QString( " %1 V" ).arg( QString::number( voltageMv / 1000.0, 'f', 3 ) );
+        moduleLines << line;
+      }
+      ramModulesText = moduleLines.join( QStringLiteral( " | " ) );
     }
   }
 
   // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
   m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(), m_waterCoolerSupported,
-                                     laptopModel, cpuModel, dGpuModel, iGpuModel, this );
+                                     laptopModel, cpuModel, dGpuModel, iGpuModel,
+                                     ramSummaryText, ramModulesText, this );
   m_tabs->addTab( m_dashboardTab, "Dashboard" );
   setupProfilesPage();
 
@@ -226,6 +277,11 @@ void MainWindow::setupFanControlTab()
 
   m_tabs->addTab( m_fanControlTab, "Profile Fan Control" );
 
+  // Build zone tabs from hardware topology (this is the source of truth for
+  // what zones / editors exist).  Profile data only provides curve overrides.
+  m_fanControlTab->buildZoneEditors( m_profileManager->fanZonesData(),
+                                     m_profileManager->thermalSourcesData() );
+
   if ( m_fanControlTab->fanProfileCombo()->count() > 0 )
     onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentData().toString() );
 }
@@ -234,14 +290,10 @@ void MainWindow::connectFanControlTab()
 {
   connect( m_fanControlTab, &FanControlTab::fanProfileChanged,
            this, &MainWindow::onFanProfileChanged );
-  connect( m_fanControlTab, &FanControlTab::cpuPointsChanged,
-           this, &MainWindow::onCpuFanPointsChanged );
-  connect( m_fanControlTab, &FanControlTab::gpuPointsChanged,
-           this, &MainWindow::onGpuFanPointsChanged );
-  connect( m_fanControlTab, &FanControlTab::wcFanPointsChanged,
-           this, &MainWindow::onWaterCoolerFanPointsChanged );
-  connect( m_fanControlTab, &FanControlTab::pumpPointsChanged,
-           this, &MainWindow::onPumpPointsChanged );
+  connect( m_fanControlTab, &FanControlTab::fanCurveChanged,
+           this, &MainWindow::onFanCurveChanged );
+  connect( m_fanControlTab, &FanControlTab::pumpCurveChanged,
+           this, &MainWindow::onPumpCurveChanged );
   connect( m_fanControlTab, &FanControlTab::applyRequested,
            this, &MainWindow::onApplyFanProfilesClicked );
   connect( m_fanControlTab, &FanControlTab::saveRequested,
@@ -432,6 +484,15 @@ void MainWindow::setupProfilesPage()
     m_waterCoolerButton->setVisible( false );
   }
 
+  // Hide entire "Activate profile automatically on" section when no battery
+  if ( !m_hasMultiplePowerStates )
+  {
+    autoActivateLabel->setVisible( false );
+    m_mainsButton->setVisible( false );
+    m_batteryButton->setVisible( false );
+    m_waterCoolerButton->setVisible( false );
+  }
+
   // Add spacer/separator
   detailsLayout->addItem( new QSpacerItem( 0, 15 ), row, 0, 1, 2 );
   row++;
@@ -611,16 +672,6 @@ void MainWindow::setupProfilesPage()
   }
   detailsLayout->addWidget( fanProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileFanProfileCombo, row, 1 );
-  row++;
-
-  QLabel *sameSpeedLabel = new QLabel( "Same fan speed for all fans" );
-  detailsLayout->addWidget( sameSpeedLabel, row, 0 );
-  // Reuse the shared checkbox created in the dashboard (create if not present)
-  if ( !m_sameFanSpeedCheckBox ) {
-    m_sameFanSpeedCheckBox = new QCheckBox();
-    m_sameFanSpeedCheckBox->setChecked( true );
-  }
-  detailsLayout->addWidget( m_sameFanSpeedCheckBox, row, 1, Qt::AlignLeft );
   row++;
 
   QLabel *autoWaterLabel = new QLabel( "Water cooler auto control" );
@@ -1163,40 +1214,40 @@ void MainWindow::updateFanCrosshairs()
     return;
 
   // CPU fan editor
+  if ( auto *ed = m_fanControlTab->fanEditor( QStringLiteral( "zone-cpu" ) ) )
   {
     auto temp = parseMonitorValue( m_systemMonitor->cpuTemp() );
     auto duty = parseMonitorValue( m_systemMonitor->cpuFanSpeed() );
-    qDebug() << "[Crosshair] CPU raw:" << m_systemMonitor->cpuTemp() << m_systemMonitor->cpuFanSpeed()
-             << "parsed temp:" << ( temp ? *temp : -1 ) << "duty:" << ( duty ? *duty : -1 );
     if ( temp && duty )
-      m_fanControlTab->cpuEditor()->setCrosshair( *temp, *duty );
+      ed->setCrosshair( *temp, *duty );
     else
-      m_fanControlTab->cpuEditor()->clearCrosshair();
+      ed->clearCrosshair();
   }
 
   // GPU fan editor
+  if ( auto *ed = m_fanControlTab->fanEditor( QStringLiteral( "zone-gpu" ) ) )
   {
     auto temp = parseMonitorValue( m_systemMonitor->gpuTemp() );
     auto duty = parseMonitorValue( m_systemMonitor->gpuFanSpeed() );
     if ( temp && duty )
-      m_fanControlTab->gpuEditor()->setCrosshair( *temp, *duty );
+      ed->setCrosshair( *temp, *duty );
     else
-      m_fanControlTab->gpuEditor()->clearCrosshair();
+      ed->clearCrosshair();
   }
 
   // Water cooler fan editor (uses CPU temp as temperature source)
-  if ( m_fanControlTab->wcFanEditor() )
+  if ( auto *ed = m_fanControlTab->fanEditor( QStringLiteral( "wc-fan" ) ) )
   {
     auto temp = parseMonitorValue( m_systemMonitor->cpuTemp() );
     auto duty = parseMonitorValue( m_systemMonitor->waterCoolerFanSpeed() );
     if ( temp && duty )
-      m_fanControlTab->wcFanEditor()->setCrosshair( *temp, *duty );
+      ed->setCrosshair( *temp, *duty );
     else
-      m_fanControlTab->wcFanEditor()->clearCrosshair();
+      ed->clearCrosshair();
   }
 
   // Pump curve editor (uses CPU temp and pump voltage level)
-  if ( m_fanControlTab->pumpEditor() )
+  if ( auto *ed = m_fanControlTab->pumpEditor( QStringLiteral( "wc-pump" ) ) )
   {
     auto temp = parseMonitorValue( m_systemMonitor->cpuTemp() );
     int pumpLevel = -1;
@@ -1207,9 +1258,9 @@ void MainWindow::updateFanCrosshairs()
     else if ( lvlStr == "High" ) pumpLevel = 3;
 
     if ( temp && pumpLevel >= 0 )
-      m_fanControlTab->pumpEditor()->setCrosshair( *temp, pumpLevel );
+      ed->setCrosshair( *temp, pumpLevel );
     else
-      m_fanControlTab->pumpEditor()->clearCrosshair();
+      ed->clearCrosshair();
   }
 }
 
@@ -1233,12 +1284,10 @@ void MainWindow::onTabChanged( int index )
     updateFanCrosshairs();
   else if ( m_fanControlTab )
   {
-    m_fanControlTab->cpuEditor()->clearCrosshair();
-    m_fanControlTab->gpuEditor()->clearCrosshair();
-    if ( m_fanControlTab->wcFanEditor() )
-      m_fanControlTab->wcFanEditor()->clearCrosshair();
-    if ( m_fanControlTab->pumpEditor() )
-      m_fanControlTab->pumpEditor()->clearCrosshair();
+    for ( auto *ed : m_fanControlTab->fanEditors() )
+      ed->clearCrosshair();
+    for ( auto *ed : m_fanControlTab->pumpEditors() )
+      ed->clearCrosshair();
   }
 
   // Load current keyboard backlight states when keyboard tab (index 4) is activated
@@ -1695,12 +1744,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
       }
     }
 
-    // Load sameSpeed from profile (default true)
-    if ( fanObj.contains( "sameSpeed" ) )
-      m_sameFanSpeedCheckBox->setChecked( fanObj["sameSpeed"].toBool( true ) );
-    else
-      m_sameFanSpeedCheckBox->setChecked( true );
-
     if ( fanObj.contains( "autoControlWC" ) )
     {
       bool autoControl = fanObj["autoControlWC"].toBool( true );
@@ -2097,7 +2140,6 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   // Fan controls
   if ( m_profileFanProfileCombo ) m_profileFanProfileCombo->setEnabled( isCustom );
-  if ( m_sameFanSpeedCheckBox ) m_sameFanSpeedCheckBox->setEnabled( isCustom );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->setEnabled( isCustom );
 
   // CPU controls
@@ -2171,7 +2213,6 @@ QString MainWindow::buildProfileJSON() const
   QJsonObject fanObj;
   QString fanProfileId  = m_profileFanProfileCombo->currentData().toString();
   fanObj["fanProfile"]       = fanProfileId;
-  fanObj["sameSpeed"]        = m_sameFanSpeedCheckBox   ? m_sameFanSpeedCheckBox->isChecked()   : true;
   fanObj["autoControlWC"]    = m_autoWaterControlCheckBox ? m_autoWaterControlCheckBox->isChecked() : true;
   fanObj["enableWaterCooler"] = m_fanControlTab          ? m_fanControlTab->isWaterCoolerEnabled() : true;
   profileObj["fan"] = fanObj;
@@ -2290,12 +2331,20 @@ void MainWindow::onSaveClicked()
   // For both custom and built-in profiles, update stateMap based on mains/battery button states
   // Batch all stateMap changes into a single D-Bus call (single backup + write)
   std::map< QString, QString > stateMapUpdates;
-  if ( m_mainsButton->isChecked() )
+  if ( !m_hasMultiplePowerStates )
+  {
+    // No battery: always assign to power_ac
     stateMapUpdates["power_ac"] = profileId;
-  if ( m_batteryButton->isChecked() )
-    stateMapUpdates["power_bat"] = profileId;
-  if ( m_waterCoolerButton->isChecked() )
-    stateMapUpdates["power_wc"] = profileId;
+  }
+  else
+  {
+    if ( m_mainsButton->isChecked() )
+      stateMapUpdates["power_ac"] = profileId;
+    if ( m_batteryButton->isChecked() )
+      stateMapUpdates["power_bat"] = profileId;
+    if ( m_waterCoolerButton->isChecked() )
+      stateMapUpdates["power_wc"] = profileId;
+  }
 
   if ( !stateMapUpdates.empty() )
     m_profileManager->setBatchStateMap( stateMapUpdates );
@@ -2574,64 +2623,42 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
   QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
   if (doc.isObject()) {
     QJsonObject obj = doc.object();
+    QJsonArray zones = obj["zones"].toArray();
 
-    // Load CPU points
-    if (obj.contains("tableCPU")) {
-      QJsonArray arr = obj["tableCPU"].toArray();
-      QVector<FanCurveEditorWidget::Point> cpuPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        double temp = o["temp"].toDouble();
-        double speed = o["speed"].toDouble();
-        cpuPoints.append({temp, speed});
-      }
-      if (m_fanControlTab->cpuEditor() && !cpuPoints.isEmpty()) {
-        m_fanControlTab->cpuEditor()->setPoints(cpuPoints);
-      }
-    }
+    // Overlay profile curve data and thermal source overrides onto
+    // existing hardware-based zone editors (built once in setupFanControlTab)
+    for ( const QJsonValue &zv : zones )
+    {
+      QJsonObject zone = zv.toObject();
+      QString id        = zone[QStringLiteral( "id" )].toString();
+      QString devType   = zone[QStringLiteral( "deviceType" )].toString();
+      QJsonArray curve  = zone[QStringLiteral( "curve" )].toArray();
 
-    // Load GPU points
-    if (obj.contains("tableGPU")) {
-      QJsonArray arr = obj["tableGPU"].toArray();
-      QVector<FanCurveEditorWidget::Point> gpuPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        double temp = o["temp"].toDouble();
-        double speed = o["speed"].toDouble();
-        gpuPoints.append({temp, speed});
-      }
-      if (m_fanControlTab->gpuEditor() && !gpuPoints.isEmpty()) {
-        m_fanControlTab->gpuEditor()->setPoints(gpuPoints);
-      }
-    }
+      // Apply thermal source override from profile
+      if ( zone.contains( QStringLiteral( "thermalSourceId" ) ) )
+        m_fanControlTab->setThermalSourceForZone( id, zone[QStringLiteral( "thermalSourceId" )].toString() );
 
-    // Load water cooler fan points
-    if (obj.contains("tableWaterCoolerFan")) {
-      QJsonArray arr = obj["tableWaterCoolerFan"].toArray();
-      QVector<FanCurveEditorWidget::Point> wcFanPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        double temp = o["temp"].toDouble();
-        double speed = o["speed"].toDouble();
-        wcFanPoints.append({temp, speed});
+      if ( devType == QStringLiteral( "stagedPump" ) )
+      {
+        QVector< PumpCurveEditorWidget::Point > pts;
+        for ( const QJsonValue &cv : curve )
+        {
+          QJsonObject pt = cv.toObject();
+          pts.append( { pt["temp"].toDouble(), pt["speed"].toInt() } );
+        }
+        if ( auto *ed = m_fanControlTab->pumpEditor( id ); ed && !pts.isEmpty() )
+          ed->setPoints( pts );
       }
-      if (m_fanControlTab->wcFanEditor() && !wcFanPoints.isEmpty()) {
-        m_fanControlTab->wcFanEditor()->setPoints(wcFanPoints);
-      }
-    }
-
-    // Load pump threshold points
-    if (obj.contains("tablePump")) {
-      QJsonArray arr = obj["tablePump"].toArray();
-      QVector<PumpCurveEditorWidget::Point> pumpPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        double temp = o["temp"].toDouble();
-        int speed = o["speed"].toInt();
-        pumpPoints.append({temp, speed});
-      }
-      if (m_fanControlTab->pumpEditor() && !pumpPoints.isEmpty()) {
-        m_fanControlTab->pumpEditor()->setPoints(pumpPoints);
+      else
+      {
+        QVector< FanCurveEditorWidget::Point > pts;
+        for ( const QJsonValue &cv : curve )
+        {
+          QJsonObject pt = cv.toObject();
+          pts.append( { pt["temp"].toDouble(), pt["speed"].toDouble() } );
+        }
+        if ( auto *ed = m_fanControlTab->fanEditor( id ); ed && !pts.isEmpty() )
+          ed->setPoints( pts );
       }
     }
   }
@@ -2665,11 +2692,10 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
 
 void MainWindow::onCpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points)
 {
-  m_cpuFanPoints.clear();
-
-  for (const auto& p : points) {
-    m_cpuFanPoints.append({static_cast<int>(p.temp), static_cast<int>(p.duty)});
-  }
+  QVector< FanPoint > cached;
+  for ( const auto &p : points )
+    cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
+  m_fanZonePoints[QStringLiteral( "zone-cpu" )] = cached;
 }
 
 void MainWindow::reloadFanProfiles()
@@ -2736,22 +2762,24 @@ void MainWindow::onUccdConnectionChanged( bool connected )
 
 void MainWindow::onGpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points)
 {
-  m_gpuFanPoints.clear();
-  for (const auto& p : points) {
-    m_gpuFanPoints.append({static_cast<int>(p.temp), static_cast<int>(p.duty)});
-  }
+  QVector< FanPoint > cached;
+  for ( const auto &p : points )
+    cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
+  m_fanZonePoints[QStringLiteral( "zone-gpu" )] = cached;
 }
 
-void MainWindow::onWaterCoolerFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points)
+void MainWindow::onFanCurveChanged( const QString &zoneId, const QVector< FanCurveEditorWidget::Point > &points )
 {
-  m_waterCoolerFanPoints.clear();
-  for (const auto& p : points) {
-    m_waterCoolerFanPoints.append({static_cast<int>(p.temp), static_cast<int>(p.duty)});
-  }
+  QVector< FanPoint > cached;
+  for ( const auto &p : points )
+    cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
+  m_fanZonePoints[zoneId] = cached;
 }
 
-void MainWindow::onPumpPointsChanged(const QVector<PumpCurveEditorWidget::Point>& /*points*/)
+void MainWindow::onPumpCurveChanged( const QString &zoneId, const QVector< PumpCurveEditorWidget::Point > &points )
 {
+  Q_UNUSED( zoneId )
+  Q_UNUSED( points )
   // Pump points changed – mark the fan profile as modified so it can be saved
   if ( m_fanControlTab )
   {
@@ -2808,7 +2836,7 @@ void MainWindow::onCopyFanProfileClicked()
 
 void MainWindow::onApplyFanProfilesClicked()
 {
-  if ( not m_fanControlTab->cpuEditor() and not m_fanControlTab->gpuEditor() )
+  if ( m_fanControlTab->fanEditors().isEmpty() && m_fanControlTab->pumpEditors().isEmpty() )
   {
     QMessageBox::warning( this, "No Editors", "No fan curve editors available to apply fan profiles." );
     return;
@@ -2820,62 +2848,57 @@ void MainWindow::onApplyFanProfilesClicked()
     return;
   }
 
-  const auto &cpuPoints = m_fanControlTab->cpuEditor()->points();
-  const auto &gpuPoints = m_fanControlTab->gpuEditor()->points();
+  // Build a zones array from all current editors
   QJsonObject root;
-  QJsonArray cpuArr;
-  QJsonArray gpuArr;
+  QJsonArray zonesArr;
 
-  for ( const auto &p : cpuPoints )
+  for ( auto it = m_fanControlTab->fanEditors().constBegin();
+        it != m_fanControlTab->fanEditors().constEnd(); ++it )
   {
-    QJsonObject o;
-    o["temp"] = p.temp;
-    o["speed"] = p.duty;
-    cpuArr.append( o );
-  }
-
-  for ( const auto &p : gpuPoints )
-  {
-    QJsonObject o;
-    o["temp"] = p.temp;
-    o["speed"] = p.duty;
-    gpuArr.append( o );
-  }
-
-  // Water cooler fan points
-  QJsonArray wcFanArr;
-  if ( m_fanControlTab->wcFanEditor() )
-  {
-    const auto &wcFanPoints = m_fanControlTab->wcFanEditor()->points();
-    for ( const auto &p : wcFanPoints )
+    const QString &zoneId = it.key();
+    const auto &pts = it.value()->points();
+    QJsonArray curveArr;
+    for ( const auto &p : pts )
     {
       QJsonObject o;
-      o["temp"] = p.temp;
+      o["temp"]  = p.temp;
       o["speed"] = p.duty;
-      wcFanArr.append( o );
+      curveArr.append( o );
     }
+    QJsonObject zone;
+    zone["id"]    = zoneId;
+    zone["curve"] = curveArr;
+    QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
+    if ( !tsId.isEmpty() )
+      zone["thermalSourceId"] = tsId;
+    zonesArr.append( zone );
   }
 
-  // Pump threshold points
-  QJsonArray pumpArr;
-  if ( m_fanControlTab->pumpEditor() )
+  for ( auto it = m_fanControlTab->pumpEditors().constBegin();
+        it != m_fanControlTab->pumpEditors().constEnd(); ++it )
   {
-    const auto &pumpPoints = m_fanControlTab->pumpEditor()->points();
-    for ( const auto &p : pumpPoints )
+    const QString &zoneId = it.key();
+    const auto &pts = it.value()->points();
+    QJsonArray curveArr;
+    for ( const auto &p : pts )
     {
       QJsonObject o;
-      o["temp"] = p.temp;
+      o["temp"]  = p.temp;
       o["speed"] = p.level;
-      pumpArr.append( o );
+      curveArr.append( o );
     }
+    QJsonObject zone;
+    zone["id"]    = zoneId;
+    zone["curve"] = curveArr;
+    QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
+    if ( !tsId.isEmpty() )
+      zone["thermalSourceId"] = tsId;
+    zonesArr.append( zone );
   }
 
-  root[ "cpu" ] = cpuArr;
-  root[ "gpu" ] = gpuArr;
-  root[ "waterCoolerFan" ] = wcFanArr;
-  root[ "pump" ] = pumpArr;
+  root["zones"] = zonesArr;
   if ( !m_currentFanProfile.isEmpty() )
-    root[ "fanProfileId" ] = m_currentFanProfile;
+    root["fanProfileId"] = m_currentFanProfile;
 
   QJsonDocument doc( root );
   QString json = QString::fromUtf8( doc.toJson( QJsonDocument::Compact ) );
@@ -2884,19 +2907,16 @@ void MainWindow::onApplyFanProfilesClicked()
   {
     statusBar()->showMessage( "Temporary fan profiles applied" );
 
-    // Keep an internal copy so UI actions like revert have the current values
-    m_cpuFanPoints.clear();
-    for ( const auto &p : m_fanControlTab->cpuEditor()->points() )
-      m_cpuFanPoints.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
-
-    m_gpuFanPoints.clear();
-    for ( const auto &p : m_fanControlTab->gpuEditor()->points() )
-      m_gpuFanPoints.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
-
-    m_waterCoolerFanPoints.clear();
-    if ( m_fanControlTab->wcFanEditor() )
-      for ( const auto &p : m_fanControlTab->wcFanEditor()->points() )
-        m_waterCoolerFanPoints.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
+    // Keep an internal cache so UI actions like revert have the current values
+    m_fanZonePoints.clear();
+    for ( auto it = m_fanControlTab->fanEditors().constBegin();
+          it != m_fanControlTab->fanEditors().constEnd(); ++it )
+    {
+      QVector< FanPoint > cached;
+      for ( const auto &p : it.value()->points() )
+        cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
+      m_fanZonePoints[it.key()] = cached;
+    }
 
     // Re-send the current water cooler enable state to the daemon so that
     // the profile apply (which may set enableWaterCooler from profile data)
@@ -2921,66 +2941,47 @@ void MainWindow::loadFanPoints()
   if ( m_currentFanProfile.isEmpty() ) return;
 
   QString json = m_profileManager->getFanProfile( m_currentFanProfile );
-  QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
-  if (doc.isObject()) {
-    QJsonObject obj = doc.object();
-    if (obj.contains("tableCPU")) {
-      QJsonArray arr = obj["tableCPU"].toArray();
-      m_cpuFanPoints.clear();
-      QVector<FanCurveEditorWidget::Point> cpuPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        int temp = o["temp"].toInt();
-        int speed = o["speed"].toInt();
-        m_cpuFanPoints.append({temp, speed});
-        cpuPoints.append({static_cast<double>(temp), static_cast<double>(speed)});
+  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
+  if ( !doc.isObject() ) return;
+  QJsonObject obj = doc.object();
+  QJsonArray zones = obj["zones"].toArray();
+
+  m_fanZonePoints.clear();
+
+  for ( const QJsonValue &zv : zones )
+  {
+    QJsonObject zone = zv.toObject();
+    QString id      = zone[QStringLiteral( "id" )].toString();
+    QString devType = zone[QStringLiteral( "deviceType" )].toString();
+    QJsonArray curve = zone[QStringLiteral( "curve" )].toArray();
+    if ( curve.isEmpty() ) continue;
+
+    if ( devType == QStringLiteral( "stagedPump" ) )
+    {
+      QVector< PumpCurveEditorWidget::Point > pts;
+      for ( const QJsonValue &cv : curve )
+      {
+        QJsonObject o = cv.toObject();
+        pts.append( { o["temp"].toDouble(), o["speed"].toInt() } );
       }
-      if (m_fanControlTab->cpuEditor()) {
-        m_fanControlTab->cpuEditor()->setPoints(cpuPoints);
-      }
+      if ( auto *ed = m_fanControlTab->pumpEditor( id ) )
+        ed->setPoints( pts );
     }
-    if (obj.contains("tableGPU")) {
-      QJsonArray arr = obj["tableGPU"].toArray();
-      m_gpuFanPoints.clear();
-      QVector<FanCurveEditorWidget::Point> gpuPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        int temp = o["temp"].toInt();
+    else
+    {
+      QVector< FanPoint > cached;
+      QVector< FanCurveEditorWidget::Point > pts;
+      for ( const QJsonValue &cv : curve )
+      {
+        QJsonObject o = cv.toObject();
+        int temp  = o["temp"].toInt();
         int speed = o["speed"].toInt();
-        m_gpuFanPoints.append({temp, speed});
-        gpuPoints.append({static_cast<double>(temp), static_cast<double>(speed)});
+        cached.append( { temp, speed } );
+        pts.append( { static_cast< double >( temp ), static_cast< double >( speed ) } );
       }
-      if (m_fanControlTab->gpuEditor()) {
-        m_fanControlTab->gpuEditor()->setPoints(gpuPoints);
-      }
-    }
-    if (obj.contains("tableWaterCoolerFan")) {
-      QJsonArray arr = obj["tableWaterCoolerFan"].toArray();
-      m_waterCoolerFanPoints.clear();
-      QVector<FanCurveEditorWidget::Point> wcFanPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        int temp = o["temp"].toInt();
-        int speed = o["speed"].toInt();
-        m_waterCoolerFanPoints.append({temp, speed});
-        wcFanPoints.append({static_cast<double>(temp), static_cast<double>(speed)});
-      }
-      if (m_fanControlTab->wcFanEditor()) {
-        m_fanControlTab->wcFanEditor()->setPoints(wcFanPoints);
-      }
-    }
-    if (obj.contains("tablePump")) {
-      QJsonArray arr = obj["tablePump"].toArray();
-      QVector<PumpCurveEditorWidget::Point> pumpPoints;
-      for (const QJsonValue &v : arr) {
-        QJsonObject o = v.toObject();
-        double temp = o["temp"].toDouble();
-        int speed = o["speed"].toInt();
-        pumpPoints.append({temp, speed});
-      }
-      if (m_fanControlTab->pumpEditor() && !pumpPoints.isEmpty()) {
-        m_fanControlTab->pumpEditor()->setPoints(pumpPoints);
-      }
+      m_fanZonePoints[id] = cached;
+      if ( auto *ed = m_fanControlTab->fanEditor( id ) )
+        ed->setPoints( pts );
     }
   }
 }
@@ -2989,60 +2990,51 @@ void MainWindow::loadFanPoints()
 void MainWindow::saveFanPoints()
 {
   QJsonObject obj;
+  QJsonArray zonesArr;
 
-  // Get CPU points from the editor
-  QJsonArray cpuArr;
-  if ( m_fanControlTab->cpuEditor() )
+  // Serialize fan curve editors
+  for ( auto it = m_fanControlTab->fanEditors().constBegin();
+        it != m_fanControlTab->fanEditors().constEnd(); ++it )
   {
-    const auto& cpuPoints = m_fanControlTab->cpuEditor()->points();
-    for (const auto &p : cpuPoints) {
+    QJsonArray curveArr;
+    for ( const auto &p : it.value()->points() )
+    {
       QJsonObject o;
-      o["temp"] = p.temp;
+      o["temp"]  = p.temp;
       o["speed"] = p.duty;
-      cpuArr.append(o);
+      curveArr.append( o );
     }
-  }
-  obj["tableCPU"] = cpuArr;
-
-  // Get GPU points from the editor
-  QJsonArray gpuArr;
-  if (m_fanControlTab->gpuEditor()) {
-    const auto& gpuPoints = m_fanControlTab->gpuEditor()->points();
-    for (const auto &p : gpuPoints) {
-      QJsonObject o;
-      o["temp"] = p.temp;
-      o["speed"] = p.duty;
-      gpuArr.append(o);
-    }
-  }
-  obj["tableGPU"] = gpuArr;
-
-  // Get water cooler fan points from the editor
-  QJsonArray wcFanArr;
-  if (m_fanControlTab->wcFanEditor()) {
-    const auto& wcFanPoints = m_fanControlTab->wcFanEditor()->points();
-    for (const auto &p : wcFanPoints) {
-      QJsonObject o;
-      o["temp"] = p.temp;
-      o["speed"] = p.duty;
-      wcFanArr.append(o);
-    }
+    QJsonObject zone;
+    zone["id"]    = it.key();
+    zone["curve"] = curveArr;
+    QString tsId = m_fanControlTab->thermalSourceForZone( it.key() );
+    if ( !tsId.isEmpty() )
+      zone["thermalSourceId"] = tsId;
+    zonesArr.append( zone );
   }
 
-  obj["tableWaterCoolerFan"] = wcFanArr;
-
-  // Get pump points from the editor
-  QJsonArray pumpArr;
-  if (m_fanControlTab->pumpEditor()) {
-    const auto& pumpPoints = m_fanControlTab->pumpEditor()->points();
-    for (const auto &p : pumpPoints) {
+  // Serialize pump curve editors
+  for ( auto it = m_fanControlTab->pumpEditors().constBegin();
+        it != m_fanControlTab->pumpEditors().constEnd(); ++it )
+  {
+    QJsonArray curveArr;
+    for ( const auto &p : it.value()->points() )
+    {
       QJsonObject o;
-      o["temp"] = p.temp;
+      o["temp"]  = p.temp;
       o["speed"] = p.level;
-      pumpArr.append(o);
+      curveArr.append( o );
     }
+    QJsonObject zone;
+    zone["id"]    = it.key();
+    zone["curve"] = curveArr;
+    QString tsId = m_fanControlTab->thermalSourceForZone( it.key() );
+    if ( !tsId.isEmpty() )
+      zone["thermalSourceId"] = tsId;
+    zonesArr.append( zone );
   }
-  obj["tablePump"] = pumpArr;
+
+  obj["zones"] = zonesArr;
 
   QJsonDocument doc(obj);
   QString json = doc.toJson(QJsonDocument::Compact);

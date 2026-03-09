@@ -18,12 +18,15 @@
 #include "hal/HwCapability.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <sstream>
+#include <vector>
 #include <syslog.h>
 
 namespace fs = std::filesystem;
@@ -57,6 +60,216 @@ std::string readFile( const std::string &path )
   std::string line;
   std::getline( file, line );
   return trim( line );
+}
+
+int parseFirstInt( const std::string &text )
+{
+  std::string digits;
+  for ( char c : text )
+  {
+    if ( std::isdigit( static_cast< unsigned char >( c ) ) )
+      digits.push_back( c );
+    else if ( !digits.empty() )
+      break;
+  }
+  if ( digits.empty() )
+    return 0;
+  try { return std::stoi( digits ); } catch ( ... ) { return 0; }
+}
+
+uint16_t readLe16( const std::vector< uint8_t > &buf, size_t off )
+{
+  if ( off + 1 >= buf.size() )
+    return 0;
+  return static_cast< uint16_t >(
+      static_cast< uint16_t >( buf[off] ) |
+      static_cast< uint16_t >( static_cast< uint16_t >( buf[off + 1] ) << 8 ) );
+}
+
+uint32_t readLe32( const std::vector< uint8_t > &buf, size_t off )
+{
+  if ( off + 3 >= buf.size() )
+    return 0;
+  return static_cast< uint32_t >( buf[off] ) |
+         ( static_cast< uint32_t >( buf[off + 1] ) << 8 ) |
+         ( static_cast< uint32_t >( buf[off + 2] ) << 16 ) |
+         ( static_cast< uint32_t >( buf[off + 3] ) << 24 );
+}
+
+std::string readSmbiosString( const uint8_t *strStart, size_t strLen, uint8_t index )
+{
+  if ( index == 0 || !strStart || strLen == 0 )
+    return {};
+
+  uint8_t currentIndex = 1;
+  size_t pos = 0;
+  while ( pos < strLen )
+  {
+    size_t len = 0;
+    while ( pos + len < strLen && strStart[pos + len] != 0 )
+      ++len;
+    if ( len == 0 )
+      break;
+    if ( currentIndex == index )
+      return trim( std::string( reinterpret_cast< const char * >( strStart + pos ), len ) );
+    pos += len + 1;
+    ++currentIndex;
+  }
+
+  return {};
+}
+
+std::string memoryTypeToString( uint8_t typeCode )
+{
+  switch ( typeCode )
+  {
+    case 0x12: return "DDR";
+    case 0x13: return "DDR2";
+    case 0x18: return "DDR3";
+    case 0x1A: return "DDR4";
+    case 0x22: return "DDR5";
+    default: return {};
+  }
+}
+
+std::vector< uint8_t > readBinaryFile( const std::string &path )
+{
+  std::ifstream in( path, std::ios::binary );
+  if ( !in.is_open() )
+    return {};
+
+  in.seekg( 0, std::ios::end );
+  const auto size = in.tellg();
+  if ( size <= 0 )
+    return {};
+  in.seekg( 0, std::ios::beg );
+
+  std::vector< uint8_t > data( static_cast< size_t >( size ) );
+  in.read( reinterpret_cast< char * >( data.data() ), static_cast< std::streamsize >( data.size() ) );
+  if ( !in )
+    return {};
+  return data;
+}
+
+int decodeSizeMiB( uint16_t sizeField, uint32_t extSizeField )
+{
+  if ( sizeField == 0 || sizeField == 0xFFFF )
+    return 0;
+
+  if ( sizeField == 0x7FFF )
+    return static_cast< int >( extSizeField );
+
+  if ( ( sizeField & 0x8000u ) != 0 )
+  {
+    // Bit 15 set -> units are KiB
+    const uint32_t kib = static_cast< uint32_t >( sizeField & 0x7FFFu );
+    return static_cast< int >( kib / 1024u );
+  }
+
+  return static_cast< int >( sizeField );
+}
+
+void detectMemorySummary( int &totalMiB, int &availableMiB, int &usedMiB )
+{
+  totalMiB = 0;
+  availableMiB = 0;
+  usedMiB = 0;
+
+  std::ifstream meminfo( "/proc/meminfo" );
+  if ( !meminfo.is_open() )
+    return;
+
+  long long totalKiB = 0;
+  long long availableKiB = 0;
+  std::string line;
+  while ( std::getline( meminfo, line ) )
+  {
+    if ( line.rfind( "MemTotal:", 0 ) == 0 )
+      totalKiB = parseFirstInt( line );
+    else if ( line.rfind( "MemAvailable:", 0 ) == 0 )
+      availableKiB = parseFirstInt( line );
+  }
+
+  if ( totalKiB <= 0 )
+    return;
+
+  if ( availableKiB < 0 )
+    availableKiB = 0;
+  if ( availableKiB > totalKiB )
+    availableKiB = totalKiB;
+
+  totalMiB = static_cast< int >( totalKiB / 1024 );
+  availableMiB = static_cast< int >( availableKiB / 1024 );
+  usedMiB = std::max( 0, totalMiB - availableMiB );
+}
+
+std::vector< MemoryModuleInfo > detectMemoryModulesFromSmbios()
+{
+  std::vector< MemoryModuleInfo > modules;
+
+  const auto dmi = readBinaryFile( "/sys/firmware/dmi/tables/DMI" );
+  if ( dmi.empty() )
+    return modules;
+
+  size_t off = 0;
+  while ( off + 4 <= dmi.size() )
+  {
+    const uint8_t type = dmi[off];
+    const uint8_t len = dmi[off + 1];
+    if ( len < 4 || off + len > dmi.size() )
+      break;
+
+    size_t strStart = off + len;
+    size_t end = strStart;
+    while ( end + 1 < dmi.size() )
+    {
+      if ( dmi[end] == 0 && dmi[end + 1] == 0 )
+      {
+        end += 2;
+        break;
+      }
+      ++end;
+    }
+
+    if ( end > dmi.size() )
+      break;
+
+    if ( type == 17 )
+    {
+      MemoryModuleInfo mod{};
+
+      const uint16_t sizeField = readLe16( dmi, off + 0x0C );
+      const uint32_t extSizeField = ( len >= 0x20 ) ? readLe32( dmi, off + 0x1C ) : 0;
+      mod.sizeMiB = decodeSizeMiB( sizeField, extSizeField );
+
+      if ( mod.sizeMiB > 0 )
+      {
+        const uint8_t locatorIndex = ( len > 0x10 ) ? dmi[off + 0x10] : 0;
+        const uint8_t bankIndex = ( len > 0x11 ) ? dmi[off + 0x11] : 0;
+        const uint8_t typeCode = ( len > 0x12 ) ? dmi[off + 0x12] : 0;
+
+        mod.locator = readSmbiosString( dmi.data() + strStart, end - strStart, locatorIndex );
+        mod.bankLocator = readSmbiosString( dmi.data() + strStart, end - strStart, bankIndex );
+        mod.type = memoryTypeToString( typeCode );
+
+        // SMBIOS 2.3+: Speed at offset 0x15
+        mod.maxSpeedMTs = ( len >= 0x17 ) ? static_cast< int >( readLe16( dmi, off + 0x15 ) ) : 0;
+        // SMBIOS 2.7+: Configured speed at offset 0x20
+        mod.configuredSpeedMTs = ( len >= 0x22 ) ? static_cast< int >( readLe16( dmi, off + 0x20 ) ) : 0;
+        if ( mod.configuredSpeedMTs <= 0 )
+          mod.configuredSpeedMTs = mod.maxSpeedMTs;
+
+        // SMBIOS 3.2+: Configured voltage at offset 0x26 (millivolts)
+        mod.configuredVoltageMv = ( len >= 0x28 ) ? static_cast< int >( readLe16( dmi, off + 0x26 ) ) : 0;
+
+        modules.push_back( mod );
+      }
+    }
+
+    off = end;
+  }
+
+  return modules;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,6 +600,44 @@ std::string manufacturerToString( LaptopManufacturer m )
   }
 }
 
+bool isGenericDmiValue( const std::string &value )
+{
+  if ( value.empty() )
+    return true;
+
+  std::string lower = value;
+  std::transform( lower.begin(), lower.end(), lower.begin(), ::tolower );
+
+  return lower == "to be filled by o.e.m." ||
+         lower == "to be filled by oem" ||
+         lower == "default string" ||
+         lower == "system product name" ||
+         lower == "system version" ||
+         lower == "not applicable" ||
+         lower == "n/a" ||
+         lower == "none" ||
+         lower == "unknown";
+}
+
+std::string prefixVendorIfNeeded( const std::string &vendor, const std::string &model )
+{
+  if ( model.empty() )
+    return {};
+
+  if ( vendor.empty() || isGenericDmiValue( vendor ) )
+    return model;
+
+  std::string v = vendor;
+  std::string m = model;
+  std::transform( v.begin(), v.end(), v.begin(), ::tolower );
+  std::transform( m.begin(), m.end(), m.begin(), ::tolower );
+
+  if ( m.rfind( v, 0 ) == 0 )
+    return model;
+
+  return vendor + " " + model;
+}
+
 /**
  * @brief Map UniwillDeviceID → human-readable laptop model including year
  *
@@ -463,7 +714,10 @@ static const std::map< UniwillDeviceID, DeviceInfo > deviceInfoMap =
  */
 std::string buildLaptopModel( std::optional< UniwillDeviceID > deviceId,
                               LaptopManufacturer manufacturer,
-                              const std::string &sysVendor )
+                              const std::string &sysVendor,
+                              const std::string &productName,
+                              const std::string &boardName,
+                              ucc::hal::ChassisType chassisType )
 {
   if ( deviceId.has_value() )
   {
@@ -481,18 +735,28 @@ std::string buildLaptopModel( std::optional< UniwillDeviceID > deviceId,
     }
   }
 
-  // Fallback: use raw DMI product_name
-  std::string productName = readFile( "/sys/class/dmi/id/product_name" );
-  if ( !productName.empty() )
+  // Platform-aware fallback for non-Uniwill systems:
+  //  - Desktop/server/all-in-one: prefer board model (e.g. "ProArt X870E-CREATOR WIFI")
+  //  - Laptop/convertible/tablet: prefer product_name
+  const bool preferBoard = chassisType == ucc::hal::ChassisType::Desktop ||
+                           chassisType == ucc::hal::ChassisType::Server ||
+                           chassisType == ucc::hal::ChassisType::AllInOne;
+
+  const bool productValid = !isGenericDmiValue( productName );
+  const bool boardValid = !isGenericDmiValue( boardName );
+
+  const std::string primary = preferBoard
+    ? ( boardValid ? boardName : ( productValid ? productName : std::string{} ) )
+    : ( productValid ? productName : ( boardValid ? boardName : std::string{} ) );
+
+  if ( !primary.empty() )
   {
     if ( manufacturer != LaptopManufacturer::Unknown )
-      return manufacturerToString( manufacturer ) + " " + productName;
-    if ( !sysVendor.empty() )
-      return sysVendor + " " + productName;
-    return productName;
+      return manufacturerToString( manufacturer ) + " " + primary;
+    return prefixVendorIfNeeded( sysVendor, primary );
   }
 
-  return "Unknown Laptop";
+  return "Unknown System";
 }
 
 // ---------------------------------------------------------------------------
@@ -538,7 +802,31 @@ std::string SystemInfo::toJSON() const
       << "\"boardVendor\":\"" << jsonEscapeValue( boardVendor ) << "\","
       << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\","
       << "\"productName\":\"" << jsonEscapeValue( productName ) << "\","
-      << "\"chassisType\":\"" << jsonEscapeValue( ucc::hal::chassisTypeToString( chassisType ) ) << "\""
+      << "\"chassisType\":\"" << jsonEscapeValue( ucc::hal::chassisTypeToString( chassisType ) ) << "\","
+      << "\"ramTotalMiB\":" << ramTotalMiB << ","
+      << "\"ramAvailableMiB\":" << ramAvailableMiB << ","
+      << "\"ramUsedMiB\":" << ramUsedMiB << ","
+      << "\"ramModules\":[";
+
+  for ( size_t i = 0; i < ramModules.size(); ++i )
+  {
+    const auto &m = ramModules[i];
+    if ( i > 0 ) oss << ",";
+    oss << "{"
+        << "\"locator\":\"" << jsonEscapeValue( m.locator ) << "\","
+        << "\"bankLocator\":\"" << jsonEscapeValue( m.bankLocator ) << "\","
+        << "\"type\":\"" << jsonEscapeValue( m.type ) << "\","
+        << "\"manufacturer\":\"" << jsonEscapeValue( m.manufacturer ) << "\","
+        << "\"partNumber\":\"" << jsonEscapeValue( m.partNumber ) << "\","
+        << "\"serialNumber\":\"" << jsonEscapeValue( m.serialNumber ) << "\","
+        << "\"sizeMiB\":" << m.sizeMiB << ","
+        << "\"configuredSpeedMTs\":" << m.configuredSpeedMTs << ","
+        << "\"maxSpeedMTs\":" << m.maxSpeedMTs << ","
+        << "\"configuredVoltageMv\":" << m.configuredVoltageMv
+        << "}";
+  }
+
+  oss << "]"
       << "}";
   return oss.str();
 }
@@ -574,6 +862,12 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
   info.cpuModel = detectCpuModel();
   syslog( LOG_INFO, "[SystemInfo] CPU: %s", info.cpuModel.c_str() );
 
+    // Memory summary and per-module inventory
+    detectMemorySummary( info.ramTotalMiB, info.ramAvailableMiB, info.ramUsedMiB );
+    info.ramModules = detectMemoryModulesFromSmbios();
+    syslog( LOG_INFO, "[SystemInfo] RAM: total=%d MiB used=%d MiB available=%d MiB modules=%zu",
+      info.ramTotalMiB, info.ramUsedMiB, info.ramAvailableMiB, info.ramModules.size() );
+
   // GPUs
   detectGpus( info.iGpuModel, info.dGpuModel );
   syslog( LOG_INFO, "[SystemInfo] iGPU: %s", info.iGpuModel.empty() ? "(none)" : info.iGpuModel.c_str() );
@@ -584,7 +878,12 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
   info.manufacturerName = manufacturerToString( info.manufacturer );
 
   // System model (renamed from laptopModel for generality)
-  info.systemModel = buildLaptopModel( deviceId, info.manufacturer, info.sysVendor );
+  info.systemModel = buildLaptopModel( deviceId,
+                                       info.manufacturer,
+                                       info.sysVendor,
+                                       info.productName,
+                                       info.boardName,
+                                       info.chassisType );
   info.laptopModel = info.systemModel; // backward compat alias
 
   syslog( LOG_INFO, "[SystemInfo] System: %s (manufacturer: %s, chassis: %s)",

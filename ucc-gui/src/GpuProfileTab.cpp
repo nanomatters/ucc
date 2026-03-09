@@ -146,28 +146,33 @@ void GpuProfileTab::setupUI()
   QGridLayout *infoLayout = new QGridLayout();
   infoLayout->setHorizontalSpacing( 18 );
   infoLayout->setVerticalSpacing( 4 );
-  QLabel *tempLabel = new QLabel( "Temperature" );
-  QLabel *powerLabel = new QLabel( "Power draw" );
-  QLabel *pstateLabel = new QLabel( "Current P-State" );
+  QLabel *tempLabel = new QLabel( "Temperature:" );
+  QLabel *freqLabel = new QLabel( "Core:" );
+  QLabel *powerLabel = new QLabel( "Power:" );
+  QLabel *pstateLabel = new QLabel( "P-State:" );
 
   m_gpuNameLabel = new QLabel( "—" );
   m_tempLabel = new QLabel( "—" );
+  m_coreFreqLabel = new QLabel( "—" );
   m_powerDrawLabel = new QLabel( "—" );
   m_currentPstateLabel = new QLabel( "—" );
   QFont valueFont = m_gpuNameLabel->font();
   valueFont.setBold( true );
   m_gpuNameLabel->setFont( valueFont );
   m_tempLabel->setFont( valueFont );
+  m_coreFreqLabel->setFont( valueFont );
   m_powerDrawLabel->setFont( valueFont );
   m_currentPstateLabel->setFont( valueFont );
 
   infoLayout->addWidget( m_gpuNameLabel, 0, 0 );
   infoLayout->addWidget( tempLabel, 0, 2 );
   infoLayout->addWidget( m_tempLabel, 0, 3 );
-  infoLayout->addWidget( powerLabel, 0, 4 );
-  infoLayout->addWidget( m_powerDrawLabel, 0, 5 );
-  infoLayout->addWidget( pstateLabel, 0, 6 );
-  infoLayout->addWidget( m_currentPstateLabel, 0, 7 );
+  infoLayout->addWidget( freqLabel, 0, 4 );
+  infoLayout->addWidget( m_coreFreqLabel, 0, 5 );
+  infoLayout->addWidget( powerLabel, 0, 6 );
+  infoLayout->addWidget( m_powerDrawLabel, 0, 7 );
+  infoLayout->addWidget( pstateLabel, 0, 8 );
+  infoLayout->addWidget( m_currentPstateLabel, 0, 9 );
   infoLayout->setColumnStretch( 1, 1 );
   infoSectionLayout->addLayout( infoLayout );
   contentLayout->addWidget( infoSection );
@@ -183,11 +188,11 @@ void GpuProfileTab::setupUI()
   powerLayout->setContentsMargins( 0, 0, 0, 0 );
   powerLayout->setSpacing( 8 );
 
-  QLabel *ctgpLabel = new QLabel( "cTGP" );
-  QFont ctgpFont = ctgpLabel->font();
+  m_powerLimitLabel = new QLabel( "Power Limit" );
+  QFont ctgpFont = m_powerLimitLabel->font();
   ctgpFont.setBold( true );
-  ctgpLabel->setFont( ctgpFont );
-  powerLayout->addWidget( ctgpLabel );
+  m_powerLimitLabel->setFont( ctgpFont );
+  powerLayout->addWidget( m_powerLimitLabel );
 
   m_powerLimitSlider = new QSlider( Qt::Horizontal );
   m_powerLimitSlider->setMinimum( 40 );
@@ -436,7 +441,14 @@ void GpuProfileTab::refreshOCState()
   m_gpuNameLabel->setText( state["gpuName"].toString( "Unknown" ) );
   refreshLiveMetrics();
 
-  // cTGP range (Profiles-page compatible semantics)
+  // Update power label: "cTGP" for Uniwill/Tuxedo laptops, "Power Limit" otherwise
+  if ( m_powerLimitLabel )
+  {
+    const bool isCTGP = m_uccdClient->getCTGPAdjustmentSupported().value_or( false );
+    m_powerLimitLabel->setText( isCTGP ? "cTGP" : "Power Limit" );
+  }
+
+  // Power range from NVML constraints
   m_powerMinW = state["powerMinW"].toDouble();
   m_powerMaxW = state["powerMaxW"].toDouble();
   m_powerDefaultW = state["powerDefaultW"].toDouble();
@@ -444,6 +456,12 @@ void GpuProfileTab::refreshOCState()
   int defaultPower = static_cast< int >( std::round( m_powerDefaultW ) );
   if ( auto v = m_uccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     defaultPower = *v;
+
+  int minPower = static_cast< int >( std::round( m_powerMinW ) );
+  if ( auto v = m_uccdClient->getNVIDIAPowerCTRLMinPowerLimit() )
+    minPower = *v;
+  if ( minPower <= 0 )
+    minPower = defaultPower;
 
   int maxPower = static_cast< int >( std::round( m_powerMaxW ) );
   if ( auto v = m_uccdClient->getNVIDIAPowerCTRLMaxPowerLimit() )
@@ -463,13 +481,14 @@ void GpuProfileTab::refreshOCState()
            << "powerMinW=" << m_powerMinW
            << "powerDefaultW(state)=" << m_powerDefaultW
            << "powerMaxW(state)=" << m_powerMaxW
+           << "minPower(iface)=" << minPower
            << "defaultPower(iface)=" << defaultPower
            << "maxPower(iface)=" << maxPower
            << "haveOffset=" << haveOffset
            << "offset(iface)=" << currentOffset
            << "powerLimitW(state)=" << currentPowerFromState;
 
-  if ( defaultPower > 0 && maxPower >= defaultPower )
+  if ( minPower > 0 && maxPower >= minPower )
   {
     int currentPower = defaultPower;
 
@@ -481,21 +500,22 @@ void GpuProfileTab::refreshOCState()
     else if ( haveOffset )
       currentPower = defaultPower + currentOffset;
 
-    currentPower = std::clamp( currentPower, defaultPower, maxPower );
+    currentPower = std::clamp( currentPower, minPower, maxPower );
 
     qDebug() << "[GPU-CTGP] refresh resolved"
-             << "sliderMin=" << defaultPower
+             << "sliderMin=" << minPower
              << "sliderMax=" << maxPower
              << "sliderValue=" << currentPower;
 
     m_powerLimitSlider->blockSignals( true );
-    m_powerLimitSlider->setMinimum( defaultPower );
+    m_powerLimitSlider->setMinimum( minPower );
     m_powerLimitSlider->setMaximum( maxPower );
     m_powerLimitSlider->setValue( currentPower );
     m_powerLimitSlider->blockSignals( false );
     m_powerLimitValue->setText( QString::number( currentPower ) + " W" );
 
     m_powerDefaultW = defaultPower;
+    m_powerMinW = minPower;
     m_powerMaxW = maxPower;
   }
 
@@ -594,6 +614,7 @@ void GpuProfileTab::refreshLiveMetrics()
     return;
 
   std::optional< int > tempC = m_uccdClient->getGpuTemperature();
+  std::optional< int > freqMHz = m_uccdClient->getGpuFrequency();
   std::optional< double > powerW = m_uccdClient->getGpuPower();
   std::optional< int > currentPstate = m_uccdClient->getDGpuCurrentPstate();
 
@@ -618,6 +639,9 @@ void GpuProfileTab::refreshLiveMetrics()
 
   if ( m_tempLabel )
     m_tempLabel->setText( tempC ? ( QString::number( *tempC ) + " °C" ) : QStringLiteral( "—" ) );
+
+  if ( m_coreFreqLabel )
+    m_coreFreqLabel->setText( freqMHz ? ( QString::number( *freqMHz ) + " MHz" ) : QStringLiteral( "—" ) );
 
   if ( m_powerDrawLabel )
     m_powerDrawLabel->setText( powerW ? ( QString::number( *powerW, 'f', 1 ) + " W" ) : QStringLiteral( "—" ) );
@@ -815,18 +839,27 @@ QString GpuProfileTab::buildProfileJSON() const
     root["vramLockedClocks"] = vramLocked;
   }
 
-  // cTGP profile payload (same field as Profiles page)
+  // Power limit — include both cTGP offset (for Uniwill/Tuxedo laptops with
+  // the sysfs interface) and the absolute NVML powerLimitW (for desktop GPUs
+  // that lack cTGP but support nvmlDeviceSetPowerManagementLimit).  The daemon
+  // will use whichever path is available.
   if ( m_powerLimitSlider )
   {
-    const int ctgpOffset = m_powerLimitSlider->value() - static_cast< int >( std::round( m_powerDefaultW ) );
+    const int sliderValue = m_powerLimitSlider->value();
+    const int ctgpOffset = sliderValue - static_cast< int >( std::round( m_powerDefaultW ) );
+
     QJsonObject nvidiaPowerObj;
     nvidiaPowerObj["cTGPOffset"] = ctgpOffset;
     root["nvidiaPowerCTRLProfile"] = nvidiaPowerObj;
 
+    // Also include NVML power limit for desktop GPUs without cTGP sysfs
+    root["powerLimitW"] = static_cast< double >( sliderValue );
+
     qDebug() << "[GPU-CTGP] buildProfileJSON"
-             << "sliderValueW=" << m_powerLimitSlider->value()
+             << "sliderValueW=" << sliderValue
              << "baselineDefaultW=" << m_powerDefaultW
-             << "ctgpOffset=" << ctgpOffset;
+             << "ctgpOffset=" << ctgpOffset
+             << "powerLimitW=" << sliderValue;
   }
 
   QJsonDocument doc( root );
@@ -925,6 +958,7 @@ void GpuProfileTab::loadProfile( const QString &json )
   }
 
   // Load cTGP offset profile data (preferred)
+  bool powerLoaded = false;
   if ( obj.contains( "nvidiaPowerCTRLProfile" ) && obj["nvidiaPowerCTRLProfile"].isObject() && m_powerLimitSlider )
   {
     QJsonObject gpuObj = obj["nvidiaPowerCTRLProfile"].toObject();
@@ -944,6 +978,21 @@ void GpuProfileTab::loadProfile( const QString &json )
     m_powerLimitValue->setText( QString::number( m_powerLimitSlider->value() ) + " W" );
 
     qDebug() << "[GPU-CTGP] loadProfile applied sliderW=" << m_powerLimitSlider->value();
+    powerLoaded = true;
+  }
+
+  // Desktop / generic NVIDIA path: absolute power limit in watts.
+  if ( !powerLoaded && obj.contains( "powerLimitW" ) && m_powerLimitSlider )
+  {
+    const int valueW = static_cast< int >( std::round( obj["powerLimitW"].toDouble( 0.0 ) ) );
+    if ( valueW > 0 )
+    {
+      m_powerLimitSlider->blockSignals( true );
+      m_powerLimitSlider->setValue( std::clamp( valueW, m_powerLimitSlider->minimum(), m_powerLimitSlider->maximum() ) );
+      m_powerLimitSlider->blockSignals( false );
+      m_powerLimitValue->setText( QString::number( m_powerLimitSlider->value() ) + " W" );
+      qDebug() << "[GPU-CTGP] loadProfile applied desktop powerLimitW=" << m_powerLimitSlider->value();
+    }
   }
 }
 

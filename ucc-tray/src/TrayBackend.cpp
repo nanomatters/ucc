@@ -292,8 +292,8 @@ void TrayBackend::setActiveProfile( const QString &profileId )
 void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
 {
   // Fetch the fan profile JSON and apply its curves to hardware.
-  // GetFanProfile returns keys "tableCPU"/"tableGPU"/"tablePump"/"tableWaterCoolerFan"
-  // but ApplyFanProfiles expects "cpu"/"gpu"/"pump"/"waterCoolerFan".
+  // GetFanProfile returns a zones array; ApplyFanProfiles accepts the same plus
+  // legacy keys "cpu"/"gpu"/"pump"/"waterCoolerFan" for compatibility.
   if ( auto json = m_client->getFanProfile( fanProfileId.toStdString() ) )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
@@ -301,10 +301,23 @@ void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
     {
       QJsonObject src = doc.object();
       QJsonObject dst;
-      if ( src.contains( "tableCPU" ) )         dst[ "cpu" ]            = src[ "tableCPU" ];
-      if ( src.contains( "tableGPU" ) )         dst[ "gpu" ]            = src[ "tableGPU" ];
-      if ( src.contains( "tablePump" ) )        dst[ "pump" ]           = src[ "tablePump" ];
-      if ( src.contains( "tableWaterCoolerFan" ) ) dst[ "waterCoolerFan" ] = src[ "tableWaterCoolerFan" ];
+
+      // Extract per-zone curves for the apply-format keys
+      if ( src.contains( "zones" ) && src["zones"].isArray() )
+      {
+        QJsonArray zones = src["zones"].toArray();
+        for ( const QJsonValue &zv : zones )
+        {
+          QJsonObject zone = zv.toObject();
+          QString id = zone["id"].toString();
+          if ( id == "zone-cpu" )  dst["cpu"]            = zone["curve"];
+          else if ( id == "zone-gpu" )  dst["gpu"]            = zone["curve"];
+          else if ( id == "wc-pump" )   dst["pump"]           = zone["curve"];
+          else if ( id == "wc-fan" )    dst["waterCoolerFan"] = zone["curve"];
+        }
+        dst["zones"] = src["zones"];
+      }
+
       dst[ "fanProfileId" ] = fanProfileId;
       const std::string applyJson =
         QJsonDocument( dst ).toJson( QJsonDocument::Compact ).toStdString();

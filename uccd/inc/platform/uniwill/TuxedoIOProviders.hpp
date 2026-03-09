@@ -89,6 +89,7 @@ public:
       fi.index = i;
       fi.canRead = true;
       fi.canControl = true;
+      fi.deviceType = FanDeviceType::Staged; // laptop WMI-controlled fans
       m_fans.push_back( std::move( fi ) );
     }
 

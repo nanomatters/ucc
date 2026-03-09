@@ -40,7 +40,7 @@
 #include "workers/FanControlWorker.hpp"
 #include "KeyboardBacklightController.hpp"
 #include "workers/ProfileSettingsWorker.hpp"
-#include "workers/LCTWaterCoolerWorker.hpp"
+#include "platform/uniwill/LCTWaterCoolerWorker.hpp"
 #include "workers/NvidiaOCWorker.hpp"
 #include "workers/AutoOCWorker.hpp"
 #include "workers/AutoUndervoltWorker.hpp"
@@ -152,6 +152,7 @@ public:
   std::atomic< bool > sensorDataCollectionStatus;
   std::atomic< bool > d0MetricsUsage;
   std::atomic< int32_t > nvidiaPowerCTRLDefaultPowerLimit;
+  std::atomic< int32_t > nvidiaPowerCTRLMinPowerLimit;
   std::atomic< int32_t > nvidiaPowerCTRLMaxPowerLimit;
   std::atomic< bool > nvidiaPowerCTRLAvailable;
   std::atomic< bool > waterCoolerAvailable;
@@ -208,6 +209,7 @@ public:
       sensorDataCollectionStatus( false ),
       d0MetricsUsage( false ),
       nvidiaPowerCTRLDefaultPowerLimit( 0 ),
+      nvidiaPowerCTRLMinPowerLimit( 0 ),
       nvidiaPowerCTRLMaxPowerLimit( 1000 ),
       nvidiaPowerCTRLAvailable( false ),
         waterCoolerAvailable( false ),
@@ -312,6 +314,10 @@ public slots:
   bool SaveProfile( const QString &profileJSON );  // Save/update any editable profile
   bool DeleteProfile( const QString &profileId );  // Delete an editable profile
 
+  // Hardware zone model
+  QString GetThermalSourcesJSON();                  // Available thermal sources from hardware
+  QString GetFanZonesJSON();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
+
   // Sub-profile CRUD — all include built-in (editable=false) + custom (editable=true)
   QString GetFanProfilesJSON();                    // Replaces GetFanProfileNames
   QString GetFanProfileJSON( const QString &id );  // Replaces GetFanProfile
@@ -387,6 +393,7 @@ public slots:
 
   // nvidia power control methods
   int GetNVIDIAPowerCTRLDefaultPowerLimit();
+  int GetNVIDIAPowerCTRLMinPowerLimit();
   int GetNVIDIAPowerCTRLMaxPowerLimit();
   bool GetNVIDIAPowerCTRLAvailable();
   int GetNVIDIAPowerOffset();

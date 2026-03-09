@@ -1,193 +1,193 @@
 /*
- * Unit tests for FanProfile – isValid(), getSpeedForTemp(), 
- * getWaterCoolerFanSpeedForTemp(), getPumpSpeedForTemp()
+ * Unit tests for FanProfile – isValid(), findZoneCurve(), getSpeedForZone(),
+ * interpolateCurve(), and zone lookup behavior.
  */
 
 #include <QTest>
 #include "profiles/FanProfile.hpp"
+
+using ucc::hal::FanCurvePoint;
+using ucc::hal::FanZoneCurve;
 
 class TestFanProfile : public QObject
 {
   Q_OBJECT
 
 private:
+  static FanZoneCurve makeCurve( const std::string &zoneId,
+                                 std::vector< FanCurvePoint > curve )
+  {
+    return FanZoneCurve( zoneId, std::move( curve ) );
+  }
+
   FanProfile makeSimple() const
   {
-    // CPU:  30°→20%  50°→40%  70°→60%  90°→100%
-    // GPU:  30°→25%  50°→45%  70°→65%  90°→100%
+    // CPU zone:  30°→20%  50°→40%  70°→60%  90°→100%
+    // GPU zone:  30°→25%  50°→45%  70°→65%  90°→100%
     return FanProfile(
       "test", "Test",
-      { { 30, 20 }, { 50, 40 }, { 70, 60 }, { 90, 100 } },
-      { { 30, 25 }, { 50, 45 }, { 70, 65 }, { 90, 100 } } );
+      {
+        makeCurve( "zone-cpu",
+          { {30,20}, {50,40}, {70,60}, {90,100} } ),
+        makeCurve( "zone-gpu",
+          { {30,25}, {50,45}, {70,65}, {90,100} } ),
+      } );
   }
 
 private slots:
 
   // ---- isValid() -------------------------------------------------------
 
-  void isValid_bothTables()
+  void isValid_withZones()
   {
     auto fp = makeSimple();
     QVERIFY( fp.isValid() );
   }
 
-  void isValid_emptyCPU()
-  {
-    FanProfile fp( "a", "A", {}, { { 30, 20 } } );
-    QVERIFY( !fp.isValid() );
-  }
-
-  void isValid_emptyGPU()
-  {
-    FanProfile fp( "a", "A", { { 30, 20 } }, {} );
-    QVERIFY( !fp.isValid() );
-  }
-
-  void isValid_bothEmpty()
+  void isValid_noZones()
   {
     FanProfile fp( "a", "A" );
     QVERIFY( !fp.isValid() );
   }
 
-  // ---- getSpeedForTemp() – CPU table -----------------------------------
+  // ---- findZoneCurve() ------------------------------------------------------
 
-  void speed_emptyTable()
+  void findZoneCurve_exists()
+  {
+    auto fp = makeSimple();
+    QVERIFY( fp.findZoneCurve( "zone-cpu" ) != nullptr );
+    QCOMPARE( fp.findZoneCurve( "zone-cpu" )->zoneId, std::string( "zone-cpu" ) );
+  }
+
+  void findZoneCurve_missing()
+  {
+    auto fp = makeSimple();
+    QVERIFY( fp.findZoneCurve( "zone-nonexistent" ) == nullptr );
+  }
+
+  // ---- getSpeedForZone() – CPU zone ------------------------------------
+
+  void speed_emptyProfile()
   {
     FanProfile fp;
-    QCOMPARE( fp.getSpeedForTemp( 50, true ), -1 );
+    QCOMPARE( fp.getSpeedForZone( 50, "zone-cpu" ), -1 );
+  }
+
+  void speed_missingZone()
+  {
+    auto fp = makeSimple();
+    QCOMPARE( fp.getSpeedForZone( 50, "zone-nonexistent" ), -1 );
   }
 
   void speed_belowFirst()
   {
     auto fp = makeSimple();
-    // 10° is below 30° → clamp to first entry speed (20%)
-    QCOMPARE( fp.getSpeedForTemp( 10, true ), 20 );
+    // 10° below 30° → clamp to first entry speed (20%)
+    QCOMPARE( fp.getSpeedForZone( 10, "zone-cpu" ), 20 );
   }
 
   void speed_exactFirst()
   {
     auto fp = makeSimple();
-    QCOMPARE( fp.getSpeedForTemp( 30, true ), 20 );
+    QCOMPARE( fp.getSpeedForZone( 30, "zone-cpu" ), 20 );
   }
 
   void speed_exactMid()
   {
     auto fp = makeSimple();
-    QCOMPARE( fp.getSpeedForTemp( 50, true ), 40 );
+    QCOMPARE( fp.getSpeedForZone( 50, "zone-cpu" ), 40 );
   }
 
   void speed_exactLast()
   {
     auto fp = makeSimple();
-    QCOMPARE( fp.getSpeedForTemp( 90, true ), 100 );
+    QCOMPARE( fp.getSpeedForZone( 90, "zone-cpu" ), 100 );
   }
 
   void speed_beyondLast()
   {
     auto fp = makeSimple();
     // 100° beyond 90° → last entry speed (100%)
-    QCOMPARE( fp.getSpeedForTemp( 100, true ), 100 );
+    QCOMPARE( fp.getSpeedForZone( 100, "zone-cpu" ), 100 );
   }
 
   void speed_interpolateMidpoint()
   {
     auto fp = makeSimple();
     // 40° is midpoint of 30°→20% and 50°→40%  → lerp = 30%
-    QCOMPARE( fp.getSpeedForTemp( 40, true ), 30 );
+    QCOMPARE( fp.getSpeedForZone( 40, "zone-cpu" ), 30 );
   }
 
   void speed_interpolateQuarter()
   {
     auto fp = makeSimple();
     // 35° = ¼ of [30,50], speed = 20 + 0.25*(40-20) = 25
-    QCOMPARE( fp.getSpeedForTemp( 35, true ), 25 );
+    QCOMPARE( fp.getSpeedForZone( 35, "zone-cpu" ), 25 );
   }
+
+  // ---- getSpeedForZone() – GPU zone ------------------------------------
 
   void speed_gpu()
   {
     auto fp = makeSimple();
-    QCOMPARE( fp.getSpeedForTemp( 50, false ), 45 );
+    QCOMPARE( fp.getSpeedForZone( 50, "zone-gpu" ), 45 );
   }
 
   void speed_gpuInterpolate()
   {
     auto fp = makeSimple();
     // 60° midpoint of 50°→45% and 70°→65%  → 55%
-    QCOMPARE( fp.getSpeedForTemp( 60, false ), 55 );
+    QCOMPARE( fp.getSpeedForZone( 60, "zone-gpu" ), 55 );
   }
 
-  // ---- getWaterCoolerFanSpeedForTemp() ---------------------------------
+  // ---- WC fan zone -----------------------------------------------------
 
-  void wcFan_fallbackToMaxCpuGpu()
+  void wcFan_ownCurve()
   {
     auto fp = makeSimple();
-    // No water cooler table → max(CPU, GPU) at 50°
-    // CPU=40, GPU=45 → 45
-    QCOMPARE( fp.getWaterCoolerFanSpeedForTemp( 50 ), 45 );
-  }
-
-  void wcFan_ownTable()
-  {
-    auto fp = makeSimple();
-    fp.tableWaterCoolerFan = { { 30, 10 }, { 70, 50 } };
-    // Use its own table – exact match
-    QCOMPARE( fp.getWaterCoolerFanSpeedForTemp( 30 ), 10 );
+    fp.zoneCurves.push_back( makeCurve( "wc-fan",
+      { {30,10}, {70,50} } ) );
+    QCOMPARE( fp.getSpeedForZone( 30, "wc-fan" ), 10 );
   }
 
   void wcFan_interpolate()
   {
     auto fp = makeSimple();
-    fp.tableWaterCoolerFan = { { 30, 10 }, { 70, 50 } };
+    fp.zoneCurves.push_back( makeCurve( "wc-fan",
+      { {30,10}, {70,50} } ) );
     // 50° → midpoint: 10 + 0.5*40 = 30
-    QCOMPARE( fp.getWaterCoolerFanSpeedForTemp( 50 ), 30 );
+    QCOMPARE( fp.getSpeedForZone( 50, "wc-fan" ), 30 );
   }
 
-  // ---- getPumpSpeedForTemp() – step-wise lookup ------------------------
+  // ---- WC pump zone (discrete voltage levels) --------------------------
 
-  void pump_emptyTable()
-  {
-    FanProfile fp;
-    QCOMPARE( fp.getPumpSpeedForTemp( 50 ), ucc::PumpVoltage::Off );
-  }
-
-  void pump_belowFirst()
+  void pump_lookup()
   {
     auto fp = makeSimple();
-    fp.tablePump = { { 40, 1 }, { 60, 2 }, { 80, 3 } };
-    // 30° < 40° → never entered loop body → Off
-    QCOMPARE( fp.getPumpSpeedForTemp( 30 ), ucc::PumpVoltage::Off );
-  }
-
-  void pump_exactFirst()
-  {
-    auto fp = makeSimple();
-    fp.tablePump = { { 40, 1 }, { 60, 2 }, { 80, 3 } };
-    // speed=1 → pumpSpeedToVoltage[1] = V7
-    QCOMPARE( fp.getPumpSpeedForTemp( 40 ), ucc::PumpVoltage::V7 );
-  }
-
-  void pump_midStep()
-  {
-    auto fp = makeSimple();
-    fp.tablePump = { { 40, 1 }, { 60, 2 }, { 80, 3 } };
-    // 50° >= 40° but < 60° → last match is 1 → V7
-    QCOMPARE( fp.getPumpSpeedForTemp( 50 ), ucc::PumpVoltage::V7 );
-  }
-
-  void pump_lastStep()
-  {
-    auto fp = makeSimple();
-    fp.tablePump = { { 40, 1 }, { 60, 2 }, { 80, 3 } };
-    // 80° matches all three entries; last match speed=3 → V11
-    QCOMPARE( fp.getPumpSpeedForTemp( 80 ), ucc::PumpVoltage::V11 );
+    fp.zoneCurves.push_back( makeCurve( "wc-pump",
+      { {40,1}, {60,2}, {80,3} } ) );
+    // interpolateCurve uses linear, so exact matches just return the speed value
+    QCOMPARE( fp.getSpeedForZone( 40, "wc-pump" ), 1 );
+    QCOMPARE( fp.getSpeedForZone( 60, "wc-pump" ), 2 );
+    QCOMPARE( fp.getSpeedForZone( 80, "wc-pump" ), 3 );
   }
 
   void pump_beyondLast()
   {
     auto fp = makeSimple();
-    fp.tablePump = { { 40, 1 }, { 60, 2 }, { 80, 3 } };
-    // 100° >= all → last match speed=3 → V11
-    QCOMPARE( fp.getPumpSpeedForTemp( 100 ), ucc::PumpVoltage::V11 );
+    fp.zoneCurves.push_back( makeCurve( "wc-pump",
+      { {40,1}, {60,2}, {80,3} } ) );
+    // 100° beyond 80° → clamp to last (3)
+    QCOMPARE( fp.getSpeedForZone( 100, "wc-pump" ), 3 );
+  }
+
+  void pump_belowFirst()
+  {
+    auto fp = makeSimple();
+    fp.zoneCurves.push_back( makeCurve( "wc-pump",
+      { {40,1}, {60,2}, {80,3} } ) );
+    // 30° below 40° → clamp to first (1)
+    QCOMPARE( fp.getSpeedForZone( 30, "wc-pump" ), 1 );
   }
 };
 

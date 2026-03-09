@@ -15,7 +15,7 @@
 
 #include "workers/ProfileSettingsWorker.hpp"
 #include "PowerSupplyController.hpp"
-#include <tuxedo_io_lib/tuxedo_io_api.hh>
+#include "hal/HardwareManager.hpp"
 
 // =====================================================================
 //  Public methods
@@ -37,13 +37,15 @@ std::vector< TDPInfo > ProfileSettingsWorker::getTDPInfo()
 {
   std::vector< TDPInfo > tdpInfo;
 
-  int nrTDPs = 0;
-
-  if ( not m_ioApi.getNumberTDPs( nrTDPs ) or nrTDPs <= 0 )
+  auto *platform = m_hw.tdpProvider();
+  if ( !platform )
     return tdpInfo;
 
-  std::vector< std::string > descriptors;
-  m_ioApi.getTDPDescriptors( descriptors );
+  const int nrTDPs = platform->getNumberTDPs();
+  if ( nrTDPs <= 0 )
+    return tdpInfo;
+
+  const auto descriptors = platform->getTDPDescriptors();
 
   for ( int i = 0; i < nrTDPs; ++i )
   {
@@ -55,9 +57,9 @@ std::vector< TDPInfo > ProfileSettingsWorker::getTDPInfo()
                         ? descriptors[ static_cast< size_t >( i ) ]
                         : "";
 
-    m_ioApi.getTDPMin( i, reinterpret_cast< int & >( info.min ) );
-    m_ioApi.getTDPMax( i, reinterpret_cast< int & >( info.max ) );
-    m_ioApi.getTDP( i, reinterpret_cast< int & >( info.current ) );
+    if ( auto v = platform->getTDPMin( i ) ) info.min = static_cast< uint32_t >( *v );
+    if ( auto v = platform->getTDPMax( i ) ) info.max = static_cast< uint32_t >( *v );
+    if ( auto v = platform->getTDP( i ) )    info.current = static_cast< uint32_t >( *v );
 
     tdpInfo.push_back( info );
   }
@@ -67,11 +69,15 @@ std::vector< TDPInfo > ProfileSettingsWorker::getTDPInfo()
 
 bool ProfileSettingsWorker::setTDPValues( const std::vector< uint32_t > &values )
 {
+  auto *platform = m_hw.tdpProvider();
+  if ( !platform )
+    return false;
+
   bool allSuccess = true;
 
   for ( size_t i = 0; i < values.size(); ++i )
   {
-    if ( not m_ioApi.setTDP( static_cast< int >( i ), static_cast< int >( values[ i ] ) ) )
+    if ( not platform->setTDP( static_cast< int >( i ), static_cast< int >( values[ i ] ) ) )
     {
       allSuccess = false;
     }

@@ -85,8 +85,8 @@ namespace ucc
     void onRemoveFanProfileClicked();
     void onCpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
     void onGpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
-    void onWaterCoolerFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
-    void onPumpPointsChanged(const QVector<PumpCurveEditorWidget::Point>& points);
+    void onFanCurveChanged(const QString &zoneId, const QVector<FanCurveEditorWidget::Point>& points);
+    void onPumpCurveChanged(const QString &zoneId, const QVector<PumpCurveEditorWidget::Point>& points);
     void onFanProfileChanged(const QString& fanProfileId);
     void onCopyFanProfileClicked();
 
@@ -193,12 +193,9 @@ namespace ucc
     QComboBox *m_profileChargeLimitCombo = nullptr;
 
     // Fan control widgets (profile page)
-    QCheckBox *m_sameFanSpeedCheckBox = nullptr;
     QCheckBox *m_autoWaterControlCheckBox = nullptr;
     QComboBox *m_profileFanProfileCombo = nullptr;
-    QVector<FanPoint> m_cpuFanPoints;
-    QVector<FanPoint> m_gpuFanPoints;
-    QVector<FanPoint> m_waterCoolerFanPoints;
+    QMap< QString, QVector< FanPoint > > m_fanZonePoints;   // zoneId → cached fan curve
 
     // Fan control tab (owns editors, combo, buttons, water cooler hw controls)
     FanControlTab *m_fanControlTab = nullptr;
@@ -253,6 +250,7 @@ namespace ucc
 
     // Device capability flags (queried from daemon at startup)
     bool m_waterCoolerSupported = false;
+    bool m_hasMultiplePowerStates = false;
     bool m_cTGPAdjustmentSupported = true;
     int m_gpuDefaultPowerLimit = 0;  // Default GPU power limit in watts, queried from daemon
 

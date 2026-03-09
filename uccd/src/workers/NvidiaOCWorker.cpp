@@ -14,6 +14,7 @@
  */
 
 #include "workers/NvidiaOCWorker.hpp"
+#include "platform/gpu/nvidia/NvidiaGpuPowerProvider.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -42,6 +43,16 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
   if ( !isAvailable() )
     return "{}";
 
+  if ( m_nvml->needsReset( deviceIndex ) )
+  {
+    QJsonObject root;
+    root["needsReset"] = true;
+    root["gpuName"] = "GPU requires reset";
+    log( "getOCStateJSON: GPU " + std::to_string( deviceIndex ) + " requires reset (reboot or nvidia-smi -r)" );
+    QJsonDocument doc( root );
+    return doc.toJson( QJsonDocument::Compact ).toStdString();
+  }
+
   auto stateOpt = m_nvml->getOCState( deviceIndex );
   if ( !stateOpt )
     return "{}";
@@ -58,6 +69,8 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
   root["powerMaxW"] = s.powerMaxW;
   root["offsetsSupported"] = s.offsetsSupported;
   root["lockedClocksSupported"] = s.lockedClocksSupported;
+  if ( s.resetRequired )
+    root["needsReset"] = true;
 
   // GPU clock range
   if ( s.gpuClockRange )
@@ -210,8 +223,8 @@ bool NvidiaOCWorker::setPowerLimit( unsigned int deviceIndex, double watts )
   if ( !isAvailable() )
     return false;
 
-  auto mw = static_cast< unsigned int >( watts * 1000.0 );
-  bool ok = m_nvml->setPowerLimit( deviceIndex, mw );
+  ucc::hal::NvidiaGpuPowerProvider powerProvider( m_nvml.get() );
+  bool ok = powerProvider.setLimitW( deviceIndex, watts );
   if ( ok )
     log( "Set GPU power limit: " + std::to_string( watts ) + " W" );
   return ok;
@@ -221,7 +234,9 @@ bool NvidiaOCWorker::resetPowerLimit( unsigned int deviceIndex )
 {
   if ( !isAvailable() )
     return false;
-  return m_nvml->resetPowerLimit( deviceIndex );
+
+  ucc::hal::NvidiaGpuPowerProvider powerProvider( m_nvml.get() );
+  return powerProvider.resetLimit( deviceIndex );
 }
 
 bool NvidiaOCWorker::applyGpuOCProfile( const std::string &profileJSON, unsigned int deviceIndex )
@@ -229,12 +244,27 @@ bool NvidiaOCWorker::applyGpuOCProfile( const std::string &profileJSON, unsigned
   if ( !isAvailable() || profileJSON.empty() || profileJSON == "{}" )
     return false;
 
+  if ( m_nvml->needsReset( deviceIndex ) )
+  {
+    log( "applyGpuOCProfile: GPU " + std::to_string( deviceIndex ) +
+         " requires reset — aborting profile application" );
+    return false;
+  }
+
   QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( profileJSON ) );
   if ( !doc.isObject() )
     return false;
 
   QJsonObject obj = doc.object();
   bool anyFailed = false;
+
+  // Reset existing OC state before applying new settings.
+  // This follows the same pattern as LACT: undo all offsets and locked
+  // clocks first, then layer the new configuration on cleanly.  Without
+  // this, conflicting settings (e.g. offsets + locked clocks applied on
+  // top of each other) can put Blackwell-and-later GPUs into an
+  // unrecoverable RESET_REQUIRED state.
+  resetAll( deviceIndex );
 
   auto applyOffsets = [this, deviceIndex, &anyFailed]( const QJsonArray &arr,
                                                         unsigned int clockType,
@@ -393,7 +423,8 @@ bool NvidiaOCWorker::resetAll( unsigned int deviceIndex )
   const auto state = m_nvml->getOCState( deviceIndex );
   const bool offsetsSupported = state.has_value() && state->offsetsSupported;
   const bool lockedClocksSupported = state.has_value() && state->lockedClocksSupported;
-  const bool powerLimitSupported = m_nvml->getPowerDefaultLimitW( deviceIndex ).has_value();
+  ucc::hal::NvidiaGpuPowerProvider powerProvider( m_nvml.get() );
+  const bool powerLimitSupported = powerProvider.isAvailable( deviceIndex );
 
   bool ok = true;
   if ( offsetsSupported )
@@ -422,7 +453,7 @@ bool NvidiaOCWorker::resetAll( unsigned int deviceIndex )
 
   if ( powerLimitSupported )
   {
-    if ( !m_nvml->resetPowerLimit( deviceIndex ) )
+    if ( !powerProvider.resetLimit( deviceIndex ) )
     {
       ok = false;
       log( "[GPU-RESET] Failed to reset power limit" );

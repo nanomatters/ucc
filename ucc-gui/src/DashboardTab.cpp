@@ -75,6 +75,7 @@ namespace ucc
 DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager, bool waterCoolerSupported,
                             const QString &laptopModel, const QString &cpuModel,
                             const QString &dGpuModel, const QString &iGpuModel,
+                            const QString &ramSummary, const QString &ramModules,
                             QWidget *parent )
   : QWidget( parent )
   , m_systemMonitor( systemMonitor )
@@ -84,6 +85,8 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   , m_cpuModel( cpuModel )
   , m_dGpuModel( dGpuModel )
   , m_iGpuModel( iGpuModel )
+  , m_ramSummary( ramSummary )
+  , m_ramModules( ramModules )
 {
   setupUI();
   connectSignals();
@@ -259,12 +262,49 @@ void DashboardTab::setupUI()
   cpuHeader->setAlignment( Qt::AlignCenter );
   layout->addWidget( cpuHeader );
 
-  layout->addWidget( makePanel({
+  // CPU panel with a DRAM details subsection under a dashed separator
+  QFrame *cpuPanel = new QFrame();
+  cpuPanel->setObjectName( "metricPanel" );
+  cpuPanel->setStyleSheet( QString("QFrame#metricPanel { border: 2px solid %1; border-radius: 6px; background: transparent; }"
+                                    "QWidget { background: transparent; }").arg( m_ringColorHex ) );
+  QVBoxLayout *cpuPanelLayout = new QVBoxLayout( cpuPanel );
+  cpuPanelLayout->setContentsMargins( 0, 0, 0, 0 );
+  cpuPanelLayout->setSpacing( 0 );
+
+  cpuPanelLayout->addWidget( makeCardRow({
     makeCard( "CPU - Temp",      "°C", m_cpuTempLabel ),
     makeCard( "CPU - Fan",       "%",  m_fanSpeedLabel ),
     makeCard( "CPU - Frequency", "GHz", m_cpuFrequencyLabel ),
     makeCard( "CPU - Power",     "W",  m_cpuPowerLabel )
   }) );
+
+  QFrame *ramSep = new QFrame();
+  ramSep->setFrameShape( QFrame::HLine );
+  ramSep->setFixedHeight( 2 );
+  ramSep->setStyleSheet( QString("QFrame { border: none; border-top: 2px dashed %1; background: transparent; margin: 0px 8px; }").arg(m_ringColorHex) );
+  cpuPanelLayout->addWidget( ramSep );
+
+  QWidget *ramInfo = new QWidget();
+  QVBoxLayout *ramInfoLayout = new QVBoxLayout( ramInfo );
+  ramInfoLayout->setContentsMargins( 12, 8, 12, 10 );
+  ramInfoLayout->setSpacing( 6 );
+
+  m_ramSummaryLabel = new QLabel( m_ramSummary.isEmpty() ? QStringLiteral( "DRAM summary unavailable" ) : m_ramSummary );
+  m_ramSummaryLabel->setStyleSheet( QString( "font-size: 14px; font-weight: bold; color: %1;" ).arg( textHex ) );
+  m_ramSummaryLabel->setAlignment( Qt::AlignCenter );
+  m_ramSummaryLabel->setWordWrap( false );
+  ramInfoLayout->addWidget( m_ramSummaryLabel );
+
+  m_ramModulesLabel = new QLabel( m_ramModules );
+  m_ramModulesLabel->setStyleSheet( QString( "font-size: 13px; color: %1;" ).arg( textHex ) );
+  m_ramModulesLabel->setAlignment( Qt::AlignCenter );
+  m_ramModulesLabel->setWordWrap( false );
+  m_ramModulesLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  m_ramModulesLabel->setVisible( !m_ramModules.isEmpty() );
+  ramInfoLayout->addWidget( m_ramModulesLabel );
+
+  cpuPanelLayout->addWidget( ramInfo );
+  layout->addWidget( cpuPanel );
 
   // GPU section — single section with toggle between dGPU and iGPU
   // Initial GPU header text: prefer dGPU model, fall back to iGPU model

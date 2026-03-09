@@ -19,12 +19,16 @@
 #include "hal/IFanProvider.hpp"
 #include "hal/ITempProvider.hpp"
 #include "hal/IPlatformProvider.hpp"
-#include "hal/HwmonFanProvider.hpp"
-#include "hal/HwmonTempProvider.hpp"
-#include "hal/TuxedoIOProviders.hpp"
+#include "hal/IProfileProvider.hpp"
+#include "hal/FanZone.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <syslog.h>
 #include <vector>
@@ -72,6 +76,11 @@ public:
     m_platformProviders.push_back( std::move( p ) );
   }
 
+  void addProfileProvider( std::unique_ptr< IProfileProvider > p )
+  {
+    m_profileProviders.push_back( std::move( p ) );
+  }
+
   // ---------------------------------------------------------------
   //  Detection — call once after all providers are registered
   // ---------------------------------------------------------------
@@ -105,8 +114,36 @@ public:
     if ( m_activeTempProviders.empty() )
       syslog( LOG_WARNING, "[HardwareManager] No temperature providers detected" );
 
-    // --- Platform providers ---
-    selectBest( m_platformProviders, m_activePlatformProvider, "platform" );
+    // --- Platform providers (accumulate ALL that detect, like temp) ---
+    m_activePlatformProviders.clear();
+    m_activePlatformProvider = nullptr;
+    {
+      // Sort by priority descending so the first detected is highest priority
+      std::sort( m_platformProviders.begin(), m_platformProviders.end(),
+                 []( const auto &a, const auto &b )
+                 { return a->priority() > b->priority(); } );
+
+      for ( auto &p : m_platformProviders )
+      {
+        if ( p->detect() )
+        {
+          syslog( LOG_INFO, "[HardwareManager] platform provider '%s' (priority %d) detected",
+                  p->name().c_str(), p->priority() );
+          m_activePlatformProviders.push_back( p.get() );
+          if ( !m_activePlatformProvider )
+            m_activePlatformProvider = p.get(); // highest priority (sorted first)
+        }
+      }
+
+      if ( m_activePlatformProviders.empty() )
+        syslog( LOG_INFO, "[HardwareManager] No platform provider detected" );
+      else
+        syslog( LOG_INFO, "[HardwareManager] %zu platform providers detected (primary: '%s')",
+                m_activePlatformProviders.size(), m_activePlatformProvider->name().c_str() );
+    }
+
+    // --- Profile providers ---
+    selectBest( m_profileProviders, m_activeProfileProvider, "profile" );
 
     // Build aggregated capabilities
     m_capabilities = buildCapabilities();
@@ -127,6 +164,13 @@ public:
 
     syslog( LOG_INFO, "[HardwareManager] %zu fans, %zu temperature sensors detected",
             m_fans.size(), m_tempSensors.size() );
+
+    // Auto-generate thermal sources and fan zones
+    buildDefaultThermalSources();
+    buildDefaultFanZones();
+
+    syslog( LOG_INFO, "[HardwareManager] %zu thermal sources, %zu fan zones generated",
+            m_thermalSources.size(), m_fanZones.size() );
   }
 
   // ---------------------------------------------------------------
@@ -143,9 +187,42 @@ public:
   /// All active temp providers
   const std::vector< ITempProvider * > &tempProviders() const noexcept { return m_activeTempProviders; }
 
-  /// Active platform provider (may be nullptr)
+  /// Primary (highest-priority) platform provider (may be nullptr).
+  /// Use this for OEM-specific features (ODM profiles, webcam, FnLock).
   IPlatformProvider *platformProvider() noexcept { return m_activePlatformProvider; }
   const IPlatformProvider *platformProvider() const noexcept { return m_activePlatformProvider; }
+
+  /// All detected platform providers, ordered by priority (highest first).
+  const std::vector< IPlatformProvider * > &platformProviders() const noexcept { return m_activePlatformProviders; }
+
+  /**
+   * @brief Find the best platform provider that supports TDP control.
+   *
+   * On laptops with an OEM driver (e.g. TuxedoIO), system-level TDP is
+   * preferred over CPU-only TDP.  On desktops without an OEM driver, a
+   * CPU-specific provider (RyzenAdj, RAPL) fills in.
+   *
+   * Returns the highest-priority detected provider whose
+   * getNumberTDPs() > 0, or nullptr if none.
+   */
+  IPlatformProvider *tdpProvider() noexcept
+  {
+    for ( auto *p : m_activePlatformProviders )
+      if ( p->getNumberTDPs() > 0 )
+        return p;
+    return nullptr;
+  }
+  const IPlatformProvider *tdpProvider() const noexcept
+  {
+    for ( auto *p : m_activePlatformProviders )
+      if ( p->getNumberTDPs() > 0 )
+        return p;
+    return nullptr;
+  }
+
+  /// Active profile provider (may be nullptr — should not happen if GenericProfileProvider is registered)
+  IProfileProvider *profileProvider() noexcept { return m_activeProfileProvider; }
+  const IProfileProvider *profileProvider() const noexcept { return m_activeProfileProvider; }
 
   /// All enumerated fans (from the active fan provider)
   const std::vector< FanInfo > &fans() const noexcept { return m_fans; }
@@ -161,6 +238,94 @@ public:
   bool hasTempMonitoring() const noexcept
   {
     return hasCapability( m_capabilities, HwCapability::TempMonitoring );
+  }
+
+  // ---------------------------------------------------------------
+  //  Thermal sources and fan zones
+  // ---------------------------------------------------------------
+
+  /// Auto-generated + custom thermal sources.
+  const std::vector< ThermalSource > &thermalSources() const noexcept { return m_thermalSources; }
+
+  /// Auto-generated default fan zones.
+  const std::vector< FanZone > &defaultFanZones() const noexcept { return m_fanZones; }
+
+  /// Find a thermal source by id.
+  const ThermalSource *findThermalSource( const std::string &id ) const noexcept
+  {
+    for ( const auto &ts : m_thermalSources )
+      if ( ts.id == id ) return &ts;
+    return nullptr;
+  }
+
+  /// Find a temp sensor by id (across all providers).
+  const TempSensorInfo *findTempSensor( const std::string &id ) const noexcept
+  {
+    for ( const auto &s : m_tempSensors )
+      if ( s.id == id ) return &s;
+    return nullptr;
+  }
+
+  /// Read the effective temperature of a ThermalSource (resolves strategy).
+  std::optional< double > readThermalSource( const ThermalSource &source ) const
+  {
+    if ( source.sensorIds.empty() )
+      return std::nullopt;
+
+    switch ( source.strategy )
+    {
+      case ThermalStrategy::Single:
+      {
+        auto *sensor = findTempSensor( source.sensorIds[0] );
+        if ( sensor )
+          return readTemp( *sensor );
+        return std::nullopt;
+      }
+
+      case ThermalStrategy::Max:
+      {
+        double maxTemp = -1000.0;
+        bool anyRead = false;
+        for ( const auto &sid : source.sensorIds )
+        {
+          auto *sensor = findTempSensor( sid );
+          if ( sensor )
+          {
+            auto val = readTemp( *sensor );
+            if ( val.has_value() )
+            {
+              maxTemp = std::max( maxTemp, val.value() );
+              anyRead = true;
+            }
+          }
+        }
+        return anyRead ? std::optional< double >( maxTemp ) : std::nullopt;
+      }
+
+      case ThermalStrategy::WeightedAvg:
+      {
+        double weightedSum = 0.0;
+        double weightTotal = 0.0;
+        for ( size_t i = 0; i < source.sensorIds.size(); ++i )
+        {
+          double w = ( i < source.weights.size() ) ? source.weights[i] : 1.0;
+          auto *sensor = findTempSensor( source.sensorIds[i] );
+          if ( sensor )
+          {
+            auto val = readTemp( *sensor );
+            if ( val.has_value() )
+            {
+              weightedSum += val.value() * w;
+              weightTotal += w;
+            }
+          }
+        }
+        if ( weightTotal > 0.0 )
+          return weightedSum / weightTotal;
+        return std::nullopt;
+      }
+    }
+    return std::nullopt;
   }
 
   // ---------------------------------------------------------------
@@ -298,6 +463,19 @@ private:
     return chassisTypeFromDmi( val );
   }
 
+  static bool hasBattery() noexcept
+  {
+    std::error_code ec;
+    for ( const auto &entry : std::filesystem::directory_iterator( "/sys/class/power_supply", ec ) )
+    {
+      if ( ec ) break;
+      const auto name = entry.path().filename().string();
+      if ( name.rfind( "BAT", 0 ) == 0 )
+        return true;
+    }
+    return false;
+  }
+
   template< typename ProviderPtr >
   void selectBest( std::vector< std::unique_ptr< ProviderPtr > > &providers,
                    ProviderPtr *&active,
@@ -348,25 +526,221 @@ private:
     if ( !m_activeTempProviders.empty() )
       caps |= HwCapability::TempMonitoring;
 
-    if ( m_activePlatformProvider )
-      caps |= m_activePlatformProvider->capabilities();
+    // Merge capabilities from ALL detected platform providers
+    for ( auto *p : m_activePlatformProviders )
+      caps |= p->capabilities();
+
+    // Detect battery → multiple power states (AC/BAT/WC profiles)
+    if ( hasBattery() )
+      caps |= HwCapability::MultiplePowerStates;
 
     return caps;
+  }
+
+  // ---------------------------------------------------------------
+  //  Default thermal-source / fan-zone builders
+  // ---------------------------------------------------------------
+
+  void buildDefaultThermalSources()
+  {
+    m_thermalSources.clear();
+
+    auto *cpuSensor = findCpuTempSensor();
+    auto *gpuSensor = findGpuTempSensor();
+
+    if ( cpuSensor )
+    {
+      m_thermalSources.push_back( ThermalSource{
+        .id = "cpu",
+        .label = "CPU Temperature",
+        .strategy = ThermalStrategy::Single,
+        .sensorIds = { cpuSensor->id },
+        .weights = {} } );
+    }
+
+    if ( gpuSensor )
+    {
+      m_thermalSources.push_back( ThermalSource{
+        .id = "gpu",
+        .label = "GPU Temperature",
+        .strategy = ThermalStrategy::Single,
+        .sensorIds = { gpuSensor->id },
+        .weights = {} } );
+    }
+
+    // Composite: hottest of CPU and GPU
+    if ( cpuSensor && gpuSensor )
+    {
+      m_thermalSources.push_back( ThermalSource{
+        .id = "hottest",
+        .label = "Hottest (CPU / GPU)",
+        .strategy = ThermalStrategy::Max,
+        .sensorIds = { cpuSensor->id, gpuSensor->id },
+        .weights = {} } );
+    }
+    else if ( cpuSensor )
+    {
+      // only cpu available; hottest == cpu but still create alias
+      m_thermalSources.push_back( ThermalSource{
+        .id = "hottest",
+        .label = "Hottest (CPU)",
+        .strategy = ThermalStrategy::Single,
+        .sensorIds = { cpuSensor->id },
+        .weights = {} } );
+    }
+
+    syslog( LOG_INFO, "[HardwareManager] Built %zu default thermal sources",
+            m_thermalSources.size() );
+  }
+
+  void buildDefaultFanZones()
+  {
+    m_fanZones.clear();
+
+    if ( m_fans.empty() )
+      return;
+
+    // Standard balanced curve used for most zones
+    static const std::vector< FanCurvePoint > balancedCurve = {
+      { 30, 25 }, { 45, 30 }, { 55, 40 }, { 65, 55 },
+      { 75, 70 }, { 80, 85 }, { 90, 100 }
+    };
+
+    // Quiet pump curve (pumps usually run at low speed unless hot)
+    static const std::vector< FanCurvePoint > pumpCurve = {
+      { 30, 30 }, { 50, 35 }, { 65, 45 }, { 75, 60 },
+      { 85, 80 }, { 90, 100 }
+    };
+
+    // ---- Staged laptop fans (tuxedo_io etc.) — one fan per zone, legacy-like ----
+
+    bool hasStaged = false;
+    int stagedIdx = 0;
+    for ( const auto &fan : m_fans )
+    {
+      if ( fan.deviceType == FanDeviceType::Staged )
+      {
+        hasStaged = true;
+        std::string zoneId = "zone-laptop-" + std::to_string( stagedIdx );
+        std::string thermalId = ( stagedIdx == 0 ) ? "cpu" : "gpu";
+        // Fall back to "hottest" if the preferred source doesn't exist
+        if ( !findThermalSource( thermalId ) )
+          thermalId = findThermalSource( "hottest" ) ? "hottest" : "";
+
+        m_fanZones.push_back( FanZone{
+          .id = zoneId,
+          .name = fan.label.empty() ? ( "Laptop Fan " + std::to_string( stagedIdx ) ) : fan.label,
+          .fanIds = { fan.id },
+          .thermalSourceId = thermalId,
+          .defaultType = FanDeviceType::Staged,
+          .curve = balancedCurve,
+          .hysteresisDeg = 3,
+          .enabled = true } );
+        ++stagedIdx;
+      }
+    }
+
+    if ( hasStaged )
+    {
+      syslog( LOG_INFO, "[HardwareManager] Built %zu laptop (Staged) fan zones",
+              m_fanZones.size() );
+      return; // Laptops with staged fans: all fans handled, no need for further grouping
+    }
+
+    // ---- Desktop / continuous-PWM fans — group by label classification ----
+
+    // Classification buckets: zoneId → list of fan IDs
+    std::map< std::string, std::vector< std::string > > buckets;
+
+    for ( const auto &fan : m_fans )
+    {
+      if ( fan.deviceType == FanDeviceType::Pump )
+      {
+        buckets["zone-pump"].push_back( fan.id );
+        continue;
+      }
+
+      // Classify by common hwmon labels
+      std::string lbl = fan.label;
+      std::transform( lbl.begin(), lbl.end(), lbl.begin(), ::tolower );
+
+      if ( lbl.find( "cpu" ) != std::string::npos )
+        buckets["zone-cpu"].push_back( fan.id );
+      else if ( lbl.find( "gpu" ) != std::string::npos )
+        buckets["zone-gpu"].push_back( fan.id );
+      else if ( lbl.find( "chassis" ) != std::string::npos ||
+                lbl.find( "case" ) != std::string::npos ||
+                lbl.find( "system" ) != std::string::npos ||
+                lbl.find( "sys" ) == 0 )
+        buckets["zone-case"].push_back( fan.id );
+      else
+        buckets["zone-misc"].push_back( fan.id );
+    }
+
+    // Zone metadata: { zoneId, name, thermalSourceId, defaultDeviceType, curve }
+    struct ZoneMeta
+    {
+      std::string name;
+      std::string thermalSourceId;
+      FanDeviceType deviceType;
+      const std::vector< FanCurvePoint > *curve;
+    };
+
+    const std::map< std::string, ZoneMeta > zoneMeta = {
+      { "zone-cpu",  { "CPU Fans",     "cpu",     FanDeviceType::Fan,  &balancedCurve } },
+      { "zone-gpu",  { "GPU Fans",     "gpu",     FanDeviceType::Fan,  &balancedCurve } },
+      { "zone-case", { "Case Fans",    "hottest", FanDeviceType::Fan,  &balancedCurve } },
+      { "zone-pump", { "Pump(s)",      "hottest", FanDeviceType::Pump, &pumpCurve     } },
+      { "zone-misc", { "Other Fans",   "hottest", FanDeviceType::Fan,  &balancedCurve } },
+    };
+
+    for ( auto &[zoneId, fanIds] : buckets )
+    {
+      auto it = zoneMeta.find( zoneId );
+      if ( it == zoneMeta.end() )
+        continue;
+
+      const auto &meta = it->second;
+      std::string tsId = meta.thermalSourceId;
+      if ( !findThermalSource( tsId ) )
+        tsId = findThermalSource( "hottest" ) ? "hottest"
+             : findThermalSource( "cpu" )     ? "cpu"
+                                              : "";
+
+      m_fanZones.push_back( FanZone{
+        .id = zoneId,
+        .name = meta.name,
+        .fanIds = std::move( fanIds ),
+        .thermalSourceId = tsId,
+        .defaultType = meta.deviceType,
+        .curve = *meta.curve,
+        .hysteresisDeg = 3,
+        .enabled = true } );
+    }
+
+    syslog( LOG_INFO, "[HardwareManager] Built %zu desktop fan zones", m_fanZones.size() );
   }
 
   // Registered providers (owned)
   std::vector< std::unique_ptr< IFanProvider > > m_fanProviders;
   std::vector< std::unique_ptr< ITempProvider > > m_tempProviders;
   std::vector< std::unique_ptr< IPlatformProvider > > m_platformProviders;
+  std::vector< std::unique_ptr< IProfileProvider > > m_profileProviders;
 
   // Active (selected) providers (raw pointers into owned vectors)
   IFanProvider *m_activeFanProvider = nullptr;
   std::vector< ITempProvider * > m_activeTempProviders;
-  IPlatformProvider *m_activePlatformProvider = nullptr;
+  std::vector< IPlatformProvider * > m_activePlatformProviders;
+  IPlatformProvider *m_activePlatformProvider = nullptr; // highest-priority (primary)
+  IProfileProvider *m_activeProfileProvider = nullptr;
 
   // Cached enumerations
   std::vector< FanInfo > m_fans;
   std::vector< TempSensorInfo > m_tempSensors;
+
+  // Zone model
+  std::vector< ThermalSource > m_thermalSources;
+  std::vector< FanZone > m_fanZones;
 
   // System info
   ChassisType m_chassisType = ChassisType::Unknown;
