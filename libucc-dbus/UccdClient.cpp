@@ -367,27 +367,27 @@ bool UccdClient::setBatchStateMap( const std::map< std::string, std::string > &e
   for ( const auto &[state, profileId] : entries )
     obj[QString::fromStdString( state )] = QString::fromStdString( profileId );
   QString json = QJsonDocument( obj ).toJson( QJsonDocument::Compact );
-  return callVoidMethod( "SetBatchStateMap", json );
+  return callMethod< bool, QString >( "SetBatchStateMap", json ).value_or( false );
 }
 
 bool UccdClient::setActiveProfile( const std::string &profileId )
 {
-  return callVoidMethod( "SetActiveProfile", QString::fromStdString( profileId ) );
+  return callMethod< bool, QString >( "SetActiveProfile", QString::fromStdString( profileId ) ).value_or( false );
 }
 
 bool UccdClient::applyProfile( const std::string &profileJSON )
 {
-  return callVoidMethod( "ApplyProfile", QString::fromStdString( profileJSON ) );
+  return callMethod< bool, QString >( "ApplyProfile", QString::fromStdString( profileJSON ) ).value_or( false );
 }
 
 bool UccdClient::saveProfile( const std::string &profileJSON )
 {
-  return callVoidMethod( "SaveProfile", QString::fromStdString( profileJSON ) );
+  return callMethod< bool, QString >( "SaveProfile", QString::fromStdString( profileJSON ) ).value_or( false );
 }
 
 bool UccdClient::deleteProfile( const std::string &profileId )
 {
-  return callVoidMethod( "DeleteProfile", QString::fromStdString( profileId ) );
+  return callMethod< bool, QString >( "DeleteProfile", QString::fromStdString( profileId ) ).value_or( false );
 }
 
 // Backward-compat aliases
@@ -442,13 +442,14 @@ std::optional< std::string > UccdClient::getFanProfileJSON( const std::string &f
 
 bool UccdClient::saveFanProfile( const std::string &id, const std::string &name, const std::string &json )
 {
-  return callVoidMethod( "SaveFanProfile", QString::fromStdString( id ),
-                         QString::fromStdString( name ), QString::fromStdString( json ) );
+  auto result = callMethod< bool >( "SaveFanProfile", QString::fromStdString( id ),
+                                    QString::fromStdString( name ), QString::fromStdString( json ) );
+  return result.value_or( false );
 }
 
 bool UccdClient::deleteFanProfile( const std::string &id )
 {
-  return callVoidMethod( "DeleteFanProfile", QString::fromStdString( id ) );
+  return callMethod< bool >( "DeleteFanProfile", QString::fromStdString( id ) ).value_or( false );
 }
 
 // Legacy aliases
@@ -485,13 +486,14 @@ std::optional< std::string > UccdClient::getGpuProfileJSON( const std::string &g
 
 bool UccdClient::saveGpuProfile( const std::string &id, const std::string &name, const std::string &json )
 {
-  return callVoidMethod( "SaveGpuProfile", QString::fromStdString( id ),
-                         QString::fromStdString( name ), QString::fromStdString( json ) );
+  auto result = callMethod< bool >( "SaveGpuProfile", QString::fromStdString( id ),
+                                    QString::fromStdString( name ), QString::fromStdString( json ) );
+  return result.value_or( false );
 }
 
 bool UccdClient::deleteGpuProfile( const std::string &id )
 {
-  return callVoidMethod( "DeleteGpuProfile", QString::fromStdString( id ) );
+  return callMethod< bool >( "DeleteGpuProfile", QString::fromStdString( id ) ).value_or( false );
 }
 
 // Legacy alias
@@ -520,13 +522,14 @@ std::optional< std::string > UccdClient::getKeyboardProfileJSON( const std::stri
 
 bool UccdClient::saveKeyboardProfile( const std::string &id, const std::string &name, const std::string &json )
 {
-  return callVoidMethod( "SaveKeyboardProfile", QString::fromStdString( id ),
-                         QString::fromStdString( name ), QString::fromStdString( json ) );
+  auto result = callMethod< bool >( "SaveKeyboardProfile", QString::fromStdString( id ),
+                                    QString::fromStdString( name ), QString::fromStdString( json ) );
+  return result.value_or( false );
 }
 
 bool UccdClient::deleteKeyboardProfile( const std::string &id )
 {
-  return callVoidMethod( "DeleteKeyboardProfile", QString::fromStdString( id ) );
+  return callMethod< bool >( "DeleteKeyboardProfile", QString::fromStdString( id ) ).value_or( false );
 }
 
 bool UccdClient::setDisplayBrightness( int brightness )
@@ -666,18 +669,6 @@ std::optional< std::vector< std::string > > UccdClient::getAvailableEPPs()
 std::optional< int > UccdClient::getCpuCoreCount()
 {
   return callMethod< int >( "GetCpuCoreCount" );
-}
-
-bool UccdClient::setFanProfileCPU( const std::string &pointsJSON )
-{
-  const QString js = QString::fromStdString( pointsJSON );
-  return callMethod< bool, QString >( "SetFanProfileCPU", js ).value_or( false );
-}
-
-bool UccdClient::setFanProfileDGPU( const std::string &pointsJSON )
-{
-  const QString js = QString::fromStdString( pointsJSON );
-  return callMethod< bool, QString >( "SetFanProfileDGPU", js ).value_or( false );
 }
 
 bool UccdClient::enableWaterCooler( bool enable )

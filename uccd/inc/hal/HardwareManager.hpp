@@ -726,8 +726,9 @@ private:
 
     // ---- Desktop / continuous-PWM fans — group by label classification ----
 
-    // Classification buckets: zoneId → list of fan IDs
+    // Classification buckets: zoneId -> list of fan IDs
     std::map< std::string, std::vector< std::string > > buckets;
+    size_t unclassifiedFanCount = 0;
 
     for ( const auto &fan : m_fans )
     {
@@ -751,7 +752,7 @@ private:
                 lbl.find( "sys" ) == 0 )
         buckets["zone-case"].push_back( fan.id );
       else
-        buckets["zone-misc"].push_back( fan.id );
+        ++unclassifiedFanCount;
     }
 
     // Zone metadata: { zoneId, name, thermalSourceId, defaultDeviceType, curve }
@@ -768,7 +769,6 @@ private:
       { "zone-gpu",  { "GPU Fans",     "gpu",     FanDeviceType::Fan,  &balancedCurve } },
       { "zone-case", { "Case Fans",    "hottest", FanDeviceType::Fan,  &balancedCurve } },
       { "zone-pump", { "Pump(s)",      "hottest", FanDeviceType::Pump, &pumpCurve     } },
-      { "zone-misc", { "Other Fans",   "hottest", FanDeviceType::Fan,  &balancedCurve } },
     };
 
     for ( auto &[zoneId, fanIds] : buckets )
@@ -795,7 +795,10 @@ private:
         .enabled = true } );
     }
 
-    syslog( LOG_INFO, "[HardwareManager] Built %zu desktop fan zones", m_fanZones.size() );
+        syslog( LOG_INFO,
+          "[HardwareManager] Built %zu desktop fan zones (%zu unclassified fans left unmanaged)",
+          m_fanZones.size(),
+          unclassifiedFanCount );
   }
 
   // Registered providers (owned)

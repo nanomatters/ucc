@@ -115,6 +115,10 @@ private:
   /** Install hover callout on every series in the given chart view. */
   void installHoverCallout( QChart *chart );
 
+  /** Show/hide the hover callout for a data point on a series. */
+  void showHoverCallout( QLineSeries *ls, QChart *chart,
+                         const QPointF &point, bool state );
+
   /** Decode the binary payload returned by GetMonitorDataSince and append to buffers. */
   void applyBinaryData( const QByteArray &data );
 

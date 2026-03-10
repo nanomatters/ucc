@@ -747,52 +747,8 @@ void MonitorTab::installHoverCallout( QChart *chart )
       continue;
 
     connect( ls, &QLineSeries::hovered,
-             this, [this, ls, chart]( const QPointF &point, bool state )
-    {
-      auto &co = m_callouts[ chart ];
-      if ( !state )
-      {
-        co.bg->hide();
-        co.text->hide();
-        return;
-      }
-
-      // Format the timestamp and value.
-      // _realScale is set on unified shadow series to invert the normalisation;
-      // _unit is set on all series for the physical unit suffix.
-      const QDateTime dt = QDateTime::fromMSecsSinceEpoch(
-                              static_cast< qint64 >( point.x() ) );
-      const QVariant rvProp = ls->property( "_realScale" );
-      const double realVal  = rvProp.isValid()
-                              ? point.y() * rvProp.toDouble()
-                              : point.y();
-      const QString unit    = ls->property( "_unit" ).toString();
-
-      const QString label = unit.isEmpty()
-          ? QStringLiteral( "%1\n%2: %3" )
-              .arg( dt.toString( "HH:mm:ss" ) )
-              .arg( ls->name() )
-              .arg( realVal, 0, 'f', 1 )
-          : QStringLiteral( "%1\n%2: %3 %4" )
-              .arg( dt.toString( "HH:mm:ss" ) )
-              .arg( ls->name() )
-              .arg( realVal, 0, 'f', 1 )
-              .arg( unit );
-
-      co.text->setText( label );
-
-      // Position near the data point (in scene coordinates)
-      const QPointF scenePos = chart->mapToPosition( point );
-      constexpr qreal pad = 4.0;
-      const QRectF textRect = co.text->boundingRect();
-      co.text->setPos( scenePos.x() + 10, scenePos.y() - textRect.height() - 6 );
-      co.bg->setRect( co.text->pos().x() - pad,
-                      co.text->pos().y() - pad,
-                      textRect.width() + 2 * pad,
-                      textRect.height() + 2 * pad );
-
-      co.bg->show();
-      co.text->show();
+             this, [this, ls, chart]( const QPointF &point, bool state ) {
+      showHoverCallout( ls, chart, point, state );
     } );
 
     // Sticky mark — click to pin/unpin a data-point label
@@ -802,6 +758,59 @@ void MonitorTab::installHoverCallout( QChart *chart )
       handleSeriesClick( ls, point );
     } );
   }
+}
+
+// ---------------------------------------------------------------------------
+// showHoverCallout — extracted body of the per-series hovered() callback
+// ---------------------------------------------------------------------------
+
+void MonitorTab::showHoverCallout( QLineSeries *ls, QChart *chart,
+                                   const QPointF &point, bool state )
+{
+  auto &co = m_callouts[ chart ];
+  if ( !state )
+  {
+    co.bg->hide();
+    co.text->hide();
+    return;
+  }
+
+  // Format the timestamp and value.
+  // _realScale is set on unified shadow series to invert the normalisation;
+  // _unit is set on all series for the physical unit suffix.
+  const QDateTime dt = QDateTime::fromMSecsSinceEpoch(
+                          static_cast< qint64 >( point.x() ) );
+  const QVariant rvProp = ls->property( "_realScale" );
+  const double realVal  = rvProp.isValid()
+                          ? point.y() * rvProp.toDouble()
+                          : point.y();
+  const QString unit    = ls->property( "_unit" ).toString();
+
+  const QString label = unit.isEmpty()
+      ? QStringLiteral( "%1\n%2: %3" )
+          .arg( dt.toString( "HH:mm:ss" ) )
+          .arg( ls->name() )
+          .arg( realVal, 0, 'f', 1 )
+      : QStringLiteral( "%1\n%2: %3 %4" )
+          .arg( dt.toString( "HH:mm:ss" ) )
+          .arg( ls->name() )
+          .arg( realVal, 0, 'f', 1 )
+          .arg( unit );
+
+  co.text->setText( label );
+
+  // Position near the data point (in scene coordinates)
+  const QPointF scenePos = chart->mapToPosition( point );
+  constexpr qreal pad = 4.0;
+  const QRectF textRect = co.text->boundingRect();
+  co.text->setPos( scenePos.x() + 10, scenePos.y() - textRect.height() - 6 );
+  co.bg->setRect( co.text->pos().x() - pad,
+                  co.text->pos().y() - pad,
+                  textRect.width() + 2 * pad,
+                  textRect.height() + 2 * pad );
+
+  co.bg->show();
+  co.text->show();
 }
 
 // ---------------------------------------------------------------------------

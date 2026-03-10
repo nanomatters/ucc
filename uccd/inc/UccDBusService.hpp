@@ -305,8 +305,6 @@ public slots:
   bool SetActiveProfile( const QString &id );
   bool ApplyProfile( const QString &profileJSON );
   QString GetProfilesJSON();                       // All profiles (built-in + custom) with "editable" flag
-  bool SetFanProfileCPU( const QString &pointsJSON );
-  bool SetFanProfileDGPU( const QString &pointsJSON );
   bool ApplyFanProfiles( const QString &fanProfilesJSON );
   bool RevertFanProfiles();
   QString GetCpuFrequencyLimitsJSON();
@@ -516,6 +514,11 @@ private:
 
   void resetDataCollectionTimeout();
   QVariantMap exportFanData( const FanData &fanData );
+  void onFpsPollTimeout();
+  void autoApplyGpuProfileForApp( const std::string &appName, pid_t clientPid );
+  void applyMappedGpuProfile( const std::string &appName, pid_t clientPid,
+                               const std::string &mappedGpuProfileId );
+  void restoreFallbackGpuProfile( const std::string &appName, pid_t clientPid );
 
   /**
    * @brief Check Polkit authorization for the current D-Bus caller.
@@ -700,6 +703,11 @@ private:
   void initializeDisplayModes();
   void serializeProfilesJSON();
   void applyProfileForCurrentState();
+  void applyFullProfile( const UccProfile &profile );
+  void onFanTemperatureUpdate( size_t fanIndex, int64_t timestamp, int temp );
+  void updateWaterCoolerAutoControl( int temp );
+  void onAutoUndervoltFinished( const UndervoltResult &result );
+  void persistAutoUndervoltProfile( const UndervoltResult &result );
   void applyFanAndPumpSettings( const UccProfile &profile );
   void applyGpuOCFromProfile( const UccProfile &profile );
   void applyKeyboardFromProfile( const UccProfile &profile );

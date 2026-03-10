@@ -124,7 +124,7 @@ namespace ucc
     void setupKeyboardBacklightPage();
     void connectKeyboardBacklightPageWidgets();
     void loadFanPoints();
-    void saveFanPoints();
+    bool saveFanPoints();
     void connectSignals();
     void populateGovernorCombo();
     void populateEppCombo();
@@ -144,6 +144,13 @@ namespace ucc
     void connectFanControlTab();
     void setupGpuProfileTab();
     void connectGpuProfileTab();
+    void onGpuProfilesChanged();
+    void onActiveGpuProfileChanged( const QString &gpId );
+    void onProfileFanProfileComboChanged( int index );
+    void onProfileKeyboardProfileComboChanged( int index );
+    void loadKeyboardTabState();
+    void syncKeyboardVisualizerFromHardware();
+    void autoLoadKeyboardProfileFromActiveProfile();
     void updateProfileEditingWidgets( bool isCustom );
     void updateFanCrosshairs();
 

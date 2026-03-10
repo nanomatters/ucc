@@ -15,7 +15,9 @@
 
 #pragma once
 
+#include <cstring>
 #include <string>
+#include <vector>
 #include <syslog.h>
 #include <QDBusConnection>
 #include <QDBusMessage>
@@ -59,9 +61,9 @@ public:
   {
     try
     {
-      // Retrieve the caller's PID via the bus daemon
       const QString sender = message.service();
 
+      // Retrieve the caller's PID
       QDBusMessage getPid = QDBusMessage::createMethodCall(
           "org.freedesktop.DBus",
           "/org/freedesktop/DBus",
@@ -78,71 +80,56 @@ public:
       }
       const uint callerPid = pidReply.value();
 
-      // Build the Polkit subject: ("unix-process", { "pid": uint32, "start-time": uint64 })
-      // start-time = 0 means "don't check" (Polkit falls back to /proc/<pid>)
-      QVariantMap subjectDetails;
-      subjectDetails["pid"] = QVariant::fromValue( callerPid );
-      subjectDetails["start-time"] = QVariant::fromValue( static_cast< quint64 >( 0 ) );
+      // Try standard polkit unix-process check first
+      if ( checkPolkitSubjectProcess( connection, callerPid, actionId ) )
+        return true;
 
-      // The Polkit CheckAuthorization call uses (sa{sv}) for the subject struct.
-      // We must build the struct using QDBusArgument.
-      QDBusMessage polkitCall = QDBusMessage::createMethodCall(
-          "org.freedesktop.PolicyKit1",
-          "/org/freedesktop/PolicyKit1/Authority",
-          "org.freedesktop.PolicyKit1.Authority",
-          "CheckAuthorization" );
+      // Polkit denied; retrieve the caller's UID for fallback checks.
+      QDBusMessage getUid = QDBusMessage::createMethodCall(
+          "org.freedesktop.DBus",
+          "/org/freedesktop/DBus",
+          "org.freedesktop.DBus",
+          "GetConnectionUnixUser" );
+      getUid << sender;
 
-      // Subject struct: (sa{sv})
-      QDBusArgument subject;
-      subject.beginStructure();
-      subject << QString( "unix-process" ) << subjectDetails;
-      subject.endStructure();
-
-      // Details: a{ss} (empty map of string→string)
-      QDBusArgument details;
-      details.beginMap( QMetaType::fromType< QString >(), QMetaType::fromType< QString >() );
-      details.endMap();
-
-      // flags: 0x1 = AllowUserInteraction (show password prompt if needed)
-      quint32 flags = 0x1;
-
-      // cancellation_id: empty string
-      QString cancellationId;
-
-      polkitCall << QVariant::fromValue( subject )
-                 << QString( actionId )
-                 << QVariant::fromValue( details )
-                 << flags
-                 << cancellationId;
-
-      QDBusMessage polkitReply = connection.call( polkitCall, QDBus::Block, 60000 );
-
-      if ( polkitReply.type() == QDBusMessage::ErrorMessage )
+      QDBusReply< uint > uidReply = connection.call( getUid );
+      if ( not uidReply.isValid() )
       {
-        syslog( LOG_WARNING, "PolkitAuthority: Polkit error for action '%s': %s",
-                actionId, polkitReply.errorMessage().toStdString().c_str() );
+        syslog( LOG_NOTICE, "PolkitAuthority: PID %u denied for action '%s' "
+                "(could not resolve UID)",
+                callerPid, actionId );
         return false;
       }
+      const uint callerUid = uidReply.value();
 
-      // The reply is a struct (bba{ss}): (is_authorized, is_challenge, details)
-      const QVariant argVariant = polkitReply.arguments().value( 0 );
-      const QDBusArgument resultArg = argVariant.value< QDBusArgument >();
-
-      bool isAuthorized = false;
-      bool isChallenge = false;
-      QMap< QString, QString > resultDetails;
-
-      resultArg.beginStructure();
-      resultArg >> isAuthorized >> isChallenge >> resultDetails;
-      resultArg.endStructure();
-
-      if ( not isAuthorized )
+      // Fallback: try polkit with the user's active session as subject.
+      const QString activeSession = findActiveSessionForUid( connection, callerUid );
+      if ( !activeSession.isEmpty() &&
+           checkPolkitSubjectSession( connection, activeSession, actionId ) )
       {
-        syslog( LOG_NOTICE, "PolkitAuthority: PID %u denied for action '%s'",
-                callerPid, actionId );
+        syslog( LOG_NOTICE, "PolkitAuthority: PID %u authorized via active session '%s'",
+                callerPid, activeSession.toStdString().c_str() );
+        return true;
       }
 
-      return isAuthorized;
+      // Last resort for non-dangerous actions (ACTION_READ / ACTION_CONTROL):
+      // Polkit's allow_active=yes means "allow local users without a password".
+      // If the process is in a non-active logind session (e.g. IDE terminal)
+      // polkit wrongly denies it even though the user IS at the machine.
+      // Treat "UID has any session on a physical seat" as equivalent.
+      if ( ( std::strcmp( actionId, ACTION_READ ) == 0
+             || std::strcmp( actionId, ACTION_CONTROL ) == 0 )
+           && hasSessionOnSeat( connection, callerUid ) )
+      {
+        syslog( LOG_NOTICE, "PolkitAuthority: PID %u (uid %u) authorized for '%s' "
+                "(local seat user fallback)",
+                callerPid, callerUid, actionId );
+        return true;
+      }
+
+      syslog( LOG_NOTICE, "PolkitAuthority: PID %u (uid %u) denied for action '%s'",
+              callerPid, callerUid, actionId );
+      return false;
     }
     catch ( const std::exception &e )
     {
@@ -154,5 +141,165 @@ public:
       syslog( LOG_ERR, "PolkitAuthority: Unknown exception during auth check" );
       return false;
     }
+  }
+
+private:
+  /// Call polkit CheckAuthorization with a unix-process subject.
+  static bool checkPolkitSubjectProcess( const QDBusConnection &connection,
+                                         uint pid,
+                                         const char *actionId ) noexcept
+  {
+    QVariantMap subjectDetails;
+    subjectDetails["pid"] = QVariant::fromValue( pid );
+    subjectDetails["start-time"] = QVariant::fromValue( static_cast< quint64 >( 0 ) );
+
+    QDBusArgument subject;
+    subject.beginStructure();
+    subject << QString( "unix-process" ) << subjectDetails;
+    subject.endStructure();
+
+    return invokePolkitCheck( connection, subject, actionId );
+  }
+
+  /// Call polkit CheckAuthorization with a unix-session subject.
+  static bool checkPolkitSubjectSession( const QDBusConnection &connection,
+                                         const QString &sessionId,
+                                         const char *actionId ) noexcept
+  {
+    QVariantMap subjectDetails;
+    subjectDetails["session-id"] = sessionId;
+
+    QDBusArgument subject;
+    subject.beginStructure();
+    subject << QString( "unix-session" ) << subjectDetails;
+    subject.endStructure();
+
+    return invokePolkitCheck( connection, subject, actionId );
+  }
+
+  /// Invoke polkit CheckAuthorization with an already-built subject.
+  static bool invokePolkitCheck( const QDBusConnection &connection,
+                                 const QDBusArgument &subject,
+                                 const char *actionId ) noexcept
+  {
+    QDBusMessage polkitCall = QDBusMessage::createMethodCall(
+        "org.freedesktop.PolicyKit1",
+        "/org/freedesktop/PolicyKit1/Authority",
+        "org.freedesktop.PolicyKit1.Authority",
+        "CheckAuthorization" );
+
+    QDBusArgument details;
+    details.beginMap( QMetaType::fromType< QString >(), QMetaType::fromType< QString >() );
+    details.endMap();
+
+    quint32 flags = 0x1; // AllowUserInteraction
+    QString cancellationId;
+
+    polkitCall << QVariant::fromValue( subject )
+               << QString( actionId )
+               << QVariant::fromValue( details )
+               << flags
+               << cancellationId;
+
+    QDBusMessage polkitReply = connection.call( polkitCall, QDBus::Block, 60000 );
+
+    if ( polkitReply.type() == QDBusMessage::ErrorMessage )
+      return false;
+
+    const QVariant argVariant = polkitReply.arguments().value( 0 );
+    const QDBusArgument resultArg = argVariant.value< QDBusArgument >();
+
+    bool isAuthorized = false;
+    bool isChallenge = false;
+    QMap< QString, QString > resultDetails;
+
+    resultArg.beginStructure();
+    resultArg >> isAuthorized >> isChallenge >> resultDetails;
+    resultArg.endStructure();
+
+    return isAuthorized;
+  }
+
+  /// Query logind over D-Bus to find an active session owned by the given UID.
+  static QString findActiveSessionForUid( const QDBusConnection &connection,
+                                          uint uid ) noexcept
+  {
+    const auto sessions = listSessionsForUid( connection, uid );
+    for ( const auto &[sessionId, seatId, objectPath] : sessions )
+    {
+      if ( seatId.isEmpty() )
+        continue;
+
+      QDBusMessage propMsg = QDBusMessage::createMethodCall(
+          "org.freedesktop.login1",
+          objectPath,
+          "org.freedesktop.DBus.Properties",
+          "Get" );
+      propMsg << QStringLiteral( "org.freedesktop.login1.Session" )
+              << QStringLiteral( "Active" );
+
+      QDBusReply< QVariant > propReply = connection.call( propMsg, QDBus::Block, 2000 );
+      if ( propReply.isValid() && propReply.value().toBool() )
+        return sessionId;
+    }
+    return {};
+  }
+
+  /// Check whether the given UID owns any logind session on a physical seat.
+  static bool hasSessionOnSeat( const QDBusConnection &connection,
+                                uint uid ) noexcept
+  {
+    const auto sessions = listSessionsForUid( connection, uid );
+    for ( const auto &[sessionId, seatId, objectPath] : sessions )
+    {
+      Q_UNUSED( sessionId )
+      Q_UNUSED( objectPath )
+      if ( !seatId.isEmpty() )
+        return true;
+    }
+    return false;
+  }
+
+  struct SessionInfo
+  {
+    QString sessionId;
+    QString seatId;
+    QString objectPath;
+  };
+
+  /// List all logind sessions for a given UID.
+  static std::vector< SessionInfo > listSessionsForUid( const QDBusConnection &connection,
+                                                         uint uid ) noexcept
+  {
+    std::vector< SessionInfo > result;
+
+    QDBusMessage listMsg = QDBusMessage::createMethodCall(
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+        "ListSessions" );
+
+    QDBusMessage reply = connection.call( listMsg, QDBus::Block, 5000 );
+    if ( reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty() )
+      return result;
+
+    const QDBusArgument arg = reply.arguments().at( 0 ).value< QDBusArgument >();
+    arg.beginArray();
+    while ( !arg.atEnd() )
+    {
+      arg.beginStructure();
+      QString sessionId;
+      uint sessionUid = 0;
+      QString userName, seatId;
+      QDBusObjectPath objectPath;
+      arg >> sessionId >> sessionUid >> userName >> seatId >> objectPath;
+      arg.endStructure();
+
+      if ( sessionUid == uid )
+        result.push_back( { sessionId, seatId, objectPath.path() } );
+    }
+    arg.endArray();
+
+    return result;
   }
 };

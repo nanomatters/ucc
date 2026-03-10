@@ -118,8 +118,6 @@ public:
   std::optional< int > getCpuCoreCount();
 
   // Fan Control
-  bool setFanProfileCPU( const std::string &pointsJSON );
-  bool setFanProfileDGPU( const std::string &pointsJSON );
   bool applyFanProfiles( const std::string &fanProfilesJSON );
   bool revertFanProfiles();
   std::optional< std::string > getCurrentFanSpeed();

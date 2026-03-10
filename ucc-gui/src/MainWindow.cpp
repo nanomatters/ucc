@@ -357,36 +357,37 @@ void MainWindow::connectGpuProfileTab()
 
   // When custom GPU profiles change in ProfileManager, refresh the combos
   connect( m_profileManager.get(), &ProfileManager::gpuProfilesChanged,
-           this, [this]() {
-    if ( m_gpuProfileTab )
-      m_gpuProfileTab->reloadGpuProfiles();
-
-    // Also update the profile page combo
-    if ( m_profileGpuProfileCombo )
-    {
-      QString prevId = m_profileGpuProfileCombo->currentData().toString();
-      m_profileGpuProfileCombo->blockSignals( true );
-      m_profileGpuProfileCombo->clear();
-      m_profileGpuProfileCombo->addItem( "(None)", QString() );
-      for ( const auto &v : m_profileManager->gpuProfilesData() )
-      {
-        if ( v.isObject() )
-        {
-          QJsonObject o = v.toObject();
-          m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
-        }
-      }
-      // Restore selection
-      for ( int i = 0; i < m_profileGpuProfileCombo->count(); ++i )
-      {
-        if ( m_profileGpuProfileCombo->itemData( i ).toString() == prevId )
-        { m_profileGpuProfileCombo->setCurrentIndex( i ); break; }
-      }
-      m_profileGpuProfileCombo->blockSignals( false );
-    }
-  } );
+           this, &MainWindow::onGpuProfilesChanged );
 }
 
+void MainWindow::onGpuProfilesChanged()
+{
+  if ( m_gpuProfileTab )
+    m_gpuProfileTab->reloadGpuProfiles();
+
+  if ( !m_profileGpuProfileCombo )
+    return;
+
+  QString prevId = m_profileGpuProfileCombo->currentData().toString();
+  m_profileGpuProfileCombo->blockSignals( true );
+  m_profileGpuProfileCombo->clear();
+  m_profileGpuProfileCombo->addItem( "(None)", QString() );
+  for ( const auto &v : m_profileManager->gpuProfilesData() )
+  {
+    if ( v.isObject() )
+    {
+      QJsonObject o = v.toObject();
+      m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+    }
+  }
+  // Restore selection
+  for ( int i = 0; i < m_profileGpuProfileCombo->count(); ++i )
+  {
+    if ( m_profileGpuProfileCombo->itemData( i ).toString() == prevId )
+    { m_profileGpuProfileCombo->setCurrentIndex( i ); break; }
+  }
+  m_profileGpuProfileCombo->blockSignals( false );
+}
 
 
 void MainWindow::setupProfilesPage()
@@ -911,28 +912,7 @@ void MainWindow::connectSignals()
     updateFanEditorFromProfile( fpId );
   } );
   connect( m_profileManager.get(), &ProfileManager::activeGpuProfileChanged,
-           this, [this]( const QString &gpId ) {
-    if ( m_initializing || gpId.isEmpty() )
-      return;
-
-    if ( m_gpuProfileTab && m_gpuProfileTab->gpuProfileCombo() )
-    {
-      auto *combo = m_gpuProfileTab->gpuProfileCombo();
-      if ( int idx = combo->findData( gpId ); idx >= 0 && combo->currentIndex() != idx )
-        combo->setCurrentIndex( idx );
-    }
-
-    if ( m_profileGpuProfileCombo )
-    {
-      if ( int idx = m_profileGpuProfileCombo->findData( gpId ); idx >= 0
-           && m_profileGpuProfileCombo->currentIndex() != idx )
-      {
-        m_profileGpuProfileCombo->setCurrentIndex( idx );
-      }
-    }
-
-    onGpuProfileChanged( gpId );
-  } );
+           this, &MainWindow::onActiveGpuProfileChanged );
 
   connect( m_profileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, &MainWindow::onProfileIndexChanged );
@@ -1051,15 +1031,7 @@ void MainWindow::connectSignals()
            this, [this]() { markChanged(); } );
 
   connect( m_profileFanProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
-           this, [this](int index) {
-             markChanged();
-             // Update fan profile tab to match profile tab selection
-             m_fanControlTab->fanProfileCombo()->blockSignals(true);
-             m_fanControlTab->fanProfileCombo()->setCurrentIndex(index);
-             m_fanControlTab->fanProfileCombo()->blockSignals(false);
-             // Load the fan curves for the new profile
-             onFanProfileChanged(m_profileFanProfileCombo->currentData().toString());
-           } );
+           this, &MainWindow::onProfileFanProfileComboChanged );
 
   if ( m_autoWaterControlCheckBox )
   {
@@ -1105,19 +1077,7 @@ void MainWindow::connectSignals()
              this, [this]() { markChanged(); } );
 
   connect( m_profileKeyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
-           this, [this](int index) {
-             markChanged();
-             // Sync the keyboard tab combo and apply to hardware immediately
-             m_keyboardProfileCombo->blockSignals(true);
-             m_keyboardProfileCombo->setCurrentIndex(index);
-             m_keyboardProfileCombo->blockSignals(false);
-
-             // Apply keyb profile to hardware right away so the user
-             // sees the color change without needing to click Apply.
-             QString kbId = m_profileKeyboardProfileCombo->currentData().toString();
-             if ( !kbId.isEmpty() )
-               onKeyboardProfileChanged( kbId );
-           } );
+           this, &MainWindow::onProfileKeyboardProfileComboChanged );
 
   if ( m_profileChargingProfileCombo )
   {
@@ -1331,78 +1291,136 @@ void MainWindow::onTabChanged( int index )
 
   // Load current keyboard backlight states when keyboard tab is activated.
   if ( index == keyboardTabIndex )
+    loadKeyboardTabState();
+}
+
+void MainWindow::loadKeyboardTabState()
+{
+  syncKeyboardVisualizerFromHardware();
+  reloadKeyboardProfiles();
+  autoLoadKeyboardProfileFromActiveProfile();
+}
+
+void MainWindow::syncKeyboardVisualizerFromHardware()
+{
+  if ( !m_keyboardVisualizer )
+    return;
+
+  auto states = m_UccdClient->getKeyboardBacklightStates();
+  if ( !states )
+    return;
+
+  // Block visualizer signals to prevent hardware write during state refresh
+  m_keyboardVisualizer->blockSignals( true );
+  m_keyboardVisualizer->loadCurrentStates( *states );
+
+  // Read brightness from hardware states and sync slider
+  QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
+  if ( statesDoc.isArray() && !statesDoc.array().isEmpty() )
   {
-    if ( m_keyboardVisualizer )
+    int hwBrightness = statesDoc.array()[0].toObject()["brightness"].toInt( -1 );
+    qDebug() << "[KBD TAB] hw brightness:" << hwBrightness
+             << "slider current:" << m_keyboardBrightnessSlider->value()
+             << "slider max:" << m_keyboardBrightnessSlider->maximum();
+    if ( hwBrightness >= 0 && m_keyboardBrightnessSlider )
     {
-      if ( auto states = m_UccdClient->getKeyboardBacklightStates() )
-      {
-        // Block visualizer signals to prevent hardware write during state refresh
-        m_keyboardVisualizer->blockSignals( true );
-        m_keyboardVisualizer->loadCurrentStates( *states );
-
-        // Read brightness from hardware states and sync slider
-        if ( QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
-             statesDoc.isArray() && !statesDoc.array().isEmpty() )
-        {
-          int hwBrightness = statesDoc.array()[0].toObject()["brightness"].toInt( -1 );
-          qDebug() << "[KBD TAB] hw brightness:" << hwBrightness
-                   << "slider current:" << m_keyboardBrightnessSlider->value()
-                   << "slider max:" << m_keyboardBrightnessSlider->maximum();
-          if ( hwBrightness >= 0 && m_keyboardBrightnessSlider )
-          {
-            m_keyboardBrightnessSlider->blockSignals( true );
-            m_keyboardBrightnessSlider->setValue( hwBrightness );
-            m_keyboardBrightnessSlider->blockSignals( false );
-            m_keyboardBrightnessValueLabel->setText( QString::number( hwBrightness ) );
-          }
-        }
-
-        // ALWAYS override per-zone brightness with slider value to guarantee sync
-        m_keyboardVisualizer->setGlobalBrightness( m_keyboardBrightnessSlider->value() );
-        m_keyboardVisualizer->blockSignals( false );
-      }
-    }
-
-    // Reload keyboard profiles
-    reloadKeyboardProfiles();
-
-    // Auto-load the keyboard profile from the active profile's settings
-    if ( QString activeProfileId = m_profileManager->activeProfileId(); !activeProfileId.isEmpty() )
-    {
-      if ( QString profileJson = m_profileManager->getProfileDetails( activeProfileId );
-           !profileJson.isEmpty() )
-      {
-        if ( QJsonDocument doc = QJsonDocument::fromJson( profileJson.toUtf8() ); doc.isObject() )
-        {
-          QJsonObject obj = doc.object();
-          QString keyboardProfileId;
-
-          if ( obj.contains( "selectedKeyboardProfile" ) )
-            keyboardProfileId = obj["selectedKeyboardProfile"].toString();
-
-          if ( !keyboardProfileId.isEmpty() )
-          {
-            // Find by ID in combo userData
-            int kbIdx = -1;
-            for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
-            {
-              if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
-              { kbIdx = i; break; }
-            }
-            if ( kbIdx >= 0 )
-            {
-              m_keyboardProfileCombo->blockSignals( true );
-              m_keyboardProfileCombo->setCurrentIndex( kbIdx );
-              m_keyboardProfileCombo->blockSignals( false );
-              // Explicitly load the profile data (setCurrentIndex won't emit
-              // if the index was already restored by reloadKeyboardProfiles)
-              onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( kbIdx ).toString() );
-            }
-          }
-        }
-      }
+      m_keyboardBrightnessSlider->blockSignals( true );
+      m_keyboardBrightnessSlider->setValue( hwBrightness );
+      m_keyboardBrightnessSlider->blockSignals( false );
+      m_keyboardBrightnessValueLabel->setText( QString::number( hwBrightness ) );
     }
   }
+
+  // ALWAYS override per-zone brightness with slider value to guarantee sync
+  m_keyboardVisualizer->setGlobalBrightness( m_keyboardBrightnessSlider->value() );
+  m_keyboardVisualizer->blockSignals( false );
+}
+
+void MainWindow::autoLoadKeyboardProfileFromActiveProfile()
+{
+  QString activeProfileId = m_profileManager->activeProfileId();
+  if ( activeProfileId.isEmpty() )
+    return;
+
+  QString profileJson = m_profileManager->getProfileDetails( activeProfileId );
+  if ( profileJson.isEmpty() )
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson( profileJson.toUtf8() );
+  if ( !doc.isObject() )
+    return;
+
+  QJsonObject obj = doc.object();
+  QString keyboardProfileId = obj["selectedKeyboardProfile"].toString();
+  if ( keyboardProfileId.isEmpty() )
+    return;
+
+  // Find by ID in combo userData
+  int kbIdx = -1;
+  for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
+  {
+    if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
+    { kbIdx = i; break; }
+  }
+  if ( kbIdx < 0 )
+    return;
+
+  m_keyboardProfileCombo->blockSignals( true );
+  m_keyboardProfileCombo->setCurrentIndex( kbIdx );
+  m_keyboardProfileCombo->blockSignals( false );
+  // Explicitly load the profile data (setCurrentIndex won't emit
+  // if the index was already restored by reloadKeyboardProfiles)
+  onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( kbIdx ).toString() );
+}
+
+void MainWindow::onActiveGpuProfileChanged( const QString &gpId )
+{
+  if ( m_initializing || gpId.isEmpty() )
+    return;
+
+  if ( m_gpuProfileTab && m_gpuProfileTab->gpuProfileCombo() )
+  {
+    auto *combo = m_gpuProfileTab->gpuProfileCombo();
+    if ( int idx = combo->findData( gpId ); idx >= 0 && combo->currentIndex() != idx )
+      combo->setCurrentIndex( idx );
+  }
+
+  if ( m_profileGpuProfileCombo )
+  {
+    if ( int idx = m_profileGpuProfileCombo->findData( gpId ); idx >= 0
+         && m_profileGpuProfileCombo->currentIndex() != idx )
+    {
+      m_profileGpuProfileCombo->setCurrentIndex( idx );
+    }
+  }
+
+  onGpuProfileChanged( gpId );
+}
+
+void MainWindow::onProfileFanProfileComboChanged( int index )
+{
+  markChanged();
+  // Update fan profile tab to match profile tab selection
+  m_fanControlTab->fanProfileCombo()->blockSignals( true );
+  m_fanControlTab->fanProfileCombo()->setCurrentIndex( index );
+  m_fanControlTab->fanProfileCombo()->blockSignals( false );
+  // Load the fan curves for the new profile
+  onFanProfileChanged( m_profileFanProfileCombo->currentData().toString() );
+}
+
+void MainWindow::onProfileKeyboardProfileComboChanged( int index )
+{
+  markChanged();
+  // Sync the keyboard tab combo and apply to hardware immediately
+  m_keyboardProfileCombo->blockSignals( true );
+  m_keyboardProfileCombo->setCurrentIndex( index );
+  m_keyboardProfileCombo->blockSignals( false );
+
+  // Apply keyb profile to hardware right away so the user
+  // sees the color change without needing to click Apply.
+  QString kbId = m_profileKeyboardProfileCombo->currentData().toString();
+  if ( !kbId.isEmpty() )
+    onKeyboardProfileChanged( kbId );
 }
 
 // Profile page slots
@@ -2396,9 +2414,12 @@ void MainWindow::onSaveClicked()
 
 void MainWindow::onSaveFanProfilesClicked()
 {
-  // Save fan profiles via DBus
-  saveFanPoints();
-  statusBar()->showMessage( "Fan profiles saved" );
+  // Save fan profiles via DBus, then apply immediately so hardware reflects new curves
+  if ( saveFanPoints() )
+  {
+    m_fanControlTab->saveSensorAliasesToSettings();
+    onApplyFanProfilesClicked();
+  }
 }
 
 void MainWindow::onAddProfileClicked()
@@ -2664,6 +2685,65 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
     QJsonObject obj = doc.object();
     QJsonArray zones = obj["zones"].toArray();
 
+    // Rebuild temperature source editor model from profile payload when present.
+    // Fall back to hardware/default sources for built-ins and legacy profiles.
+    QJsonArray thermalSources = obj["thermalSources"].toArray();
+    if ( thermalSources.isEmpty() )
+      thermalSources = m_profileManager->thermalSourcesData();
+
+    // Treat profile zones as authoritative when present.
+    // For older curve-only zone payloads, backfill missing metadata from
+    // hardware zones by matching zone ID, but do not re-add absent zones.
+    QJsonArray zoneModel;
+    if ( !zones.isEmpty() )
+    {
+      QMap< QString, QJsonObject > hardwareZoneById;
+      const QJsonArray hardwareZones = m_profileManager->fanZonesData();
+      for ( const QJsonValue &hzv : hardwareZones )
+      {
+        if ( !hzv.isObject() )
+          continue;
+        const QJsonObject hz = hzv.toObject();
+        const QString hzId = hz[QStringLiteral( "id" )].toString();
+        if ( !hzId.isEmpty() )
+          hardwareZoneById[hzId] = hz;
+      }
+
+      for ( const QJsonValue &zv : zones )
+      {
+        if ( !zv.isObject() )
+          continue;
+
+        QJsonObject merged = zv.toObject();
+        const QString zoneId = merged[QStringLiteral( "id" )].toString();
+        if ( zoneId.isEmpty() )
+          continue;
+
+        if ( hardwareZoneById.contains( zoneId ) )
+        {
+          const QJsonObject hz = hardwareZoneById.value( zoneId );
+          if ( !merged.contains( QStringLiteral( "name" ) ) )
+            merged[QStringLiteral( "name" )] = hz[QStringLiteral( "name" )];
+          if ( !merged.contains( QStringLiteral( "deviceType" ) ) )
+            merged[QStringLiteral( "deviceType" )] = hz[QStringLiteral( "deviceType" )];
+          if ( !merged.contains( QStringLiteral( "fanIds" ) ) )
+            merged[QStringLiteral( "fanIds" )] = hz[QStringLiteral( "fanIds" )];
+          if ( !merged.contains( QStringLiteral( "thermalSourceId" ) ) )
+            merged[QStringLiteral( "thermalSourceId" )] = hz[QStringLiteral( "thermalSourceId" )];
+        }
+
+        zoneModel.append( merged );
+      }
+    }
+
+    if ( zoneModel.isEmpty() )
+      zoneModel = m_profileManager->fanZonesData();
+
+    m_fanControlTab->buildZoneEditors( zoneModel,
+                                       thermalSources,
+                                       m_profileManager->hardwareFanDevicesData(),
+                                       m_profileManager->hardwareSensorsData() );
+
     // Overlay profile curve data and thermal source overrides onto
     // existing hardware-based zone editors (built once in setupFanControlTab)
     for ( const QJsonValue &zv : zones )
@@ -2700,6 +2780,9 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
           ed->setPoints( pts );
       }
     }
+
+    // Profile load should not be treated as user graph edits.
+    m_fanControlTab->clearZoneGraphModifiedFlags();
   }
 
   // Update the current fan profile ID
@@ -3026,54 +3109,54 @@ void MainWindow::loadFanPoints()
 }
 
 
-void MainWindow::saveFanPoints()
+bool MainWindow::saveFanPoints()
 {
   QJsonObject obj;
   QJsonArray zonesArr;
 
-  // Serialize fan curve editors
-  for ( auto it = m_fanControlTab->fanEditors().constBegin();
-        it != m_fanControlTab->fanEditors().constEnd(); ++it )
+  const QJsonArray zoneModel = m_fanControlTab->fanZonesData();
+  for ( const QJsonValue &zv : zoneModel )
   {
-    QJsonArray curveArr;
-    for ( const auto &p : it.value()->points() )
-    {
-      QJsonObject o;
-      o["temp"]  = p.temp;
-      o["speed"] = p.duty;
-      curveArr.append( o );
-    }
-    QJsonObject zone;
-    zone["id"]    = it.key();
-    zone["curve"] = curveArr;
-    QString tsId = m_fanControlTab->thermalSourceForZone( it.key() );
-    if ( !tsId.isEmpty() )
-      zone["thermalSourceId"] = tsId;
-    zonesArr.append( zone );
-  }
+    if ( !zv.isObject() )
+      continue;
 
-  // Serialize pump curve editors
-  for ( auto it = m_fanControlTab->pumpEditors().constBegin();
-        it != m_fanControlTab->pumpEditors().constEnd(); ++it )
-  {
+    QJsonObject zone = zv.toObject();
+    const QString zoneId = zone[QStringLiteral( "id" )].toString();
+    if ( zoneId.isEmpty() )
+      continue;
+
     QJsonArray curveArr;
-    for ( const auto &p : it.value()->points() )
+    if ( auto *fanEd = m_fanControlTab->fanEditor( zoneId ) )
     {
-      QJsonObject o;
-      o["temp"]  = p.temp;
-      o["speed"] = p.level;
-      curveArr.append( o );
+      for ( const auto &p : fanEd->points() )
+      {
+        QJsonObject o;
+        o["temp"] = p.temp;
+        o["speed"] = p.duty;
+        curveArr.append( o );
+      }
     }
-    QJsonObject zone;
-    zone["id"]    = it.key();
+    else if ( auto *pumpEd = m_fanControlTab->pumpEditor( zoneId ) )
+    {
+      for ( const auto &p : pumpEd->points() )
+      {
+        QJsonObject o;
+        o["temp"] = p.temp;
+        o["speed"] = p.level;
+        curveArr.append( o );
+      }
+    }
+
     zone["curve"] = curveArr;
-    QString tsId = m_fanControlTab->thermalSourceForZone( it.key() );
+    QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
     if ( !tsId.isEmpty() )
       zone["thermalSourceId"] = tsId;
+
     zonesArr.append( zone );
   }
 
   obj["zones"] = zonesArr;
+  obj["thermalSources"] = m_fanControlTab->thermalSourcesData();
 
   QJsonDocument doc(obj);
   QString json = doc.toJson(QJsonDocument::Compact);
@@ -3082,16 +3165,22 @@ void MainWindow::saveFanPoints()
   const QString currentName = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
   if ( currentId.isEmpty() ) {
     QMessageBox::warning(this, "Save Failed", "No fan profile selected to save to.");
-    return;
+    return false;
   }
 
   if ( !m_profileManager->isProfileEditable( currentId, m_profileManager->fanProfilesData() ) ) {
     QMessageBox::warning(this, "Save Failed", "Cannot overwrite built-in fan profile. Copy it to a custom profile first.");
-    return;
+    return false;
   }
 
   // Save into selected custom profile (by ID)
-  m_profileManager->setFanProfile( currentId, currentName, json );
+  if ( !m_profileManager->setFanProfile( currentId, currentName, json ) )
+  {
+    QMessageBox::warning( this, "Save Failed", "Failed to save fan profile via daemon." );
+    return false;
+  }
+
+  return true;
 }
 
 // ---------------------------------------------------------------------------

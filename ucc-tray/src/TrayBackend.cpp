@@ -17,6 +17,31 @@
 
 #include <algorithm>
 
+namespace {
+
+/// Parse a JSON array of { id, name } objects into parallel name/id lists.
+/// Returns true if parsing was successful.
+bool parseProfileArray( const std::string &jsonStr,
+                        QStringList &outNames, QStringList &outIds )
+{
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( jsonStr ) );
+  if ( !doc.isArray() )
+    return false;
+
+  for ( const auto &val : doc.array() )
+  {
+    auto obj = val.toObject();
+    QString id   = obj[ "id" ].toString();
+    QString name = obj[ "name" ].toString();
+    if ( id.isEmpty() ) continue;
+    outIds.append( id );
+    outNames.append( name );
+  }
+  return true;
+}
+
+} // anonymous namespace
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -292,43 +317,44 @@ void TrayBackend::setActiveProfile( const QString &profileId )
 void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
 {
   // Fetch the fan profile JSON and apply its curves to hardware.
-  // GetFanProfile returns a zones array; ApplyFanProfiles accepts the same plus
-  // legacy keys "cpu"/"gpu"/"pump"/"waterCoolerFan" for compatibility.
   if ( auto json = m_client->getFanProfile( fanProfileId.toStdString() ) )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isObject() )
-    {
-      QJsonObject src = doc.object();
-      QJsonObject dst;
+    applyFanProfileFromJson( *json, fanProfileId );
 
-      // Extract per-zone curves for the apply-format keys
-      if ( src.contains( "zones" ) && src["zones"].isArray() )
-      {
-        QJsonArray zones = src["zones"].toArray();
-        for ( const QJsonValue &zv : zones )
-        {
-          QJsonObject zone = zv.toObject();
-          QString id = zone["id"].toString();
-          if ( id == "zone-cpu" )  dst["cpu"]            = zone["curve"];
-          else if ( id == "zone-gpu" )  dst["gpu"]            = zone["curve"];
-          else if ( id == "wc-pump" )   dst["pump"]           = zone["curve"];
-          else if ( id == "wc-fan" )    dst["waterCoolerFan"] = zone["curve"];
-        }
-        dst["zones"] = src["zones"];
-      }
-
-      dst[ "fanProfileId" ] = fanProfileId;
-      const std::string applyJson =
-        QJsonDocument( dst ).toJson( QJsonDocument::Compact ).toStdString();
-      m_client->applyFanProfiles( applyJson );
-    }
-  }
   // Mark override so pollSlowState() doesn't revert to the daemon's stored value
   m_fanProfileOverride = true;
   m_activeProfileFanId = fanProfileId;
   m_activeProfileFanName = resolveFanProfileName( fanProfileId );
   emit activeProfileChanged();
+}
+
+void TrayBackend::applyFanProfileFromJson( const std::string &jsonStr, const QString &fanProfileId )
+{
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( jsonStr ) );
+  if ( !doc.isObject() )
+    return;
+
+  QJsonObject src = doc.object();
+  QJsonObject dst;
+
+  if ( src.contains( "zones" ) && src["zones"].isArray() )
+  {
+    QJsonArray zones = src["zones"].toArray();
+    for ( const QJsonValue &zv : zones )
+    {
+      QJsonObject zone = zv.toObject();
+      QString id = zone["id"].toString();
+      if ( id == "zone-cpu" )       dst["cpu"]            = zone["curve"];
+      else if ( id == "zone-gpu" )  dst["gpu"]            = zone["curve"];
+      else if ( id == "wc-pump" )   dst["pump"]           = zone["curve"];
+      else if ( id == "wc-fan" )    dst["waterCoolerFan"] = zone["curve"];
+    }
+    dst["zones"] = src["zones"];
+  }
+
+  dst[ "fanProfileId" ] = fanProfileId;
+  const std::string applyJson =
+    QJsonDocument( dst ).toJson( QJsonDocument::Compact ).toStdString();
+  m_client->applyFanProfiles( applyJson );
 }
 
 void TrayBackend::setActiveKeyboardProfile( const QString &keyboardProfileId )
@@ -645,21 +671,7 @@ void TrayBackend::loadProfiles()
   QStringList names, ids;
 
   if ( auto json = m_client->getProfilesJSON() )
-  {
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isArray() )
-    {
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() ) continue;
-        ids.append( id );
-        names.append( name );
-      }
-    }
-  }
+    parseProfileArray( *json, names, ids );
 
   if ( ids != m_profileIds || names != m_profileNames )
   {
@@ -691,76 +703,41 @@ void TrayBackend::loadProfiles()
   }
 
   // Fan profiles
-  if ( auto json = m_client->getFanProfilesJSON() )
   {
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isArray() )
+    QStringList fpNames, fpIds;
+    if ( auto json = m_client->getFanProfilesJSON() )
+      parseProfileArray( *json, fpNames, fpIds );
+    if ( fpIds != m_fanProfileIds || fpNames != m_fanProfileNames )
     {
-      QStringList fpNames, fpIds;
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() ) continue;
-        fpIds.append( id );
-        fpNames.append( name );
-      }
-      if ( fpIds != m_fanProfileIds || fpNames != m_fanProfileNames )
-      {
-        m_fanProfileIds   = fpIds;
-        m_fanProfileNames = fpNames;
-        emit fanProfilesChanged();
-      }
+      m_fanProfileIds   = fpIds;
+      m_fanProfileNames = fpNames;
+      emit fanProfilesChanged();
     }
   }
 
-  if ( auto json = m_client->getGpuProfilesJSON() )
+  // GPU profiles
   {
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isArray() )
+    QStringList gpNames, gpIds;
+    if ( auto json = m_client->getGpuProfilesJSON() )
+      parseProfileArray( *json, gpNames, gpIds );
+    if ( gpIds != m_gpuProfileIds || gpNames != m_gpuProfileNames )
     {
-      QStringList gpNames, gpIds;
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() ) continue;
-        gpIds.append( id );
-        gpNames.append( name );
-      }
-      if ( gpIds != m_gpuProfileIds || gpNames != m_gpuProfileNames )
-      {
-        m_gpuProfileIds = gpIds;
-        m_gpuProfileNames = gpNames;
-        emit gpuProfilesChanged();
-      }
+      m_gpuProfileIds = gpIds;
+      m_gpuProfileNames = gpNames;
+      emit gpuProfilesChanged();
     }
   }
 
   // Keyboard profiles from daemon
-  if ( auto json = m_client->getKeyboardProfilesJSON() )
   {
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isArray() )
+    QStringList kpNames, kpIds;
+    if ( auto json = m_client->getKeyboardProfilesJSON() )
+      parseProfileArray( *json, kpNames, kpIds );
+    if ( kpIds != m_keyboardProfileIds || kpNames != m_keyboardProfileNames )
     {
-      QStringList kpNames, kpIds;
-      for ( const auto &val : doc.array() )
-      {
-        auto obj = val.toObject();
-        QString id   = obj[ "id" ].toString();
-        QString name = obj[ "name" ].toString();
-        if ( id.isEmpty() ) continue;
-        kpIds.append( id );
-        kpNames.append( name );
-      }
-      if ( kpIds != m_keyboardProfileIds || kpNames != m_keyboardProfileNames )
-      {
-        m_keyboardProfileIds   = kpIds;
-        m_keyboardProfileNames = kpNames;
-        emit keyboardProfilesChanged();
-      }
+      m_keyboardProfileIds   = kpIds;
+      m_keyboardProfileNames = kpNames;
+      emit keyboardProfilesChanged();
     }
   }
 

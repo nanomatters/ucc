@@ -138,7 +138,7 @@
 		{
 			"label": "build-all",
 			"type": "shell",
-			"command": "cd /opt/devel/git/ucc/build && make -j16 2>&1; echo EXIT_CODE=$?",
+			"command": "cmake --build /opt/devel/git/ucc/build -j16 2>&1; echo EXIT_CODE=$status",
 			"isBackground": false
 		}
 	]

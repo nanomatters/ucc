@@ -40,7 +40,6 @@
 class QTableWidget;
 class QTableWidgetItem;
 class QLineEdit;
-class QListWidget;
 
 namespace ucc
 {
@@ -88,6 +87,15 @@ public:
   /** Set the thermal source combo for a zone (used when loading profile overrides). */
   void setThermalSourceForZone( const QString &zoneId, const QString &thermalSourceId );
 
+  /** Return current temperature-source editor model for fan profile persistence. */
+  QJsonArray thermalSourcesData() const;
+
+  /** Return current zone editor model (name/type/fanIds/source) for profile persistence. */
+  QJsonArray fanZonesData() const;
+
+  /** Persist user-defined sensor aliases to ~/.config/uccrc. */
+  void saveSensorAliasesToSettings() const;
+
   QPushButton *applyButton()  const { return m_applyFanProfilesButton; }
   QPushButton *saveButton()   const { return m_saveFanProfilesButton; }
   QPushButton *copyButton()   const { return m_copyFanProfileButton; }
@@ -117,6 +125,9 @@ public:
   /** Set editor editability. */
   void setEditorsEditable( bool editable );
 
+  /** Mark all zone graphs as clean (e.g. right after profile load). */
+  void clearZoneGraphModifiedFlags();
+
 signals:
   void applyRequested();
   void saveRequested();
@@ -141,29 +152,44 @@ private slots:
   void onLEDModeChanged( int index );
   void onColorPickerClicked();
   void onFanProfileComboRenamed();
+  void onWaterCoolerPollTimeout();
 
 private:
   void setupUI();
   void connectSignals();
   void updateColorButtonState();
   void updateManualControlState();
+  void populateZoneTemplateCombo( QComboBox *combo ) const;
+  void applyCurveTemplateToZone( const QString &zoneId,
+                                 const QString &templateId );
 
   // ── Temperature source / zone editor helpers ──
   void showStatusMessage( const QString &msg, int timeoutMs = 3000 );
+  void loadSensorAliasesFromSettings();
   static QString normalizedSourceGroup( const QJsonObject &sensor );
   void ensureValidStrategy( QJsonObject &src );
   QString sensorsSummaryText( const QJsonObject &src ) const;
   void refreshAllSourceCombos();
   void installStrategyComboForRow( int row );
+  void onStrategyComboChanged( int row );
   void refreshSourceRow( int row );
   void addSensorToSource( int row, const QString &sensorId );
   void createSourceWithSensor( const QString &sensorId );
   void onSourceItemChanged( QTableWidgetItem *item );
-  void onSourceCellChanged( int currentRow );
   void onSourceContextMenu( const QPoint &pos );
+  void handleRemoveSource( int row );
+  void handleRemoveSensor( int row, const QString &sensorId );
   void onSensorDropped( int row, const QString &sensorId );
-  void onZoneListRowChanged( int row );
-  void onZoneListContextMenu( const QPoint &pos );
+  void refreshZoneRow( int row );
+  void onZoneItemChanged( QTableWidgetItem *item );
+  void installZoneSourceComboForRow( int row );
+  void onZoneSourceComboChanged( int row );
+  void onZoneContextMenu( const QPoint &pos );
+  void onDeviceDroppedOnZone( int row, const QString &deviceId );
+  void addDeviceToZone( int row, const QString &deviceId );
+  void handleRemoveDevice( int row, const QString &deviceId );
+  QString devicesSummaryText( const QJsonObject &zone ) const;
+  static QString normalizedDeviceGroup( const QJsonObject &device );
 
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;
@@ -181,6 +207,10 @@ private:
   QMap< QString, FanCurveEditorWidget * > m_fanEditors;
   QMap< QString, PumpCurveEditorWidget * > m_pumpEditors;
   QMap< QString, QComboBox * > m_thermalSourceCombos;
+  QMap< QString, QComboBox * > m_templateSourceCombos;
+  QMap< QString, QString > m_selectedTemplateByZone;
+  QMap< QString, bool > m_zoneGraphModifiedByUser;
+  QMap< QString, bool > m_zoneProgrammaticUpdate;
 
   // Sub-tab infrastructure (one tab per zone, created by buildZoneEditors)
   QTabWidget *m_subTabs = nullptr;
@@ -210,18 +240,14 @@ private:
   QVector< QComboBox * > m_allSourceCombos;
   QTableWidget *m_sourceTable = nullptr;
   QMap< QString, QString > m_sensorLabelById;
-  QLabel *m_srcLabelValue = nullptr;
-  QLabel *m_srcStrategyValue = nullptr;
-  QLabel *m_srcSensorsValue = nullptr;
+  QMap< QString, QString > m_sensorAliasById;
+  QMap< QString, QString > m_deviceAliasById;
 
   // ── Zone editing state ──
   QVector< QJsonObject > m_zoneCache;
   QMap< QString, QString > m_fanLabelById;
-  QLineEdit *m_zoneNameEdit = nullptr;
-  QLineEdit *m_zoneTypeEdit = nullptr;
-  QComboBox *m_zoneSourceCombo = nullptr;
-  QListWidget *m_zoneFansList = nullptr;
-  QListWidget *m_zoneList = nullptr;
+  QTableWidget *m_zoneTable = nullptr;
+  QVector< QComboBox * > m_zoneSourceCombos;
 
   // Last build args (needed for rebuild on source removal)
   QJsonArray m_lastZones;

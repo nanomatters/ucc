@@ -117,6 +117,55 @@ static std::string fanProfileToJSON( const FanProfile &fp,
   return json;
 }
 
+static std::string stripLegacyMiscZoneFromProfileJson( const std::string &json,
+                                                       bool keepMiscZone,
+                                                       bool *changed = nullptr )
+{
+  if ( changed )
+    *changed = false;
+
+  if ( keepMiscZone )
+    return json;
+
+  const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
+  if ( !doc.isObject() )
+    return json;
+
+  QJsonObject root = doc.object();
+  const QJsonArray zones = root.value( QStringLiteral( "zones" ) ).toArray();
+  if ( zones.isEmpty() )
+    return json;
+
+  QJsonArray filteredZones;
+  bool removedZone = false;
+
+  for ( const QJsonValue &zoneValue : zones )
+  {
+    if ( !zoneValue.isObject() )
+    {
+      filteredZones.append( zoneValue );
+      continue;
+    }
+
+    const QJsonObject zone = zoneValue.toObject();
+    if ( zone.value( QStringLiteral( "id" ) ).toString().toStdString() == WellKnownZoneIDs::Misc )
+    {
+      removedZone = true;
+      continue;
+    }
+
+    filteredZones.append( zone );
+  }
+
+  if ( !removedZone )
+    return json;
+
+  root[QStringLiteral( "zones" )] = filteredZones;
+  if ( changed )
+    *changed = true;
+  return QJsonDocument( root ).toJson( QJsonDocument::Compact ).toStdString();
+}
+
 // helper function to convert GPU info to JSON
 std::string dgpuInfoToJSON( const DGpuInfo &info )
 {
@@ -376,162 +425,7 @@ UccDBusInterfaceAdaptor::UccDBusInterfaceAdaptor( QObject *parent,
   m_fpsPollTimer = new QTimer( this );
   m_fpsPollTimer->setInterval( 1000 );
   m_fpsPollTimer->setSingleShot( false );
-  QObject::connect( m_fpsPollTimer, &QTimer::timeout, this, [this]()
-  {
-    // Auto-recovery: if the socket file was removed while collection is
-    // active (e.g. /tmp cleanup), recreate it transparently.
-    if ( m_fpsServer.isRunning() )
-    {
-      struct stat st;
-      if ( ::stat( m_fpsServer.socketPath().c_str(), &st ) != 0 )
-      {
-        syslog( LOG_WARNING, "FpsServer: socket file disappeared — recreating" );
-        m_fpsServer.rebind();
-      }
-    }
-
-    m_fpsServer.poll();
-    const std::string appName = m_fpsServer.clientAppName();
-    const pid_t clientPid = m_fpsServer.clientPid();
-
-    // Auto-apply app-bound GPU profile on FPS client connect/switch.
-    // Fallback behavior:
-    // - If no app mapping exists, use currently active profile's GPU profile.
-    // - If no 3D app is active, restore currently active profile's GPU profile.
-    if ( m_service )
-    {
-      const bool autoUvRunning = m_service->m_autoUndervoltWorker
-                              && m_service->m_autoUndervoltWorker->isRunning();
-
-      if ( !autoUvRunning && !appName.empty() )
-      {
-        auto it = m_service->m_settings.appGpuProfileMap.find( appName );
-        if ( it != m_service->m_settings.appGpuProfileMap.end() )
-        {
-          const std::string &mappedGpuProfileId = it->second;
-          const bool needsApply = ( appName != m_lastAutoAppliedApp )
-                               || ( clientPid != m_lastAutoAppliedPid )
-                               || ( mappedGpuProfileId != m_lastAutoAppliedGpuProfileId );
-
-          if ( needsApply )
-          {
-            const std::string gpuJson = m_service->resolveGpuProfileJSON( mappedGpuProfileId );
-            if ( !gpuJson.empty() && gpuJson != "{}" )
-            {
-              UccProfile profile;
-              profile.name = "AutoUV runtime " + appName;
-              profile.gpuProfileId = mappedGpuProfileId;
-              m_service->applyGpuOCFromProfile( profile );
-
-              if ( m_service->m_adaptor )
-              {
-                m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
-                                                          m_service->m_activeProfile.keyboard.keyboardProfileId,
-                                                          m_service->m_activeProfile.fan.fanProfile,
-                                                          mappedGpuProfileId );
-              }
-
-              m_lastAutoAppliedApp = appName;
-              m_lastAutoAppliedPid = clientPid;
-              m_lastAutoAppliedGpuProfileId = mappedGpuProfileId;
-
-              syslog( LOG_INFO, "[AutoUV] Auto-applied GPU profile '%s' for app '%s' (pid=%d)",
-                      mappedGpuProfileId.c_str(), appName.c_str(), static_cast< int >( clientPid ) );
-            }
-            else
-            {
-              syslog( LOG_WARNING, "[AutoUV] Mapped GPU profile '%s' for app '%s' not found",
-                      mappedGpuProfileId.c_str(), appName.c_str() );
-            }
-          }
-        }
-        else
-        {
-          const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
-          const bool needsFallback = !fallbackGpuProfileId.empty()
-                                  && ( fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId
-                                    || appName != m_lastAutoAppliedApp
-                                    || clientPid != m_lastAutoAppliedPid );
-          if ( needsFallback )
-          {
-            m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
-
-            if ( m_service->m_adaptor )
-            {
-              m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
-                                                        m_service->m_activeProfile.keyboard.keyboardProfileId,
-                                                        m_service->m_activeProfile.fan.fanProfile,
-                                                        fallbackGpuProfileId );
-            }
-
-            m_lastAutoAppliedApp = appName;
-            m_lastAutoAppliedPid = clientPid;
-            m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
-            syslog( LOG_INFO, "[AutoUV] No app GPU mapping for '%s'; restored active profile GPU profile '%s'",
-                    appName.c_str(), fallbackGpuProfileId.c_str() );
-          }
-        }
-      }
-      else if ( !autoUvRunning && appName.empty() )
-      {
-        const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
-        if ( !fallbackGpuProfileId.empty() && fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId )
-        {
-          m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
-
-          if ( m_service->m_adaptor )
-          {
-            m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
-                                                      m_service->m_activeProfile.keyboard.keyboardProfileId,
-                                                      m_service->m_activeProfile.fan.fanProfile,
-                                                      fallbackGpuProfileId );
-          }
-
-          syslog( LOG_INFO, "[AutoUV] No active 3D app; restored active profile GPU profile '%s'",
-                  fallbackGpuProfileId.c_str() );
-        }
-
-        // Clear app/pid so the next 3D app launch always re-evaluates mapping.
-        m_lastAutoAppliedApp.clear();
-        m_lastAutoAppliedPid = 0;
-        m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
-      }
-    }
-
-    const double fps = m_fpsServer.currentFps();
-    if ( fps < 0.0 || !m_service )
-      return;
-
-    if ( !appName.empty() )
-      m_seenFpsApps.insert( appName );
-
-    // FPS ingestion policy:
-    // 1) NVIDIA must be present.
-    // 2) Optional P0 requirement.
-    // 3) Optional manual source-app filter.
-    bool allow = m_service->m_nvml && m_service->m_nvml->isAvailable()
-                 && m_service->m_nvml->deviceCount() > 0;
-
-    if ( allow && m_requireFpsP0 )
-    {
-      auto pstate = m_service->m_nvml->getCurrentPstate( 0 );
-      allow = pstate.has_value() && *pstate == 0U;
-    }
-
-    if ( allow && !m_selectedFpsApp.empty() && m_selectedFpsApp != "auto" )
-    {
-      auto toLower = []( const std::string &s ) {
-        std::string out = s;
-        std::transform( out.begin(), out.end(), out.begin(),
-                        []( unsigned char c ) { return static_cast< char >( std::tolower( c ) ); } );
-        return out;
-      };
-      allow = !appName.empty() && toLower( appName ) == toLower( m_selectedFpsApp );
-    }
-
-    if ( allow )
-      m_service->m_metricsStore.push( MetricId::Fps, fps );
-  } );
+  QObject::connect( m_fpsPollTimer, &QTimer::timeout, this, &UccDBusInterfaceAdaptor::onFpsPollTimeout );
 
   // FPS collection must remain available unconditionally for AutoOC.
   if ( !m_fpsServer.start() )
@@ -553,6 +447,176 @@ bool UccDBusInterfaceAdaptor::checkAuth( const char *actionId ) noexcept
             << "' action='" << actionId << "'\n";
   return PolkitAuthority::checkAuthorization(
       dbusObj->connection(), dbusObj->message(), actionId );
+}
+
+void UccDBusInterfaceAdaptor::onFpsPollTimeout()
+{
+  // Auto-recovery: if the socket file was removed while collection is
+  // active (e.g. /tmp cleanup), recreate it transparently.
+  if ( m_fpsServer.isRunning() )
+  {
+    struct stat st;
+    if ( ::stat( m_fpsServer.socketPath().c_str(), &st ) != 0 )
+    {
+      syslog( LOG_WARNING, "FpsServer: socket file disappeared — recreating" );
+      m_fpsServer.rebind();
+    }
+  }
+
+  m_fpsServer.poll();
+  const std::string appName = m_fpsServer.clientAppName();
+  const pid_t clientPid = m_fpsServer.clientPid();
+
+  // Auto-apply app-bound GPU profile on FPS client connect/switch.
+  if ( m_service )
+    autoApplyGpuProfileForApp( appName, clientPid );
+
+  const double fps = m_fpsServer.currentFps();
+  if ( fps < 0.0 || !m_service )
+    return;
+
+  if ( !appName.empty() )
+    m_seenFpsApps.insert( appName );
+
+  // FPS ingestion policy:
+  // 1) NVIDIA must be present.
+  // 2) Optional P0 requirement.
+  // 3) Optional manual source-app filter.
+  bool allow = m_service->m_nvml && m_service->m_nvml->isAvailable()
+               && m_service->m_nvml->deviceCount() > 0;
+
+  if ( allow && m_requireFpsP0 )
+  {
+    auto pstate = m_service->m_nvml->getCurrentPstate( 0 );
+    allow = pstate.has_value() && *pstate == 0U;
+  }
+
+  if ( allow && !m_selectedFpsApp.empty() && m_selectedFpsApp != "auto" )
+  {
+    auto toLower = []( const std::string &s ) {
+      std::string out = s;
+      std::transform( out.begin(), out.end(), out.begin(),
+                      []( unsigned char c ) { return static_cast< char >( std::tolower( c ) ); } );
+      return out;
+    };
+    allow = !appName.empty() && toLower( appName ) == toLower( m_selectedFpsApp );
+  }
+
+  if ( allow )
+    m_service->m_metricsStore.push( MetricId::Fps, fps );
+}
+
+void UccDBusInterfaceAdaptor::autoApplyGpuProfileForApp(
+    const std::string &appName, pid_t clientPid )
+{
+  const bool autoUvRunning = m_service->m_autoUndervoltWorker
+                          && m_service->m_autoUndervoltWorker->isRunning();
+
+  if ( autoUvRunning )
+    return;
+
+  if ( !appName.empty() )
+  {
+    auto it = m_service->m_settings.appGpuProfileMap.find( appName );
+    if ( it != m_service->m_settings.appGpuProfileMap.end() )
+    {
+      applyMappedGpuProfile( appName, clientPid, it->second );
+      return;
+    }
+
+    // No mapping for this app — restore active profile's GPU profile
+    restoreFallbackGpuProfile( appName, clientPid );
+    return;
+  }
+
+  // No 3D app active — restore active profile's GPU profile
+  const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
+  if ( !fallbackGpuProfileId.empty() && fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId )
+  {
+    m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
+
+    if ( m_service->m_adaptor )
+    {
+      m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
+                                                m_service->m_activeProfile.keyboard.keyboardProfileId,
+                                                m_service->m_activeProfile.fan.fanProfile,
+                                                fallbackGpuProfileId );
+    }
+
+    syslog( LOG_INFO, "[AutoUV] No active 3D app; restored active profile GPU profile '%s'",
+            fallbackGpuProfileId.c_str() );
+  }
+
+  // Clear app/pid so the next 3D app launch always re-evaluates mapping.
+  m_lastAutoAppliedApp.clear();
+  m_lastAutoAppliedPid = 0;
+  m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
+}
+
+void UccDBusInterfaceAdaptor::applyMappedGpuProfile(
+    const std::string &appName, pid_t clientPid, const std::string &mappedGpuProfileId )
+{
+  const bool needsApply = ( appName != m_lastAutoAppliedApp )
+                       || ( clientPid != m_lastAutoAppliedPid )
+                       || ( mappedGpuProfileId != m_lastAutoAppliedGpuProfileId );
+  if ( !needsApply )
+    return;
+
+  const std::string gpuJson = m_service->resolveGpuProfileJSON( mappedGpuProfileId );
+  if ( gpuJson.empty() || gpuJson == "{}" )
+  {
+    syslog( LOG_WARNING, "[AutoUV] Mapped GPU profile '%s' for app '%s' not found",
+            mappedGpuProfileId.c_str(), appName.c_str() );
+    return;
+  }
+
+  UccProfile profile;
+  profile.name = "AutoUV runtime " + appName;
+  profile.gpuProfileId = mappedGpuProfileId;
+  m_service->applyGpuOCFromProfile( profile );
+
+  if ( m_service->m_adaptor )
+  {
+    m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
+                                              m_service->m_activeProfile.keyboard.keyboardProfileId,
+                                              m_service->m_activeProfile.fan.fanProfile,
+                                              mappedGpuProfileId );
+  }
+
+  m_lastAutoAppliedApp = appName;
+  m_lastAutoAppliedPid = clientPid;
+  m_lastAutoAppliedGpuProfileId = mappedGpuProfileId;
+
+  syslog( LOG_INFO, "[AutoUV] Auto-applied GPU profile '%s' for app '%s' (pid=%d)",
+          mappedGpuProfileId.c_str(), appName.c_str(), static_cast< int >( clientPid ) );
+}
+
+void UccDBusInterfaceAdaptor::restoreFallbackGpuProfile(
+    const std::string &appName, pid_t clientPid )
+{
+  const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
+  const bool needsFallback = !fallbackGpuProfileId.empty()
+                          && ( fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId
+                            || appName != m_lastAutoAppliedApp
+                            || clientPid != m_lastAutoAppliedPid );
+  if ( !needsFallback )
+    return;
+
+  m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
+
+  if ( m_service->m_adaptor )
+  {
+    m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
+                                              m_service->m_activeProfile.keyboard.keyboardProfileId,
+                                              m_service->m_activeProfile.fan.fanProfile,
+                                              fallbackGpuProfileId );
+  }
+
+  m_lastAutoAppliedApp = appName;
+  m_lastAutoAppliedPid = clientPid;
+  m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
+  syslog( LOG_INFO, "[AutoUV] No app GPU mapping for '%s'; restored active profile GPU profile '%s'",
+          appName.c_str(), fallbackGpuProfileId.c_str() );
 }
 
 
@@ -804,97 +868,9 @@ QString UccDBusInterfaceAdaptor::GetAppliedProfilesJSON()
   return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
 }
 
-bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
-  if ( !m_service )
-    return false;
-
-  const std::string json = pointsJSON.toStdString();
-  std::cerr << "[DBus] SetFanProfileCPU called with JSON: " << json << std::endl;
-
-  try
-  {
-    auto curve = ProfileManager::parseFanCurveFromJSON( json );
-    std::cerr << "[DBus] Parsed curve size: " << curve.size() << std::endl;
-    if ( curve.size() != 17 )
-      return false;
-
-    UccProfile profile = m_service->getCurrentProfile();
-    std::cerr << "[DBus] Current profile ID: " << profile.id << std::endl;
-    auto custom = m_service->getCustomProfiles();
-    bool editable = false;
-    for ( const auto &p : custom )
-    {
-      if ( p.id == profile.id ) { editable = true; break; }
-    }
-    std::cerr << "[DBus] Profile editable: " << editable << std::endl;
-    if ( !editable )
-      return false;
-
-    // Apply as temporary zone curve (do not persist in daemon profiles)
-    if ( m_service->m_fanControlWorker )
-    {
-      std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
-      zoneCurves[WellKnownZoneIDs::CPU] = curve;
-      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
-      return true;
-    }
-    return false;
-  }
-  catch ( ... )
-  {
-    return false;
-  }
-}
-
-bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const QString &pointsJSON )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
-  if ( !m_service )
-    return false;
-
-  const std::string json = pointsJSON.toStdString();
-  std::cerr << "[DBus] SetFanProfileDGPU called with JSON: " << json << std::endl;
-
-  try
-  {
-    auto curve = ProfileManager::parseFanCurveFromJSON( json );
-    std::cerr << "[DBus] Parsed curve size: " << curve.size() << std::endl;
-    if ( curve.size() != 17 )
-      return false;
-
-    UccProfile profile = m_service->getCurrentProfile();
-    std::cerr << "[DBus] Current profile ID: " << profile.id << std::endl;
-    auto custom = m_service->getCustomProfiles();
-    bool editable = false;
-    for ( const auto &p : custom )
-    {
-      if ( p.id == profile.id ) { editable = true; break; }
-    }
-    std::cerr << "[DBus] Profile editable: " << editable << std::endl;
-    if ( !editable )
-      return false;
-
-    // Apply as temporary zone curve (do not persist in daemon profiles)
-    if ( m_service->m_fanControlWorker )
-    {
-      std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
-      zoneCurves[WellKnownZoneIDs::GPU] = curve;
-      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
-      return true;
-    }
-    return false;
-  }
-  catch ( ... )
-  {
-    return false;
-  }
-}
-
 bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( not m_service )
     return false;
 
@@ -997,7 +973,7 @@ bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq 
 
 bool UccDBusInterfaceAdaptor::RevertFanProfiles()
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service )
     return false;
 
@@ -1041,7 +1017,7 @@ bool UccDBusInterfaceAdaptor::SetActiveProfile( const QString &id )
 
 bool UccDBusInterfaceAdaptor::ApplyProfile( const QString &profileJSON )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   // Apply the profile configuration sent by the GUI
   return m_service->applyProfileJSON( profileJSON.toStdString() );
 }
@@ -1144,7 +1120,7 @@ bool UccDBusInterfaceAdaptor::UpdateCustomProfile( const QString &profileJSON )
 
 bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service )
   {
     std::cerr << "[Profile] SaveCustomProfile called but service not available" << std::endl;
@@ -1403,6 +1379,20 @@ QString UccDBusInterfaceAdaptor::GetThermalSourcesJSON()
     json += "{\"id\":\"" + ts.id + "\"";
     json += ",\"label\":\"" + ts.label + "\"";
     json += ",\"strategy\":\"" + ucc::hal::thermalStrategyToString( ts.strategy ) + "\"";
+    json += ",\"sensorIds\":[";
+    for ( size_t s = 0; s < ts.sensorIds.size(); ++s )
+    {
+      if ( s > 0 ) json += ',';
+      json += "\"" + ts.sensorIds[s] + "\"";
+    }
+    json += "]";
+    json += ",\"weights\":[";
+    for ( size_t w = 0; w < ts.weights.size(); ++w )
+    {
+      if ( w > 0 ) json += ',';
+      json += std::to_string( ts.weights[w] );
+    }
+    json += "]";
     json += "}";
   }
   json += "]";
@@ -1965,7 +1955,15 @@ bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &
 
   const std::string sid = id.toStdString();
   const std::string sname = name.toStdString();
-  const std::string sjson = json.toStdString();
+  const bool keepMiscZone = std::any_of( m_service->m_hw.defaultFanZones().begin(),
+                                         m_service->m_hw.defaultFanZones().end(),
+                                         []( const auto &zone ) {
+                                           return zone.id == WellKnownZoneIDs::Misc;
+                                         } );
+  bool sanitized = false;
+  const std::string sjson = stripLegacyMiscZoneFromProfileJson( json.toStdString(),
+                                                                keepMiscZone,
+                                                                &sanitized );
 
   // Check this doesn't collide with a built-in fan profile
   for ( const auto &fp : m_service->m_builtinFanProfiles )
@@ -2000,6 +1998,12 @@ bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &
   try { wrapper = nlohmann::json::parse( sjson ); } catch ( ... ) { wrapper = nlohmann::json::object(); }
   wrapper["name"] = sname;
   m_service->m_settings.fanProfiles[sid] = wrapper.dump();
+
+  if ( sanitized )
+  {
+    std::cout << "[FanProfile] Removed legacy '" << WellKnownZoneIDs::Misc
+              << "' zone while saving profile '" << sname << "'" << std::endl;
+  }
 
   if ( m_service->m_settingsManager.writeSettings( m_service->m_settings ) )
     std::cout << "[FanProfile] Saved fan profile '" << sname << "' (ID: " << sid << ")" << std::endl;
@@ -2402,7 +2406,7 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const QString &state, const QString &
 
 bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QString &stateMapJSON )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service )
     return false;
 
@@ -3758,134 +3762,7 @@ UccDBusService::UccDBusService()
     },
     [this]( size_t fanIndex, int64_t timestamp, int temp )
     {
-      {
-        std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-        if ( fanIndex < m_dbusData.fans.size() )
-          m_dbusData.fans[ fanIndex ].temp.set( timestamp, temp );
-      }
-
-      // Push temperature to history store
-      if ( fanIndex == 0 )
-        m_metricsStore.push( MetricId::CpuTemp, timestamp, temp );
-      else if ( fanIndex == 1 )
-        m_metricsStore.push( MetricId::GpuTemp, timestamp, temp );
-
-      // Auto-control water cooler fan and pump voltage based on CPU temperature
-      if ( m_dbusData.waterCoolerConnected.load() && m_activeProfile.fan.autoControlWC && fanIndex == 0 )
-      {
-        try
-        {
-          // Apply asymmetric EWMA to the raw sensor reading so that the
-          // water-cooler fan and pump see a smooth temperature signal,
-          // matching the filtering the main fan control loop uses.
-          if ( m_wcTempFiltered < 0.0 )
-            m_wcTempFiltered = static_cast< double >( temp );
-          else
-          {
-            const double alpha = ( temp > m_wcTempFiltered )
-                                   ? WC_TEMP_ALPHA_RISING : WC_TEMP_ALPHA_FALLING;
-            m_wcTempFiltered += alpha * ( static_cast< double >( temp ) - m_wcTempFiltered );
-          }
-          const int wcTemp = static_cast< int >( std::round( m_wcTempFiltered ) );
-
-          const std::string &fpName = m_activeProfile.fan.fanProfile;
-          FanProfile fp = resolveFanProfile( fpName );
-
-          // Overlay water cooler fan curve from temporary curves if active
-          if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
-          {
-            const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
-            auto wcFanIt = tempCurves.find( WellKnownZoneIDs::WCFan );
-            if ( wcFanIt != tempCurves.end() && !wcFanIt->second.empty() )
-            {
-              auto *wcFanZone = fp.findZoneCurve( WellKnownZoneIDs::WCFan );
-              if ( wcFanZone )
-                wcFanZone->curve = wcFanIt->second;
-            }
-          }
-
-          // Overlay pump curve from temporary curves if active
-          if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
-          {
-            const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
-            auto wcPumpIt = tempCurves.find( WellKnownZoneIDs::WCPump );
-            if ( wcPumpIt != tempCurves.end() && !wcPumpIt->second.empty() )
-            {
-              auto *wcPumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
-              if ( wcPumpZone )
-                wcPumpZone->curve = wcPumpIt->second;
-            }
-          }
-
-          const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
-          const int wcFanSpeed = fp.getSpeedForZone( snappedTemp, WellKnownZoneIDs::WCFan );
-          if ( m_waterCoolerWorker )
-            m_waterCoolerWorker->setFanSpeed( std::max( wcFanSpeed, 0 ) );
-
-          // Temperature LED mode: compute gradient color from fan speed
-          if ( m_waterCoolerLedMode.load() == static_cast< int32_t >( ucc::RGBState::Temperature ) )
-          {
-            const float t = static_cast< float >( std::clamp( wcFanSpeed, 0, 100 ) ) / 100.0f;
-            const int ledR = static_cast< int >( t * 255.0f );
-            const int ledG = 0;
-            const int ledB = static_cast< int >( ( 1.0f - t ) * 255.0f );
-            if ( m_waterCoolerWorker )
-              m_waterCoolerWorker->setLEDColor( ledR, ledG, ledB,
-                static_cast< int >( ucc::RGBState::Static ) );
-          }
-
-          // Auto-control pump voltage with hysteresis.
-          // Step-up happens immediately at the table threshold; step-down requires
-          // the temperature to fall at least PUMP_HYSTERESIS_DEG below the
-          // threshold that last triggered an upward transition.
-          static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
-              ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-              ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-
-          // Read pump curve from the wc-pump zone
-          const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
-          int rawIdx = 0;
-          if ( pumpZone )
-          {
-            for ( const auto &pt : pumpZone->curve )
-            {
-              if ( wcTemp >= pt.temp ) rawIdx = std::min( pt.speed, 4 );
-              else                     break;
-            }
-          }
-
-          if ( rawIdx > m_pumpHysSpeedIdx )
-          {
-            // Temperature rising – apply new level and record its table threshold.
-            m_pumpHysSpeedIdx = rawIdx;
-            m_pumpHysThreshold = 0;
-            if ( pumpZone )
-              for ( const auto &pt : pumpZone->curve )
-                if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
-          }
-          else if ( rawIdx < m_pumpHysSpeedIdx )
-          {
-            // Temperature falling – only step down once we are past the dead-band.
-            if ( wcTemp < m_pumpHysThreshold - PUMP_HYSTERESIS_DEG )
-            {
-              m_pumpHysSpeedIdx = rawIdx;
-              m_pumpHysThreshold = 0;
-              if ( pumpZone )
-                for ( const auto &pt : pumpZone->curve )
-                  if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
-            }
-          }
-
-          const ucc::PumpVoltage pumpSpeedValue =
-              pumpIdxToVoltage[ std::clamp( m_pumpHysSpeedIdx, 0, 4 ) ];
-          if ( m_waterCoolerWorker )
-            m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
-
-          // std::cout << "[Auto WC] Temp: " << temp << "°C, Fan: " << wcFanSpeed
-          //           << "%, Pump Voltage: " << static_cast<int>(pumpSpeedValue) << std::endl;
-        }
-        catch ( ... ) { /* ignore errors in water cooler auto-control */ }
-      }
+      onFanTemperatureUpdate( fanIndex, timestamp, temp );
     }
   );
 
@@ -4586,132 +4463,7 @@ bool UccDBusService::initDBus()
       QObject::connect( m_autoUndervoltWorker.get(), &AutoUndervoltWorker::finished,
         m_adaptor.get(), [this]( const UndervoltResult &result )
       {
-        if ( result.success && m_autoUndervoltWorker )
-        {
-          const auto appKey = result.appName;
-          if ( !appKey.empty() && result.gpuFreqCapMHz > 0 )
-          {
-            std::string profileId;
-            auto mapIt = m_settings.appGpuProfileMap.find( appKey );
-            if ( mapIt != m_settings.appGpuProfileMap.end() )
-              profileId = mapIt->second;
-            if ( profileId.empty() )
-              profileId = generateProfileId();
-
-            const std::string profileName = "AutoUV: " + appKey;
-
-            nlohmann::json profileJson;
-            auto existing = m_settings.gpuProfiles.find( profileId );
-            if ( existing != m_settings.gpuProfiles.end() )
-            {
-              try { profileJson = nlohmann::json::parse( existing->second ); }
-              catch ( ... ) { profileJson = nlohmann::json::object(); }
-            }
-
-            profileJson[ "name" ] = profileName;
-            if ( !profileJson.contains( "offsets" ) || !profileJson["offsets"].is_array() )
-              profileJson[ "offsets" ] = nlohmann::json::array();
-
-            // Upsert P0 graphics offset entry.
-            bool updatedP0 = false;
-            for ( auto &entry : profileJson["offsets"] )
-            {
-              if ( !entry.is_object() ) continue;
-              if ( entry.value( "pstate", -1 ) == 0 )
-              {
-                entry[ "gpuOffsetMHz" ] = result.coreOffsetMHz;
-                if ( !entry.contains( "vramOffsetMHz" ) )
-                  entry[ "vramOffsetMHz" ] = 0;
-                updatedP0 = true;
-                break;
-              }
-            }
-            if ( !updatedP0 )
-            {
-              profileJson[ "offsets" ].push_back( {
-                { "pstate", 0 },
-                { "gpuOffsetMHz", result.coreOffsetMHz },
-                { "vramOffsetMHz", 0 }
-              } );
-            }
-
-            profileJson[ "gpuLockedClocks" ] = {
-              { "enabled", true },
-              { "min", result.gpuFreqCapMHz },
-              { "max", result.gpuFreqCapMHz }
-            };
-
-            // AutoUV profiles must only control graphics cap + graphics offset.
-            // Drop stale power/VRAM lock fields inherited from previously mapped
-            // profiles, otherwise applyGpuOCProfile() can unexpectedly reset power
-            // limits or force VRAM clock locks from old profile content.
-            profileJson.erase( "vramLockedClocks" );
-            profileJson.erase( "powerLimitW" );
-
-            const auto nowEpochSec = static_cast< long long >(
-              std::chrono::duration_cast< std::chrono::seconds >(
-                std::chrono::system_clock::now().time_since_epoch() ).count() );
-
-            profileJson[ "meta" ][ "autoUndervolt" ] = {
-              { "appName", appKey },
-              { "baselineClkMHz", result.baselineClkMHz },
-              { "baselineFps", result.baselineFps },
-              { "achievedFps", result.finalFps },
-              { "coreOffsetMHz", result.coreOffsetMHz },
-              { "baselineVoltageMv", result.baselineVoltageMv },
-              { "achievedVoltageMv", result.finalVoltageMv },
-              { "achievedPowerW", result.finalPowerW },
-              { "lastUsedEpochSec", nowEpochSec }
-            };
-
-            const std::string profilePayload = profileJson.dump();
-            m_settings.gpuProfiles[ profileId ] = profilePayload;
-            m_settings.appGpuProfileMap[ appKey ] = profileId;
-
-            bool found = false;
-            for ( auto &gp : m_customGpuProfiles )
-            {
-              if ( gp.id == profileId )
-              {
-                gp.name = profileName;
-                gp.json = profilePayload;
-                found = true;
-                break;
-              }
-            }
-            if ( !found )
-              m_customGpuProfiles.push_back( { profileId, profileName, profilePayload } );
-
-            // Keep worker cache aligned with persisted settings.
-            std::map< std::string, AppUndervoltProfile > syncedProfiles;
-            for ( const auto &[app, p] : m_autoUndervoltWorker->profiles() )
-              syncedProfiles[ app ] = p;
-
-            AppUndervoltProfile cache;
-            cache.appName = appKey;
-            cache.gpuFreqCapMHz = result.gpuFreqCapMHz;
-            cache.coreOffsetMHz = result.coreOffsetMHz;
-            cache.baselineClkMHz = result.baselineClkMHz;
-            cache.baselineFps = result.baselineFps;
-            cache.achievedFps = result.finalFps;
-            cache.achievedPowerW = result.finalPowerW;
-            cache.achievedVoltageMv = result.finalVoltageMv;
-            cache.lastUsed = std::chrono::system_clock::now();
-            syncedProfiles[ appKey ] = cache;
-            m_autoUndervoltWorker->loadProfiles( syncedProfiles );
-
-            if ( !m_settingsManager.writeSettings( m_settings ) )
-              syslog( LOG_WARNING, "[AutoUV] Failed to persist app->GPU profile mapping" );
-            else
-              updateDBusSettingsData();
-          }
-        }
-
-        emit m_adaptor->AutoUndervoltFinished(
-          result.gpuFreqCapMHz,
-          result.success,
-          QString::fromStdString( result.message ),
-          QString::fromStdString( result.appName ) );
+        onAutoUndervoltFinished( result );
       } );
     }
 
@@ -4722,6 +4474,139 @@ bool UccDBusService::initDBus()
     syslog( LOG_ERR, "DBus service error: %s", e.what() );
     return false;
   }
+}
+
+void UccDBusService::onAutoUndervoltFinished( const UndervoltResult &result )
+{
+  if ( result.success && m_autoUndervoltWorker )
+    persistAutoUndervoltProfile( result );
+
+  emit m_adaptor->AutoUndervoltFinished(
+    result.gpuFreqCapMHz,
+    result.success,
+    QString::fromStdString( result.message ),
+    QString::fromStdString( result.appName ) );
+}
+
+void UccDBusService::persistAutoUndervoltProfile( const UndervoltResult &result )
+{
+  const auto &appKey = result.appName;
+  if ( appKey.empty() || result.gpuFreqCapMHz <= 0 )
+    return;
+
+  std::string profileId;
+  auto mapIt = m_settings.appGpuProfileMap.find( appKey );
+  if ( mapIt != m_settings.appGpuProfileMap.end() )
+    profileId = mapIt->second;
+  if ( profileId.empty() )
+    profileId = generateProfileId();
+
+  const std::string profileName = "AutoUV: " + appKey;
+
+  nlohmann::json profileJson;
+  auto existing = m_settings.gpuProfiles.find( profileId );
+  if ( existing != m_settings.gpuProfiles.end() )
+  {
+    try { profileJson = nlohmann::json::parse( existing->second ); }
+    catch ( ... ) { profileJson = nlohmann::json::object(); }
+  }
+
+  profileJson[ "name" ] = profileName;
+  if ( !profileJson.contains( "offsets" ) || !profileJson["offsets"].is_array() )
+    profileJson[ "offsets" ] = nlohmann::json::array();
+
+  // Upsert P0 graphics offset entry.
+  bool updatedP0 = false;
+  for ( auto &entry : profileJson["offsets"] )
+  {
+    if ( !entry.is_object() ) continue;
+    if ( entry.value( "pstate", -1 ) == 0 )
+    {
+      entry[ "gpuOffsetMHz" ] = result.coreOffsetMHz;
+      if ( !entry.contains( "vramOffsetMHz" ) )
+        entry[ "vramOffsetMHz" ] = 0;
+      updatedP0 = true;
+      break;
+    }
+  }
+  if ( !updatedP0 )
+  {
+    profileJson[ "offsets" ].push_back( {
+      { "pstate", 0 },
+      { "gpuOffsetMHz", result.coreOffsetMHz },
+      { "vramOffsetMHz", 0 }
+    } );
+  }
+
+  profileJson[ "gpuLockedClocks" ] = {
+    { "enabled", true },
+    { "min", result.gpuFreqCapMHz },
+    { "max", result.gpuFreqCapMHz }
+  };
+
+  // AutoUV profiles must only control graphics cap + graphics offset.
+  // Drop stale power/VRAM lock fields inherited from previously mapped
+  // profiles, otherwise applyGpuOCProfile() can unexpectedly reset power
+  // limits or force VRAM clock locks from old profile content.
+  profileJson.erase( "vramLockedClocks" );
+  profileJson.erase( "powerLimitW" );
+
+  const auto nowEpochSec = static_cast< long long >(
+    std::chrono::duration_cast< std::chrono::seconds >(
+      std::chrono::system_clock::now().time_since_epoch() ).count() );
+
+  profileJson[ "meta" ][ "autoUndervolt" ] = {
+    { "appName", appKey },
+    { "baselineClkMHz", result.baselineClkMHz },
+    { "baselineFps", result.baselineFps },
+    { "achievedFps", result.finalFps },
+    { "coreOffsetMHz", result.coreOffsetMHz },
+    { "baselineVoltageMv", result.baselineVoltageMv },
+    { "achievedVoltageMv", result.finalVoltageMv },
+    { "achievedPowerW", result.finalPowerW },
+    { "lastUsedEpochSec", nowEpochSec }
+  };
+
+  const std::string profilePayload = profileJson.dump();
+  m_settings.gpuProfiles[ profileId ] = profilePayload;
+  m_settings.appGpuProfileMap[ appKey ] = profileId;
+
+  bool found = false;
+  for ( auto &gp : m_customGpuProfiles )
+  {
+    if ( gp.id == profileId )
+    {
+      gp.name = profileName;
+      gp.json = profilePayload;
+      found = true;
+      break;
+    }
+  }
+  if ( !found )
+    m_customGpuProfiles.push_back( { profileId, profileName, profilePayload } );
+
+  // Keep worker cache aligned with persisted settings.
+  std::map< std::string, AppUndervoltProfile > syncedProfiles;
+  for ( const auto &[app, p] : m_autoUndervoltWorker->profiles() )
+    syncedProfiles[ app ] = p;
+
+  AppUndervoltProfile cache;
+  cache.appName = appKey;
+  cache.gpuFreqCapMHz = result.gpuFreqCapMHz;
+  cache.coreOffsetMHz = result.coreOffsetMHz;
+  cache.baselineClkMHz = result.baselineClkMHz;
+  cache.baselineFps = result.baselineFps;
+  cache.achievedFps = result.finalFps;
+  cache.achievedPowerW = result.finalPowerW;
+  cache.achievedVoltageMv = result.finalVoltageMv;
+  cache.lastUsed = std::chrono::system_clock::now();
+  syncedProfiles[ appKey ] = cache;
+  m_autoUndervoltWorker->loadProfiles( syncedProfiles );
+
+  if ( !m_settingsManager.writeSettings( m_settings ) )
+    syslog( LOG_WARNING, "[AutoUV] Failed to persist app->GPU profile mapping" );
+  else
+    updateDBusSettingsData();
 }
 
 void UccDBusService::shutdown()
@@ -5848,6 +5733,8 @@ void UccDBusService::computeDeviceCapabilities()
 
 void UccDBusService::loadSettings()
 {
+  bool settingsChanged = false;
+
   if ( auto loadedSettings = m_settingsManager.readSettings(); loadedSettings.has_value() )
   {
     m_settings = *loadedSettings;
@@ -5935,6 +5822,39 @@ void UccDBusService::loadSettings()
   loadSubProfiles( m_settings.keyboardProfiles, m_customKeyboardProfiles, "keyboard" );
   loadSubProfiles( m_settings.gpuProfiles, m_customGpuProfiles, "GPU" );
 
+  const bool keepMiscZone = std::any_of( m_hw.defaultFanZones().begin(),
+                                         m_hw.defaultFanZones().end(),
+                                         []( const auto &zone ) {
+                                           return zone.id == WellKnownZoneIDs::Misc;
+                                         } );
+  for ( auto &profile : m_customFanProfiles )
+  {
+    bool sanitized = false;
+    const std::string filteredJson = stripLegacyMiscZoneFromProfileJson( profile.json,
+                                                                         keepMiscZone,
+                                                                         &sanitized );
+    if ( !sanitized )
+      continue;
+
+    profile.json = filteredJson;
+
+    try
+    {
+      auto wrapper = nlohmann::json::parse( filteredJson );
+      wrapper["name"] = profile.name;
+      m_settings.fanProfiles[profile.id] = wrapper.dump();
+      settingsChanged = true;
+      std::cout << "[Settings] Removed legacy '" << WellKnownZoneIDs::Misc
+                << "' zone from fan profile '" << profile.name
+                << "' (ID: " << profile.id << ")" << std::endl;
+    }
+    catch ( const std::exception &e )
+    {
+      std::cerr << "[Settings] Failed to sanitize fan profile '" << profile.id
+                << "': " << e.what() << std::endl;
+    }
+  }
+
   // IMPORTANT: Do NOT resync/clear m_settings.profiles!
   // Reason: m_settings.profiles is the authoritative source from the file.
   // Resyncing can change keys or representation, breaking stateMap lookups.
@@ -5943,8 +5863,6 @@ void UccDBusService::loadSettings()
 
   // validate and fix state map if needed
   auto allProfiles = getAllProfiles();
-  bool settingsChanged = false;
-
   for ( const auto &stateKey : { "power_ac", "power_bat", "power_wc" } )
   {
     // check if state key exists in map – if not, leave it unassigned
@@ -6291,6 +6209,227 @@ std::string UccDBusService::resolveKeyboardProfileJSON( const std::string &keybo
   return {};
 }
 
+void UccDBusService::onFanTemperatureUpdate( size_t fanIndex, int64_t timestamp, int temp )
+{
+  {
+    std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+    if ( fanIndex < m_dbusData.fans.size() )
+      m_dbusData.fans[ fanIndex ].temp.set( timestamp, temp );
+  }
+
+  // Push temperature to history store
+  if ( fanIndex == 0 )
+    m_metricsStore.push( MetricId::CpuTemp, timestamp, temp );
+  else if ( fanIndex == 1 )
+    m_metricsStore.push( MetricId::GpuTemp, timestamp, temp );
+
+  // Auto-control water cooler fan and pump voltage based on CPU temperature
+  if ( !m_dbusData.waterCoolerConnected.load() || !m_activeProfile.fan.autoControlWC || fanIndex != 0 )
+    return;
+
+  try
+  {
+    updateWaterCoolerAutoControl( temp );
+  }
+  catch ( ... ) { /* ignore errors in water cooler auto-control */ }
+}
+
+void UccDBusService::updateWaterCoolerAutoControl( int temp )
+{
+  // Apply asymmetric EWMA to the raw sensor reading so that the
+  // water-cooler fan and pump see a smooth temperature signal,
+  // matching the filtering the main fan control loop uses.
+  if ( m_wcTempFiltered < 0.0 )
+    m_wcTempFiltered = static_cast< double >( temp );
+  else
+  {
+    const double alpha = ( temp > m_wcTempFiltered )
+                           ? WC_TEMP_ALPHA_RISING : WC_TEMP_ALPHA_FALLING;
+    m_wcTempFiltered += alpha * ( static_cast< double >( temp ) - m_wcTempFiltered );
+  }
+  const int wcTemp = static_cast< int >( std::round( m_wcTempFiltered ) );
+
+  const std::string &fpName = m_activeProfile.fan.fanProfile;
+  FanProfile fp = resolveFanProfile( fpName );
+
+  // Overlay water cooler fan curve from temporary curves if active
+  if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
+  {
+    const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
+    auto wcFanIt = tempCurves.find( WellKnownZoneIDs::WCFan );
+    if ( wcFanIt != tempCurves.end() && !wcFanIt->second.empty() )
+    {
+      auto *wcFanZone = fp.findZoneCurve( WellKnownZoneIDs::WCFan );
+      if ( wcFanZone )
+        wcFanZone->curve = wcFanIt->second;
+    }
+  }
+
+  // Overlay pump curve from temporary curves if active
+  if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
+  {
+    const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
+    auto wcPumpIt = tempCurves.find( WellKnownZoneIDs::WCPump );
+    if ( wcPumpIt != tempCurves.end() && !wcPumpIt->second.empty() )
+    {
+      auto *wcPumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+      if ( wcPumpZone )
+        wcPumpZone->curve = wcPumpIt->second;
+    }
+  }
+
+  const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
+  const int wcFanSpeed = fp.getSpeedForZone( snappedTemp, WellKnownZoneIDs::WCFan );
+  if ( m_waterCoolerWorker )
+    m_waterCoolerWorker->setFanSpeed( std::max( wcFanSpeed, 0 ) );
+
+  // Temperature LED mode: compute gradient color from fan speed
+  if ( m_waterCoolerLedMode.load() == static_cast< int32_t >( ucc::RGBState::Temperature ) )
+  {
+    const float t = static_cast< float >( std::clamp( wcFanSpeed, 0, 100 ) ) / 100.0f;
+    const int ledR = static_cast< int >( t * 255.0f );
+    const int ledG = 0;
+    const int ledB = static_cast< int >( ( 1.0f - t ) * 255.0f );
+    if ( m_waterCoolerWorker )
+      m_waterCoolerWorker->setLEDColor( ledR, ledG, ledB,
+        static_cast< int >( ucc::RGBState::Static ) );
+  }
+
+  // Auto-control pump voltage with hysteresis.
+  // Step-up happens immediately at the table threshold; step-down requires
+  // the temperature to fall at least PUMP_HYSTERESIS_DEG below the
+  // threshold that last triggered an upward transition.
+  static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
+      ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
+      ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
+
+  // Read pump curve from the wc-pump zone
+  const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+  int rawIdx = 0;
+  if ( pumpZone )
+  {
+    for ( const auto &pt : pumpZone->curve )
+    {
+      if ( wcTemp >= pt.temp ) rawIdx = std::min( pt.speed, 4 );
+      else                     break;
+    }
+  }
+
+  if ( rawIdx > m_pumpHysSpeedIdx )
+  {
+    // Temperature rising – apply new level and record its table threshold.
+    m_pumpHysSpeedIdx = rawIdx;
+    m_pumpHysThreshold = 0;
+    if ( pumpZone )
+      for ( const auto &pt : pumpZone->curve )
+        if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
+  }
+  else if ( rawIdx < m_pumpHysSpeedIdx )
+  {
+    // Temperature falling – only step down once we are past the dead-band.
+    if ( wcTemp < m_pumpHysThreshold - PUMP_HYSTERESIS_DEG )
+    {
+      m_pumpHysSpeedIdx = rawIdx;
+      m_pumpHysThreshold = 0;
+      if ( pumpZone )
+        for ( const auto &pt : pumpZone->curve )
+          if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
+    }
+  }
+
+  const ucc::PumpVoltage pumpSpeedValue =
+      pumpIdxToVoltage[ std::clamp( m_pumpHysSpeedIdx, 0, 4 ) ];
+  if ( m_waterCoolerWorker )
+    m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
+}
+
+void UccDBusService::applyFullProfile( const UccProfile &profile )
+{
+  // Preserve runtime water cooler enable state across profile re-application.
+  // The user's explicit EnableWaterCooler() D-Bus call is authoritative;
+  // the stored profile may have a stale enableWaterCooler value.
+  const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
+  m_activeProfile = profile;
+  m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
+  snapProfileFrequencies( m_activeProfile );
+  updateDBusActiveProfileData();
+
+  // Apply sameSpeed setting to fan worker
+  if ( m_fanControlWorker )
+    m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
+
+  // Resolve and apply fan curves from named profile
+  try
+  {
+    FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
+    if ( fp.isValid() )
+    {
+      std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
+      for ( const auto &zc : fp.zoneCurves )
+        if ( !zc.curve.empty() )
+          zoneCurves[zc.zoneId] = zc.curve;
+
+      std::cout << "[State] Using fan zones from profile '" << profile.fan.fanProfile << "'" << std::endl;
+
+      if ( m_fanControlWorker && !zoneCurves.empty() )
+      {
+        m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
+        std::cout << "[State] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
+      }
+
+      // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
+      const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+           && pumpZone && !pumpZone->curve.empty() )
+      {
+        int maxTemp = 0;
+        {
+          std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+          for ( const auto &fan : m_dbusData.fans )
+            maxTemp = std::max( maxTemp, fan.temp.data );
+        }
+        int pumpIdx = 0;
+        for ( const auto &pt : pumpZone->curve )
+        {
+          if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
+          else                      break;
+        }
+        m_pumpHysSpeedIdx = 0;
+        m_pumpHysThreshold = 0;
+        static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
+          ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
+          ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
+        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
+        std::cout << "[State] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
+      }
+    }
+  }
+  catch ( const std::exception &e )
+  {
+    std::cerr << "[State] Failed to apply fan curves: " << e.what() << std::endl;
+  }
+
+  // Apply CPU/ODM/keyboard workers
+  if ( m_cpuWorker )
+    m_cpuWorker->reapplyProfile();
+  if ( m_profileSettingsWorker )
+    m_profileSettingsWorker->reapplyProfile();
+  applyKeyboardFromProfile( profile );
+
+  // Apply GPU OC and cTGP from the profile
+  applyGpuOCFromProfile( profile );
+
+  // Water cooler scanning state is preserved from the runtime flag
+  // (set via EnableWaterCooler D-Bus call). Do NOT re-read enableWaterCooler
+  // from the stored profile — it may be stale.
+
+  // Emit ProfileChanged signal for DBus clients
+  if ( m_adaptor )
+    m_adaptor->emitProfileChanged( profile.id,
+                                   profile.keyboard.keyboardProfileId,
+                                   profile.fan.fanProfile );
+}
+
 void UccDBusService::applyProfileForCurrentState()
 {
   const std::string stateKey = profileStateToString( m_currentState );
@@ -6305,96 +6444,6 @@ void UccDBusService::applyProfileForCurrentState()
   m_currentStateProfileId = profileId;
 
   std::cout << "[State] Applying profile for state '" << stateKey << "': " << profileId << std::endl;
-
-  // Lambda to apply all profile settings (fan curves, sameSpeed, CPU, ODM, keyboard, pump auto-control)
-  auto applyFullProfile = [this]( const UccProfile &profile )
-  {
-    // Preserve runtime water cooler enable state across profile re-application.
-    // The user's explicit EnableWaterCooler() D-Bus call is authoritative;
-    // the stored profile may have a stale enableWaterCooler value.
-    const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
-    m_activeProfile = profile;
-    m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
-    snapProfileFrequencies( m_activeProfile );
-    updateDBusActiveProfileData();
-
-    // Apply sameSpeed setting to fan worker
-    if ( m_fanControlWorker )
-    {
-      m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
-    }
-
-    // Resolve and apply fan curves from named profile
-    try
-    {
-      FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
-      if ( fp.isValid() )
-      {
-        std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
-        for ( const auto &zc : fp.zoneCurves )
-          if ( !zc.curve.empty() )
-            zoneCurves[zc.zoneId] = zc.curve;
-
-        std::cout << "[State] Using fan zones from profile '" << profile.fan.fanProfile << "'" << std::endl;
-
-        if ( m_fanControlWorker && !zoneCurves.empty() )
-        {
-          m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
-          std::cout << "[State] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
-        }
-
-        // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-        const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
-        if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-             && pumpZone && !pumpZone->curve.empty() )
-        {
-          int maxTemp = 0;
-          {
-            std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-            for ( const auto &fan : m_dbusData.fans )
-              maxTemp = std::max( maxTemp, fan.temp.data );
-          }
-          int pumpIdx = 0;
-          for ( const auto &pt : pumpZone->curve )
-          {
-            if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
-            else                      break;
-          }
-          m_pumpHysSpeedIdx = 0;
-          m_pumpHysThreshold = 0;
-          static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
-            ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-            ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-          m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
-          std::cout << "[State] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
-        }
-      }
-    }
-    catch ( const std::exception &e )
-    {
-      std::cerr << "[State] Failed to apply fan curves: " << e.what() << std::endl;
-    }
-
-    // Apply CPU/ODM/keyboard workers
-    if ( m_cpuWorker )
-      m_cpuWorker->reapplyProfile();
-    if ( m_profileSettingsWorker )
-      m_profileSettingsWorker->reapplyProfile();
-    applyKeyboardFromProfile( profile );
-
-    // Apply GPU OC and cTGP from the profile
-    applyGpuOCFromProfile( profile );
-
-    // Water cooler scanning state is preserved from the runtime flag
-    // (set via EnableWaterCooler D-Bus call). Do NOT re-read enableWaterCooler
-    // from the stored profile — it may be stale.
-
-    // Emit ProfileChanged signal for DBus clients
-    if ( m_adaptor )
-      m_adaptor->emitProfileChanged( profile.id,
-                                     profile.keyboard.keyboardProfileId,
-                                     profile.fan.fanProfile );
-  };
 
   // Try persistent (custom) profiles first
   if ( auto profileIt = m_settings.profiles.find( profileId );
