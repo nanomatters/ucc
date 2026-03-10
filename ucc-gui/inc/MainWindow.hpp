@@ -224,6 +224,7 @@ namespace ucc
     QLabel *m_odmPowerLimit3Value = nullptr;
 
     // Keyboard backlight widgets
+    QWidget *m_keyboardAndHardwareTab = nullptr;
     QSlider *m_keyboardBrightnessSlider = nullptr;
     QLabel *m_keyboardBrightnessValueLabel = nullptr;
     QPushButton *m_keyboardColorButton = nullptr;

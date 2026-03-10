@@ -15,7 +15,9 @@
 
 #pragma once
 
+#include "hal/FanZone.hpp"
 #include "profiles/UccProfile.hpp"
+#include "profiles/FanProfile.hpp"
 #include <string>
 #include <vector>
 
@@ -48,6 +50,10 @@ public:
 
   /// Return the skeleton profile used as a starting point for new custom profiles.
   virtual UccProfile getDefaultCustomProfile() const = 0;
+
+  /// Return platform-specific built-in fan profiles for the detected hardware topology.
+  virtual std::vector< FanProfile > getDefaultFanProfiles(
+    const std::vector< ucc::hal::FanZone > &zones ) const = 0;
 };
 
 } // namespace ucc::hal

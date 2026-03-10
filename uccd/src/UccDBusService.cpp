@@ -16,6 +16,7 @@
 #include "UccDBusService.hpp"
 #include "CommonTypes.hpp"
 #include "NvmlWrapper.hpp"
+#include "SmbiosMemoryDecoder.hpp"
 #include "profiles/BuiltinSubProfiles.hpp"
 #include "profiles/DefaultProfiles.hpp"
 #include "profiles/FanProfile.hpp"
@@ -33,6 +34,7 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <set>
 #include <thread>
 #include <cmath>
 #include <climits>
@@ -52,6 +54,68 @@
 #include <nlohmann/json.hpp>
 
 static std::string jsonEscape( const std::string &value );
+
+static std::string fanProfileToJSON( const FanProfile &fp,
+                                     const std::unordered_map< std::string, std::string > &hwDeviceTypes,
+                                     const std::unordered_map< std::string, std::string > &zoneNames )
+{
+  auto zoneDisplayName = [&zoneNames]( const std::string &zid ) -> std::string {
+    if ( auto it = zoneNames.find( zid ); it != zoneNames.end() && !it->second.empty() )
+      return it->second;
+    if ( zid == WellKnownZoneIDs::CPU )    return "CPU Fans";
+    if ( zid == WellKnownZoneIDs::GPU )    return "GPU Fans";
+    if ( zid == WellKnownZoneIDs::Case )   return "Case Fans";
+    if ( zid == WellKnownZoneIDs::Pump )   return "Pump(s)";
+    if ( zid == WellKnownZoneIDs::Misc )   return "Other Fans";
+    if ( zid == WellKnownZoneIDs::WCFan )  return "Water Cooler Fan";
+    if ( zid == WellKnownZoneIDs::WCPump ) return "Water Cooler Pump";
+    return zid;
+  };
+
+  auto zoneDeviceTypeStr = [&hwDeviceTypes]( const std::string &zid ) -> std::string {
+    if ( auto it = hwDeviceTypes.find( zid ); it != hwDeviceTypes.end() )
+      return it->second;
+    if ( zid == WellKnownZoneIDs::Pump )   return "pump";
+    if ( zid == WellKnownZoneIDs::WCPump ) return "stagedPump";
+    return "fan";
+  };
+
+  std::string json = "{";
+  json += "\"id\":\"" + jsonEscape( fp.id ) + "\",";
+  json += "\"name\":\"" + jsonEscape( fp.name ) + "\",";
+  json += "\"zones\":[";
+
+  bool firstZone = true;
+  for ( const auto &zc : fp.zoneCurves )
+  {
+    if ( !hwDeviceTypes.empty() && hwDeviceTypes.find( zc.zoneId ) == hwDeviceTypes.end() )
+      continue;
+
+    if ( !firstZone )
+      json += ',';
+    firstZone = false;
+
+    json += "{\"id\":\"" + jsonEscape( zc.zoneId ) + "\"";
+    json += ",\"name\":\"" + jsonEscape( zoneDisplayName( zc.zoneId ) ) + "\"";
+    json += ",\"deviceType\":\"" + jsonEscape( zoneDeviceTypeStr( zc.zoneId ) ) + "\"";
+    json += ",\"hysteresisDeg\":" + std::to_string( zc.hysteresisDeg );
+    json += ",\"enabled\":" + std::string( zc.enabled ? "true" : "false" );
+    if ( !zc.thermalSourceId.empty() )
+      json += ",\"thermalSourceId\":\"" + jsonEscape( zc.thermalSourceId ) + "\"";
+
+    json += ",\"curve\":[";
+    for ( size_t i = 0; i < zc.curve.size(); ++i )
+    {
+      if ( i > 0 )
+        json += ',';
+      json += "{\"temp\":" + std::to_string( zc.curve[i].temp )
+           + ",\"speed\":" + std::to_string( zc.curve[i].speed ) + "}";
+    }
+    json += "]}";
+  }
+  json += "]}";
+  return json;
+}
 
 // helper function to convert GPU info to JSON
 std::string dgpuInfoToJSON( const DGpuInfo &info )
@@ -1131,7 +1195,7 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
       }
     }
 
-    bool result;
+    bool result = false;
     if ( existingProfileIt != m_service->m_customProfiles.end() )
     {
       // Profile with same name exists in memory
@@ -1297,13 +1361,16 @@ QString UccDBusInterfaceAdaptor::GetFanProfilesJSON()
   std::string json = "[";
   size_t idx = 0;
 
-  for ( size_t i = 0; i < defaultFanProfiles.size(); ++i )
+  if ( m_service )
   {
-    if ( idx > 0 ) json += ",";
-    json += "{\"id\":\"" + defaultFanProfiles[i].id + "\","
-            "\"name\":\"" + defaultFanProfiles[i].name + "\","
-            "\"editable\":false}";
-    ++idx;
+    for ( const auto &fp : m_service->m_builtinFanProfiles )
+    {
+      if ( idx > 0 ) json += ",";
+      json += "{\"id\":\"" + fp.id + "\","
+              "\"name\":\"" + fp.name + "\","
+              "\"editable\":false}";
+      ++idx;
+    }
   }
 
   if ( m_service )
@@ -1338,6 +1405,504 @@ QString UccDBusInterfaceAdaptor::GetThermalSourcesJSON()
     json += ",\"strategy\":\"" + ucc::hal::thermalStrategyToString( ts.strategy ) + "\"";
     json += "}";
   }
+  json += "]";
+  return QString::fromStdString( json );
+}
+
+QString UccDBusInterfaceAdaptor::GetHardwareFanDevicesJSON()
+{
+  if ( !m_service )
+    return QStringLiteral( "[]" );
+
+  const auto &fans = m_service->m_hw.fans();
+  std::string json = "[";
+  for ( size_t i = 0; i < fans.size(); ++i )
+  {
+    const auto &f = fans[i];
+    if ( i > 0 ) json += ',';
+    json += "{\"id\":\"" + f.id + "\"";
+    json += ",\"label\":\"" + f.label + "\"";
+    json += ",\"hwmonPath\":\"" + f.hwmonPath + "\"";
+    json += ",\"index\":" + std::to_string( f.index );
+    json += ",\"canRead\":" + std::string( f.canRead ? "true" : "false" );
+    json += ",\"canControl\":" + std::string( f.canControl ? "true" : "false" );
+    json += ",\"deviceType\":\"" + ucc::hal::fanDeviceTypeToString( f.deviceType ) + "\"";
+    json += "}";
+  }
+  json += "]";
+  return QString::fromStdString( json );
+}
+
+QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
+{
+  if ( !m_service )
+    return QStringLiteral( "[]" );
+
+  auto trimCopy = []( const std::string &in ) -> std::string {
+    size_t b = 0;
+    while ( b < in.size() && std::isspace( static_cast< unsigned char >( in[b] ) ) )
+      ++b;
+    size_t e = in.size();
+    while ( e > b && std::isspace( static_cast< unsigned char >( in[e - 1] ) ) )
+      --e;
+    return in.substr( b, e - b );
+  };
+
+  auto readFirstLine = [&]( const std::string &path ) -> std::string {
+    std::ifstream f( path );
+    if ( !f.is_open() )
+      return {};
+    std::string line;
+    std::getline( f, line );
+    return trimCopy( line );
+  };
+
+  auto resolveNetworkSourceDisplay = [&]( const std::string &source ) -> std::string {
+    if ( source.empty() )
+      return {};
+
+    const std::filesystem::path netPath = std::filesystem::path( "/sys/class/net" ) / source;
+    const std::filesystem::path devPath = netPath / "device";
+    if ( !std::filesystem::exists( netPath ) || !std::filesystem::exists( devPath ) )
+      return {};
+
+    std::string model;
+    std::string vendor;
+    std::string busId;
+    std::string driver;
+
+    struct udev *udevCtx = udev_new();
+    if ( !udevCtx )
+      return {};
+
+    struct udev_device *netDev = udev_device_new_from_subsystem_sysname( udevCtx, "net", source.c_str() );
+    if ( !netDev )
+    {
+      udev_unref( udevCtx );
+      return {};
+    }
+
+    const char *driverProp = udev_device_get_property_value( netDev, "ID_NET_DRIVER" );
+    if ( driverProp )
+      driver = driverProp;
+
+    struct udev_device *parent = udev_device_get_parent_with_subsystem_devtype( netDev, "pci", nullptr );
+    if ( !parent )
+      parent = udev_device_get_parent_with_subsystem_devtype( netDev, "usb", nullptr );
+    if ( !parent )
+      parent = udev_device_get_parent_with_subsystem_devtype( netDev, "platform", nullptr );
+
+    if ( parent )
+    {
+      if ( const char *v = udev_device_get_property_value( parent, "ID_MODEL_FROM_DATABASE" ); v )
+        model = v;
+      if ( const char *v = udev_device_get_property_value( parent, "ID_MODEL" ); v && model.empty() )
+        model = v;
+      if ( const char *v = udev_device_get_property_value( parent, "ID_VENDOR_FROM_DATABASE" ); v )
+        vendor = v;
+      if ( const char *v = udev_device_get_sysname( parent ); v )
+        busId = v;
+    }
+
+    udev_device_unref( netDev );
+    udev_unref( udevCtx );
+
+    std::string resolved;
+    if ( !vendor.empty() && !model.empty() )
+    {
+      const std::string lVendor = QString::fromStdString( vendor ).toLower().toStdString();
+      const std::string lModel = QString::fromStdString( model ).toLower().toStdString();
+      if ( lModel.find( lVendor ) != std::string::npos )
+        resolved = model;
+      else
+        resolved = vendor + " " + model;
+    }
+    else if ( !model.empty() )
+      resolved = model;
+    else if ( !vendor.empty() )
+      resolved = vendor;
+
+    if ( resolved.empty() )
+      return {};
+
+    if ( !driver.empty() )
+      resolved += " [" + driver + "]";
+    if ( !busId.empty() )
+      resolved += " (" + busId + ")";
+
+    return resolved;
+  };
+
+  const std::vector< MemoryModuleInfo > dmiMemDevices = detectMemoryModulesFromSmbios();
+
+  auto findNvmeDeviceDir = []( const std::string &hwmonPath ) -> std::filesystem::path {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path p = fs::path( hwmonPath );
+    if ( p.empty() )
+      return {};
+
+    p = fs::weakly_canonical( p, ec );
+    if ( ec )
+      p = fs::path( hwmonPath );
+
+    for ( fs::path cur = p; !cur.empty(); cur = cur.parent_path() )
+    {
+      const std::string name = cur.filename().string();
+      if ( name.rfind( "nvme", 0 ) == 0 )
+        return cur;
+      if ( cur == cur.parent_path() )
+        break;
+    }
+    return {};
+  };
+
+  auto extractPciAddress = []( const std::filesystem::path &start ) -> std::string {
+    auto isHex = []( char c ) -> bool {
+      return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) || ( c >= 'A' && c <= 'F' );
+    };
+    auto looksLikePciBdf = [&]( const std::string &s ) -> bool {
+      if ( s.size() != 12 )
+        return false;
+      return isHex( s[0] ) && isHex( s[1] ) && isHex( s[2] ) && isHex( s[3] )
+          && s[4] == ':'
+          && isHex( s[5] ) && isHex( s[6] )
+          && s[7] == ':'
+          && isHex( s[8] ) && isHex( s[9] )
+          && s[10] == '.'
+          && ( s[11] >= '0' && s[11] <= '7' );
+    };
+
+    for ( std::filesystem::path cur = start; !cur.empty(); cur = cur.parent_path() )
+    {
+      const std::string n = cur.filename().string();
+      if ( looksLikePciBdf( n ) )
+        return n;
+      if ( cur == cur.parent_path() )
+        break;
+    }
+    return {};
+  };
+
+  auto buildNvmeDisplayLabel = [&]( const ucc::hal::TempSensorInfo &s ) -> std::string {
+    const std::filesystem::path nvmeDir = findNvmeDeviceDir( s.hwmonPath );
+    if ( nvmeDir.empty() )
+      return {};
+
+    const std::string model = readFirstLine( ( nvmeDir / "model" ).string() );
+    const std::string serial = readFirstLine( ( nvmeDir / "serial" ).string() );
+    const std::string fw = readFirstLine( ( nvmeDir / "firmware_rev" ).string() );
+    const std::string bdf = extractPciAddress( nvmeDir );
+
+    std::string label = model.empty() ? std::string( "NVMe" ) : model;
+    std::vector< std::string > meta;
+    if ( !serial.empty() ) meta.push_back( serial );
+    if ( !fw.empty() ) meta.push_back( "FW " + fw );
+    if ( !bdf.empty() ) meta.push_back( bdf );
+
+    if ( !meta.empty() )
+    {
+      label += " (";
+      for ( size_t i = 0; i < meta.size(); ++i )
+      {
+        if ( i > 0 ) label += ", ";
+        label += meta[i];
+      }
+      label += ")";
+    }
+
+    return label;
+  };
+
+  auto parseDdrSlotFromPath = []( const std::string &hwmonPath ) -> int {
+    const size_t dash = hwmonPath.rfind( '-' );
+    if ( dash == std::string::npos || dash + 5 > hwmonPath.size() )
+      return 0;
+    const std::string tail = hwmonPath.substr( dash + 1, 4 );
+    if ( tail.size() != 4 )
+      return 0;
+
+    char *end = nullptr;
+    const long addr = std::strtol( tail.c_str(), &end, 16 );
+    if ( end == nullptr || *end != '\0' )
+      return 0;
+
+    if ( addr >= 0x50 && addr <= 0x57 )
+      return static_cast< int >( addr - 0x50 + 1 );
+    return 0;
+  };
+
+  auto parseSlotFromText = [&]( const std::string &text ) -> int {
+    if ( text.empty() )
+      return 0;
+
+    const std::string t = QString::fromStdString( text ).toLower().toStdString();
+
+    // First, try explicit "slot N" form.
+    const size_t slotPos = t.find( "slot" );
+    if ( slotPos != std::string::npos )
+    {
+      for ( size_t i = slotPos + 4; i < t.size(); ++i )
+      {
+        if ( std::isdigit( static_cast< unsigned char >( t[i] ) ) )
+        {
+          int n = 0;
+          while ( i < t.size() && std::isdigit( static_cast< unsigned char >( t[i] ) ) )
+          {
+            n = ( n * 10 ) + ( t[i] - '0' );
+            ++i;
+          }
+          return n > 0 ? n : 0;
+        }
+      }
+    }
+
+    // Then try DIMM-style labels like A1/B2/... and map to a linear slot index.
+    for ( size_t i = 0; i + 1 < t.size(); ++i )
+    {
+      const char a = t[i];
+      const char b = t[i + 1];
+      if ( a >= 'a' && a <= 'h' && b >= '1' && b <= '8' )
+      {
+        const int channel = ( a - 'a' );
+        const int pos = ( b - '0' );
+        return channel * 2 + pos;
+      }
+    }
+
+    return 0;
+  };
+
+  const auto &sensors = m_service->m_hw.tempSensors();
+
+  std::map< int, const MemoryModuleInfo * > modulesBySlot;
+  for ( const auto &md : dmiMemDevices )
+  {
+    int slot = parseSlotFromText( md.locator );
+    if ( slot <= 0 )
+      slot = parseSlotFromText( md.bankLocator );
+    if ( slot > 0 )
+      modulesBySlot[slot] = &md;
+  }
+
+  // If locator parsing is incomplete, map remaining modules to observed DDR slots in order.
+  std::set< int > observedDdrSlots;
+  for ( const auto &s : sensors )
+  {
+    const QString src = QString::fromStdString( s.source ).toLower();
+    if ( !src.contains( QStringLiteral( "spd" ) ) )
+      continue;
+    const int slot = parseDdrSlotFromPath( s.hwmonPath );
+    if ( slot > 0 )
+      observedDdrSlots.insert( slot );
+  }
+
+  if ( !observedDdrSlots.empty() )
+  {
+    std::vector< const MemoryModuleInfo * > unassignedModules;
+    for ( const auto &md : dmiMemDevices )
+    {
+      bool alreadyAssigned = false;
+      for ( const auto &[slot, ptr] : modulesBySlot )
+      {
+        if ( ptr == &md )
+        {
+          alreadyAssigned = true;
+          break;
+        }
+      }
+      if ( !alreadyAssigned )
+        unassignedModules.push_back( &md );
+    }
+
+    std::vector< int > unassignedSlots;
+    for ( const int slot : observedDdrSlots )
+    {
+      if ( modulesBySlot.find( slot ) == modulesBySlot.end() )
+        unassignedSlots.push_back( slot );
+    }
+
+    const size_t n = std::min( unassignedSlots.size(), unassignedModules.size() );
+    for ( size_t i = 0; i < n; ++i )
+      modulesBySlot[unassignedSlots[i]] = unassignedModules[i];
+  }
+
+  auto buildDdrDisplayLabel = [&]( const ucc::hal::TempSensorInfo &s ) -> std::string {
+    const int slot = parseDdrSlotFromPath( s.hwmonPath );
+    const MemoryModuleInfo *md = nullptr;
+    if ( slot > 0 )
+    {
+      if ( auto it = modulesBySlot.find( slot ); it != modulesBySlot.end() )
+        md = it->second;
+    }
+
+    if ( !md )
+    {
+      if ( slot > 0 )
+        return "DDR5 module, SLOT " + std::to_string( slot );
+      return {};
+    }
+
+    std::string label;
+    if ( md->sizeMiB > 0 )
+    {
+      std::ostringstream ss;
+      ss << std::fixed << std::setprecision( 1 )
+         << ( static_cast< double >( md->sizeMiB ) / 1024.0 ) << " GiB";
+      label += ss.str();
+    }
+
+    const int speedMTs = md->configuredSpeedMTs > 0 ? md->configuredSpeedMTs : md->maxSpeedMTs;
+    if ( speedMTs > 0 )
+    {
+      if ( !label.empty() ) label += " @ ";
+      label += std::to_string( speedMTs ) + " MT/s";
+    }
+
+    if ( md->configuredVoltageMv > 0 )
+    {
+      std::ostringstream vs;
+      vs << std::fixed << std::setprecision( 3 )
+         << ( static_cast< double >( md->configuredVoltageMv ) / 1000.0 ) << " V";
+      if ( !label.empty() ) label += " ";
+      label += vs.str();
+    }
+
+    if ( slot > 0 )
+    {
+      if ( !label.empty() ) label += ", ";
+      label += "SLOT " + std::to_string( slot );
+    }
+    else if ( !md->locator.empty() )
+    {
+      if ( !label.empty() ) label += ", ";
+      label += md->locator;
+    }
+
+    return label;
+  };
+
+  auto classifySensorCategory = []( const std::string &source,
+                                    const std::string &label,
+                                    const std::string &hwmonPath ) -> std::string {
+    const QString s = ( QString::fromStdString( source ) + " "
+                        + QString::fromStdString( label ) + " "
+                        + QString::fromStdString( hwmonPath ) ).toLower();
+
+    if ( s.contains( QStringLiteral( "gpu" ) )
+         || s.contains( QStringLiteral( "nvidia" ) )
+         || s.contains( QStringLiteral( "amdgpu" ) )
+         || s.contains( QStringLiteral( "radeon" ) ) )
+      return "gpu";
+
+    if ( s.contains( QStringLiteral( "k10temp" ) )
+         || s.contains( QStringLiteral( "coretemp" ) )
+         || s.contains( QStringLiteral( "cpu" ) ) )
+      return "cpu";
+
+    if ( s.contains( QStringLiteral( "nvme" ) ) )
+      return "nvme";
+
+    if ( s.contains( QStringLiteral( "spd5118" ) )
+         || s.contains( QStringLiteral( "spd" ) ) )
+      return "ddr5";
+
+    if ( s.contains( QStringLiteral( "nct6799" ) )
+         || s.contains( QStringLiteral( "nct" ) )
+         || s.contains( QStringLiteral( "it87" ) )
+         || s.contains( QStringLiteral( "w836" ) )
+         || s.contains( QStringLiteral( "f718" ) )
+         || s.contains( QStringLiteral( "acpi" ) )
+         || s.contains( QStringLiteral( "ec" ) )
+         || s.contains( QStringLiteral( "board" ) )
+         || s.contains( QStringLiteral( "pch" ) )
+         || s.contains( QStringLiteral( "chipset" ) ) )
+      return "board";
+
+    return "other";
+  };
+
+  std::string json = "[";
+  bool first = true;
+
+  auto appendObj = [&]( const std::string &obj ) {
+    if ( !first ) json += ',';
+    json += obj;
+    first = false;
+  };
+
+  for ( size_t i = 0; i < sensors.size(); ++i )
+  {
+    const auto &s = sensors[i];
+    const std::string category = classifySensorCategory( s.source, s.label, s.hwmonPath );
+    std::string displayLabel;
+    std::string sourceDisplay;
+
+    sourceDisplay = resolveNetworkSourceDisplay( s.source );
+    if ( category == "nvme" )
+      displayLabel = buildNvmeDisplayLabel( s );
+    else if ( category == "ddr5" )
+      displayLabel = buildDdrDisplayLabel( s );
+
+    std::string obj = "{\"id\":\"" + s.id + "\"";
+    obj += ",\"label\":\"" + jsonEscape( s.label ) + "\"";
+    if ( !displayLabel.empty() )
+      obj += ",\"displayLabel\":\"" + jsonEscape( displayLabel ) + "\"";
+    obj += ",\"source\":\"" + jsonEscape( s.source ) + "\"";
+    if ( !sourceDisplay.empty() )
+      obj += ",\"sourceDisplay\":\"" + jsonEscape( sourceDisplay ) + "\"";
+    obj += ",\"category\":\"" + category + "\"";
+    obj += ",\"hwmonPath\":\"" + jsonEscape( s.hwmonPath ) + "\"";
+    obj += ",\"index\":" + std::to_string( s.index );
+    obj += "}";
+    appendObj( obj );
+  }
+
+  // Add abstracted GPU sensors so UI can present board/cpu/gpu in one unified list.
+  // These are virtual sensor entries keyed by detected GPU model names.
+  {
+    std::lock_guard< std::mutex > lock( m_data.dataMutex );
+
+    const QString dGpuModel = QString::fromStdString( m_service->m_systemInfo.dGpuModel ).trimmed();
+    const QString iGpuModel = QString::fromStdString( m_service->m_systemInfo.iGpuModel ).trimmed();
+
+    auto dgpuDoc = QJsonDocument::fromJson( QByteArray::fromStdString( m_data.dGpuInfoValuesJSON ) );
+    if ( !dGpuModel.isEmpty() )
+    {
+      const QJsonObject o = dgpuDoc.isObject() ? dgpuDoc.object() : QJsonObject();
+      const double temp = o.value( QStringLiteral( "temp" ) ).toDouble( -1.0 );
+
+      std::string obj = "{\"id\":\"gpu-dgpu-temp\"";
+      obj += ",\"label\":\"Temperature\"";
+      obj += ",\"source\":\"" + jsonEscape( dGpuModel.toStdString() ) + "\"";
+      obj += ",\"category\":\"gpu\"";
+      obj += ",\"hwmonPath\":\"\"";
+      obj += ",\"index\":0";
+      if ( temp >= 0.0 )
+        obj += ",\"currentTempC\":" + std::to_string( static_cast< int >( std::lround( temp ) ) );
+      obj += "}";
+      appendObj( obj );
+    }
+
+    auto igpuDoc = QJsonDocument::fromJson( QByteArray::fromStdString( m_data.iGpuInfoValuesJSON ) );
+    if ( !iGpuModel.isEmpty() )
+    {
+      const QJsonObject o = igpuDoc.isObject() ? igpuDoc.object() : QJsonObject();
+      const double temp = o.value( QStringLiteral( "temp" ) ).toDouble( -1.0 );
+
+      std::string obj = "{\"id\":\"gpu-igpu-temp\"";
+      obj += ",\"label\":\"Temperature\"";
+      obj += ",\"source\":\"" + jsonEscape( iGpuModel.toStdString() ) + "\"";
+      obj += ",\"category\":\"gpu\"";
+      obj += ",\"hwmonPath\":\"\"";
+      obj += ",\"index\":1";
+      if ( temp >= 0.0 )
+        obj += ",\"currentTempC\":" + std::to_string( static_cast< int >( std::lround( temp ) ) );
+      obj += "}";
+      appendObj( obj );
+    }
+  }
+
   json += "]";
   return QString::fromStdString( json );
 }
@@ -1382,18 +1947,15 @@ QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
       if ( fp.id == requestedId )
         return QString::fromStdString( fp.json );
     }
+
+    for ( const auto &fp : m_service->m_builtinFanProfiles )
+    {
+      if ( fp.id == requestedId )
+        return QString::fromStdString( fp.json );
+    }
   }
 
-  // Build hardware device type map so the JSON reflects the actual hardware
-  std::unordered_map< std::string, std::string > hwTypes;
-  if ( m_service )
-  {
-    for ( const auto &zone : m_service->m_hw.defaultFanZones() )
-      hwTypes[zone.id] = ucc::hal::fanDeviceTypeToString( zone.defaultType );
-  }
-
-  // Fall back to built-in fan profiles
-  return QString::fromStdString( getFanProfileJson( requestedId, hwTypes ) );
+  return QStringLiteral( "{}" );
 }
 
 bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &name, const QString &json )
@@ -1406,7 +1968,7 @@ bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &
   const std::string sjson = json.toStdString();
 
   // Check this doesn't collide with a built-in fan profile
-  for ( const auto &fp : defaultFanProfiles )
+  for ( const auto &fp : m_service->m_builtinFanProfiles )
   {
     if ( fp.id == sid )
     {
@@ -1455,7 +2017,7 @@ bool UccDBusInterfaceAdaptor::DeleteFanProfile( const QString &id )
   const std::string sid = id.toStdString();
 
   // Cannot delete built-in
-  for ( const auto &fp : defaultFanProfiles )
+  for ( const auto &fp : m_service->m_builtinFanProfiles )
   {
     if ( fp.id == sid ) return false;
   }
@@ -3058,6 +3620,9 @@ UccDBusService::UccDBusService()
     m_dbusData.fanHwmonAvailable = m_hw.hasFanControl();
   }
 
+  // Build built-in fan profiles based on platform.
+  rebuildBuiltinFanProfiles();
+
   // initialize profiles first (safer, doesn't start threads)
   initializeProfiles();
 
@@ -3479,6 +4044,32 @@ int UccDBusService::readCurrentCTGPOffset() const
   catch ( ... )
   {
     return 0;
+  }
+}
+
+void UccDBusService::rebuildBuiltinFanProfiles()
+{
+  m_builtinFanProfiles.clear();
+
+  std::unordered_map< std::string, std::string > hwTypes;
+  std::unordered_map< std::string, std::string > zoneNames;
+  std::vector< ucc::hal::FanZone > zones;
+  for ( const auto &zone : m_hw.defaultFanZones() )
+  {
+    zones.push_back( zone );
+    hwTypes[zone.id] = ucc::hal::fanDeviceTypeToString( zone.defaultType );
+    zoneNames[zone.id] = zone.name;
+  }
+
+  auto *provider = m_hw.profileProvider();
+  if ( !provider )
+    return;
+
+  for ( const auto &fp : provider->getDefaultFanProfiles( zones ) )
+  {
+    m_builtinFanProfiles.push_back( { fp.id,
+                                      fp.name,
+                                      fanProfileToJSON( fp, hwTypes, zoneNames ) } );
   }
 }
 
@@ -4936,7 +5527,7 @@ UccProfile UccDBusService::getDefaultProfile() const
     return m_customProfiles[0];
 
   // ultimate fallback
-  return defaultCustomProfile;
+  return m_profileManager.getDefaultCustomProfile();
 }
 
 void UccDBusService::updateDBusActiveProfileData()
@@ -5643,8 +6234,17 @@ FanProfile UccDBusService::resolveFanProfile( const std::string &fanProfileId ) 
     }
   }
 
-  // Fall back to built-in fan profiles
-  return getDefaultFanProfile( fanProfileId );
+  // Check daemon-managed built-in fan profiles
+  for ( const auto &fp : m_builtinFanProfiles )
+  {
+    if ( fp.id == fanProfileId )
+      return ProfileManager::parseFanProfileJSON( fp.json );
+  }
+
+  if ( !m_builtinFanProfiles.empty() )
+    return ProfileManager::parseFanProfileJSON( m_builtinFanProfiles.front().json );
+
+  return FanProfile();
 }
 
 std::string UccDBusService::resolveGpuProfileJSON( const std::string &gpuProfileId ) const
@@ -6028,6 +6628,20 @@ void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &prof
     // Assign default GPU profile if none referenced
     if ( profile.gpuProfileId.empty() && !m_builtinGpuProfiles.empty() )
       profile.gpuProfileId = m_builtinGpuProfiles.front().id;
+
+    // Assign/repair fan profile to the platform's available built-in set.
+    const auto hasBuiltinFanProfile = [this]( const std::string &id ) {
+      for ( const auto &fp : m_builtinFanProfiles )
+        if ( fp.id == id )
+          return true;
+      return false;
+    };
+
+    if ( ( profile.fan.fanProfile.empty() || !hasBuiltinFanProfile( profile.fan.fanProfile ) )
+         && !m_builtinFanProfiles.empty() )
+    {
+      profile.fan.fanProfile = m_builtinFanProfiles.front().id;
+    }
 
     std::cout << "[fillDeviceSpecificDefaults]   Final TDP values: " << profile.odmPowerLimits.tdpValues.size() << std::endl;
   }

@@ -285,3 +285,4 @@ const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceCustomProfile
   { UniwillDeviceID::POLARIS1XA03, { defaultCustomProfile25WcTGP } },
   { UniwillDeviceID::STELLARIS1XA03, { defaultCustomProfile25WcTGP } },
 };
+// WRITE_TEST_MARKER

@@ -69,20 +69,5 @@ enum class UniwillDeviceID
   XNE16A25,                   // XMG NEO 16" AMD (Gen7, 2025)
 };
 
-// pre-defined profiles
-extern const UccProfile maxEnergySave;
-extern const UccProfile silent;
-extern const UccProfile office;
-extern const UccProfile highPerformance;
-extern const UccProfile highPerformance25WcTGP;
-
-// default custom profiles
-extern const UccProfile defaultCustomProfile;
-extern const UccProfile defaultMobileCustomProfileTDP;
-extern const UccProfile defaultMobileCustomProfileCl;
-extern const UccProfile defaultCustomProfile25WcTGP;
-
-// device-specific profile mappings
-extern const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceProfiles;
-extern const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceCustomProfiles;
+// Platform-specific default profiles are provided through HAL profile providers.
 

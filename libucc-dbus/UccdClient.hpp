@@ -73,6 +73,8 @@ public:
   bool deleteCustomProfile( const std::string &profileId );   // Backward-compat → deleteProfile
 
   // Hardware zone model
+  std::optional< std::string > getHardwareFanDevicesJSON();
+  std::optional< std::string > getHardwareSensorsJSON();
   std::optional< std::string > getThermalSourcesJSON();
   std::optional< std::string > getFanZonesJSON();
 

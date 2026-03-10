@@ -412,6 +412,20 @@ std::optional< std::string > UccdClient::getThermalSourcesJSON()
   return std::nullopt;
 }
 
+std::optional< std::string > UccdClient::getHardwareFanDevicesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetHardwareFanDevicesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
+std::optional< std::string > UccdClient::getHardwareSensorsJSON()
+{
+  if ( auto result = callMethod< QString >( "GetHardwareSensorsJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
 std::optional< std::string > UccdClient::getFanZonesJSON()
 {
   if ( auto result = callMethod< QString >( "GetFanZonesJSON" ) )

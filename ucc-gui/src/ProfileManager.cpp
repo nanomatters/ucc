@@ -64,6 +64,8 @@ ProfileManager::ProfileManager( QObject *parent )
       loadFanProfilesFromDaemon();
       loadGpuProfilesFromDaemon();
       loadKeyboardProfilesFromDaemon();
+      loadHardwareFanDevicesFromDaemon();
+      loadHardwareSensorsFromDaemon();
       loadThermalSourcesFromDaemon();
       loadFanZonesFromDaemon();
     }
@@ -77,6 +79,8 @@ ProfileManager::ProfileManager( QObject *parent )
     loadFanProfilesFromDaemon();
     loadGpuProfilesFromDaemon();
     loadKeyboardProfilesFromDaemon();
+    loadHardwareFanDevicesFromDaemon();
+    loadHardwareSensorsFromDaemon();
     loadThermalSourcesFromDaemon();
     loadFanZonesFromDaemon();
   }
@@ -157,6 +161,30 @@ void ProfileManager::loadThermalSourcesFromDaemon()
     QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
     if ( doc.isArray() )
       m_thermalSourcesData = doc.array();
+  }
+}
+
+void ProfileManager::loadHardwareFanDevicesFromDaemon()
+{
+  m_hardwareFanDevicesData = QJsonArray();
+
+  if ( auto json = m_client->getHardwareFanDevicesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_hardwareFanDevicesData = doc.array();
+  }
+}
+
+void ProfileManager::loadHardwareSensorsFromDaemon()
+{
+  m_hardwareSensorsData = QJsonArray();
+
+  if ( auto json = m_client->getHardwareSensorsJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
+    if ( doc.isArray() )
+      m_hardwareSensorsData = doc.array();
   }
 }
 

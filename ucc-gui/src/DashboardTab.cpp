@@ -375,7 +375,8 @@ void DashboardTab::setupUI()
 
     layout->addWidget( makePanelWithCaps(
       cpuContent,
-      makeCaptionRow({ makeCaptionBadge("Temperature (°C)"), makeCaptionBadge("Fan (%)"), makeCaptionBadge("Frequency (GHz)"), makeCaptionBadge("Power (W)") })
+      makeCaptionRow({ makeCaptionBadge("Temperature (°C)"), makeCaptionBadge("Fan (%)"), makeCaptionBadge("Frequency (GHz)"), makeCaptionBadge("Power (W)") }),
+      makeCaptionRow({ makeCaptionBadge("Memory") })
     ) );
   }
 

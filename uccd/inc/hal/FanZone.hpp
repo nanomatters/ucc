@@ -77,26 +77,35 @@ inline FanDeviceType fanDeviceTypeFromString( const std::string &s ) noexcept
  */
 enum class ThermalStrategy : uint8_t
 {
-  Single,       ///< One sensor, sensorIds[0]
-  Max,          ///< max(all sensors) — "hottest component"
-  WeightedAvg,  ///< Weighted average (weights[] parallel to sensorIds[])
+  Single,            ///< One sensor, sensorIds[0]
+  Max,               ///< max(all sensors) — "hottest component"
+  Average,           ///< Arithmetic mean over all readable sensors
+  WeightedAvg,       ///< Weighted average (weights[] parallel to sensorIds[])
+  Percentile90,      ///< 90th percentile of readable sensor temperatures
+  SafetyClampedAvg,  ///< Average unless hottest sensor crosses threshold, then use max
 };
 
 inline std::string thermalStrategyToString( ThermalStrategy s ) noexcept
 {
   switch ( s )
   {
-    case ThermalStrategy::Single:      return "single";
-    case ThermalStrategy::Max:         return "max";
-    case ThermalStrategy::WeightedAvg: return "weightedAvg";
+    case ThermalStrategy::Single:           return "single";
+    case ThermalStrategy::Max:              return "max";
+    case ThermalStrategy::Average:          return "average";
+    case ThermalStrategy::WeightedAvg:      return "weightedAvg";
+    case ThermalStrategy::Percentile90:     return "percentile90";
+    case ThermalStrategy::SafetyClampedAvg: return "safetyClampedAvg";
   }
   return "single";
 }
 
 inline ThermalStrategy thermalStrategyFromString( const std::string &s ) noexcept
 {
-  if ( s == "max" )         return ThermalStrategy::Max;
-  if ( s == "weightedAvg" ) return ThermalStrategy::WeightedAvg;
+  if ( s == "max" )               return ThermalStrategy::Max;
+  if ( s == "average" )           return ThermalStrategy::Average;
+  if ( s == "weightedAvg" )       return ThermalStrategy::WeightedAvg;
+  if ( s == "percentile90" )      return ThermalStrategy::Percentile90;
+  if ( s == "safetyClampedAvg" )  return ThermalStrategy::SafetyClampedAvg;
   return ThermalStrategy::Single;
 }
 

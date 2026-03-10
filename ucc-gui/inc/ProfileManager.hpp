@@ -75,6 +75,12 @@ public:
   /// Hardware fan zones (topology: id, name, deviceType, fanIds, thermalSourceId)
   const QJsonArray& fanZonesData() const { return m_fanZonesData; }
 
+  /// Raw hardware fan/pump devices (id, label, capabilities, deviceType)
+  const QJsonArray& hardwareFanDevicesData() const { return m_hardwareFanDevicesData; }
+
+  /// Raw hardware temperature sensors (id, label, source)
+  const QJsonArray& hardwareSensorsData() const { return m_hardwareSensorsData; }
+
 public slots:
   void refresh();
   void setActiveProfile( const QString &profileId );
@@ -145,6 +151,8 @@ private:
   void loadKeyboardProfilesFromDaemon();
   void loadThermalSourcesFromDaemon();
   void loadFanZonesFromDaemon();
+  void loadHardwareFanDevicesFromDaemon();
+  void loadHardwareSensorsFromDaemon();
 
   std::unique_ptr< UccdClient > m_client;
 
@@ -166,6 +174,8 @@ private:
   QJsonArray m_keyboardProfilesData;     ///< all keyboard profiles (all custom)
   QJsonArray m_thermalSourcesData;        ///< available thermal sources from hardware
   QJsonArray m_fanZonesData;               ///< hardware fan zones (topology)
+  QJsonArray m_hardwareFanDevicesData;     ///< raw hardware fan/pump devices
+  QJsonArray m_hardwareSensorsData;        ///< raw hardware temperature sensors
 };
 
 } // namespace ucc

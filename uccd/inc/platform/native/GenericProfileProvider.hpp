@@ -18,6 +18,7 @@
 #include "hal/IProfileProvider.hpp"
 #include "profiles/FanProfile.hpp"
 
+#include <algorithm>
 #include <syslog.h>
 #include <string>
 #include <vector>
@@ -52,7 +53,7 @@ public:
   std::vector< UccProfile > getDefaultProfiles() const override
   {
     return {
-      buildProfile( DefaultProfileIDs::Office, "Default", DefaultFanProfileIDs::Balanced, "balance_performance", false ),
+      buildProfile( DefaultProfileIDs::Office, "Default", "fan-platform-default", "balance_performance", false ),
     };
   }
 
@@ -72,12 +73,54 @@ public:
     profile.webcam.useStatus = false;
 
     profile.fan.useControl = true;
-    profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
+    profile.fan.fanProfile = "fan-platform-default";
     profile.fan.sameSpeed = true;
     profile.fan.autoControlWC = false;
     profile.fan.enableWaterCooler = false;
 
     return profile;
+  }
+
+  std::vector< FanProfile > getDefaultFanProfiles(
+    const std::vector< ucc::hal::FanZone > &zones ) const override
+  {
+    auto normalizeToCanonicalCurveModel = []( const std::vector< ucc::hal::FanCurvePoint > &input ) {
+      std::vector< ucc::hal::FanCurvePoint > sorted = input;
+      std::sort( sorted.begin(), sorted.end(),
+                 []( const ucc::hal::FanCurvePoint &a, const ucc::hal::FanCurvePoint &b ) {
+                   return a.temp < b.temp;
+                 } );
+
+      if ( sorted.empty() )
+        return std::vector< ucc::hal::FanCurvePoint >{};
+
+      std::vector< ucc::hal::FanCurvePoint > normalized;
+      normalized.reserve( 17 );
+      for ( int temp = 20; temp <= 100; temp += 5 )
+      {
+        normalized.emplace_back( temp, ucc::hal::interpolateCurve( sorted, temp ) );
+      }
+      return normalized;
+    };
+
+    FanProfile platformDefault;
+    platformDefault.id = "fan-platform-default";
+    platformDefault.name = "BIOS / Platform Default [Built-in]";
+
+    for ( const auto &zone : zones )
+    {
+      platformDefault.zoneCurves.push_back(
+        ucc::hal::FanZoneCurve( zone.id,
+                                normalizeToCanonicalCurveModel( zone.curve ),
+                                zone.hysteresisDeg,
+                                zone.enabled,
+                                zone.thermalSourceId ) );
+    }
+
+    if ( platformDefault.zoneCurves.empty() )
+      return {};
+
+    return { platformDefault };
   }
 
 private:

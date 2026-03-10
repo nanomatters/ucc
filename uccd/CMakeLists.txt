@@ -27,6 +27,7 @@ add_executable(uccd
   src/uccd.cpp
   src/UccDBusService.cpp
   src/SystemInfo.cpp
+  src/SmbiosMemoryDecoder.cpp
   src/NvmlWrapper.cpp
   src/workers/ProfileSettingsWorker.cpp
   src/workers/NvidiaOCWorker.cpp
@@ -34,11 +35,13 @@ add_executable(uccd
   src/workers/AutoUndervoltWorker.cpp
   src/FpsServer.cpp
   src/platform/uniwill/LCTWaterCoolerWorker.cpp
+  src/platform/uniwill/UniwillDefaultProfiles.cpp
   src/platform/gpu/nvidia/NvidiaGpuPowerProvider.cpp
   src/workers/DisplayWorker.cpp
   src/workers/HardwareMonitorWorker.cpp
   inc/UccDBusService.hpp
   inc/platform/uniwill/LCTWaterCoolerWorker.hpp
+  inc/platform/uniwill/UniwillDefaultProfiles.hpp
   inc/workers/DaemonWorker.hpp
   inc/workers/NvidiaOCWorker.hpp
   inc/workers/AutoOCWorker.hpp
@@ -61,6 +64,7 @@ add_executable(uccd
   src/profiles/FanProfiles.cpp
   src/profiles/UccProfile.cpp
   src/profiles/DefaultProfiles.cpp
+  inc/SmbiosMemoryDecoder.hpp
 )
 
 # Include directories

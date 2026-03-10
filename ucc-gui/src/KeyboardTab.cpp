@@ -36,35 +36,59 @@ namespace ucc
 
 void MainWindow::connectKeyboardBacklightPageWidgets()
 {
-  connect( m_keyboardBrightnessSlider, &QSlider::valueChanged,
-           this, &MainWindow::onKeyboardBrightnessChanged );
+  if ( m_keyboardBrightnessSlider )
+  {
+    connect( m_keyboardBrightnessSlider, &QSlider::valueChanged,
+             this, &MainWindow::onKeyboardBrightnessChanged );
+  }
 
-  connect( m_keyboardColorButton, &QPushButton::clicked,
-           this, &MainWindow::onKeyboardColorClicked );
+  if ( m_keyboardColorButton )
+  {
+    connect( m_keyboardColorButton, &QPushButton::clicked,
+             this, &MainWindow::onKeyboardColorClicked );
+  }
 
-  connect( m_keyboardVisualizer, &KeyboardVisualizerWidget::colorsChanged,
-           this, &MainWindow::onKeyboardVisualizerColorsChanged );
+  if ( m_keyboardVisualizer )
+  {
+    connect( m_keyboardVisualizer, &KeyboardVisualizerWidget::colorsChanged,
+             this, &MainWindow::onKeyboardVisualizerColorsChanged );
+  }
 
-  connect( m_keyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
-           this, [this]( int index ) {
-    if ( index >= 0 )
-      onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( index ).toString() );
-  } );
+  if ( m_keyboardProfileCombo )
+  {
+    connect( m_keyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
+             this, [this]( int index ) {
+      if ( index >= 0 )
+        onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( index ).toString() );
+    } );
 
-  connect( m_keyboardProfileCombo->lineEdit(), &QLineEdit::editingFinished,
-           this, &MainWindow::onKeyboardProfileComboRenamed );
+    if ( m_keyboardProfileCombo->lineEdit() )
+    {
+      connect( m_keyboardProfileCombo->lineEdit(), &QLineEdit::editingFinished,
+               this, &MainWindow::onKeyboardProfileComboRenamed );
 
-  connect( m_keyboardProfileCombo->lineEdit(), &QLineEdit::textChanged,
-           this, [this]() { updateKeyboardProfileButtonStates(); } );
+      connect( m_keyboardProfileCombo->lineEdit(), &QLineEdit::textChanged,
+               this, [this]() { updateKeyboardProfileButtonStates(); } );
+    }
+  }
 
-  connect( m_copyKeyboardProfileButton, &QPushButton::clicked,
-           this, &MainWindow::onCopyKeyboardProfileClicked );
+  if ( m_copyKeyboardProfileButton )
+  {
+    connect( m_copyKeyboardProfileButton, &QPushButton::clicked,
+             this, &MainWindow::onCopyKeyboardProfileClicked );
+  }
 
-  connect( m_saveKeyboardProfileButton, &QPushButton::clicked,
-           this, &MainWindow::onSaveKeyboardProfileClicked );
+  if ( m_saveKeyboardProfileButton )
+  {
+    connect( m_saveKeyboardProfileButton, &QPushButton::clicked,
+             this, &MainWindow::onSaveKeyboardProfileClicked );
+  }
 
-  connect( m_removeKeyboardProfileButton, &QPushButton::clicked,
-           this, &MainWindow::onRemoveKeyboardProfileClicked );
+  if ( m_removeKeyboardProfileButton )
+  {
+    connect( m_removeKeyboardProfileButton, &QPushButton::clicked,
+             this, &MainWindow::onRemoveKeyboardProfileClicked );
+  }
 }
 
 void MainWindow::setupKeyboardBacklightPage()
@@ -168,6 +192,7 @@ void MainWindow::setupKeyboardBacklightPage()
     mainLayout->addWidget( noSupportLabel );
   }
 
+  m_keyboardAndHardwareTab = keyboardWidget;
   const int tabIndex = m_tabs->addTab( keyboardWidget, "Keyboard and Hardware" );
   m_hardwareTab = new HardwareTab( m_systemMonitor.get(), m_tabs->widget( tabIndex ) );
 }

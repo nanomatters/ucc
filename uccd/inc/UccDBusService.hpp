@@ -315,6 +315,8 @@ public slots:
   bool DeleteProfile( const QString &profileId );  // Delete an editable profile
 
   // Hardware zone model
+  QString GetHardwareFanDevicesJSON();              // Raw detected fan/pump devices from hardware
+  QString GetHardwareSensorsJSON();                 // Raw detected temperature sensors from hardware
   QString GetThermalSourcesJSON();                  // Available thermal sources from hardware
   QString GetFanZonesJSON();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
 
@@ -642,6 +644,7 @@ private:
   UccProfile m_activeProfile;
   std::vector< UccProfile > m_defaultProfiles;
   std::vector< UccProfile > m_customProfiles;
+  std::vector< SubProfile > m_builtinFanProfiles;
   std::vector< SubProfile > m_builtinGpuProfiles;
   std::vector< SubProfile > m_builtinKeyboardProfiles;
 
@@ -682,6 +685,7 @@ private:
   static constexpr int WC_DISCONNECT_DEBOUNCE_S = 10;         // seconds stable before accepting "disconnected"
 
   void setupGpuDataCallback();
+  void rebuildBuiltinFanProfiles();
   void rebuildBuiltinGpuProfiles();
   void rebuildBuiltinKeyboardProfile();
   int readCurrentCTGPOffset() const;

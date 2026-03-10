@@ -16,7 +16,7 @@
 #pragma once
 
 #include "hal/IProfileProvider.hpp"
-#include "profiles/DefaultProfiles.hpp"
+#include "platform/uniwill/UniwillDefaultProfiles.hpp"
 #include "SysfsNode.hpp"
 
 #include <map>
@@ -66,26 +66,23 @@ public:
   std::vector< UccProfile > getDefaultProfiles() const override
   {
     if ( m_deviceId.has_value() )
-    {
-      if ( auto it = deviceProfiles.find( *m_deviceId ); it != deviceProfiles.end() )
-        return it->second;
-    }
+      return getUniwillDefaultProfiles( *m_deviceId );
 
     // Uniwill device detected but no per-device profile set — use generic Uniwill set
-    return { maxEnergySave, silent, office, highPerformance };
+    return getUniwillFallbackDefaultProfiles();
   }
 
   UccProfile getDefaultCustomProfile() const override
   {
     if ( m_deviceId.has_value() )
-    {
-      if ( auto it = deviceCustomProfiles.find( *m_deviceId ); it != deviceCustomProfiles.end() )
-      {
-        if ( !it->second.empty() )
-          return it->second.front();
-      }
-    }
-    return defaultCustomProfile;
+      return getUniwillDefaultCustomProfile( *m_deviceId );
+    return getUniwillDefaultCustomProfile();
+  }
+
+  std::vector< FanProfile > getDefaultFanProfiles(
+    [[maybe_unused]] const std::vector< ucc::hal::FanZone > &zones ) const override
+  {
+    return getUniwillDefaultFanProfiles();
   }
 
   // --- Accessors for device-specific features ---

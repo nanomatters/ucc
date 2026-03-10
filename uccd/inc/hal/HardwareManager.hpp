@@ -302,6 +302,26 @@ public:
         return anyRead ? std::optional< double >( maxTemp ) : std::nullopt;
       }
 
+      case ThermalStrategy::Average:
+      {
+        double sum = 0.0;
+        double count = 0.0;
+        for ( const auto &sid : source.sensorIds )
+        {
+          auto *sensor = findTempSensor( sid );
+          if ( !sensor )
+            continue;
+          if ( auto val = readTemp( *sensor ); val.has_value() )
+          {
+            sum += val.value();
+            count += 1.0;
+          }
+        }
+        if ( count > 0.0 )
+          return sum / count;
+        return std::nullopt;
+      }
+
       case ThermalStrategy::WeightedAvg:
       {
         double weightedSum = 0.0;
@@ -323,6 +343,63 @@ public:
         if ( weightTotal > 0.0 )
           return weightedSum / weightTotal;
         return std::nullopt;
+      }
+
+      case ThermalStrategy::Percentile90:
+      {
+        std::vector< double > values;
+        values.reserve( source.sensorIds.size() );
+        for ( const auto &sid : source.sensorIds )
+        {
+          auto *sensor = findTempSensor( sid );
+          if ( !sensor )
+            continue;
+          if ( auto val = readTemp( *sensor ); val.has_value() )
+            values.push_back( val.value() );
+        }
+
+        if ( values.empty() )
+          return std::nullopt;
+
+        std::sort( values.begin(), values.end() );
+        const size_t idx = static_cast< size_t >(
+          std::clamp< int >( static_cast< int >( std::ceil( 0.90 * static_cast< double >( values.size() ) ) ) - 1,
+                            0,
+                            static_cast< int >( values.size() ) - 1 ) );
+        return values[idx];
+      }
+
+      case ThermalStrategy::SafetyClampedAvg:
+      {
+        // Optional custom threshold via weights[0], default 85C.
+        const double thresholdC = ( !source.weights.empty() && source.weights[0] > 0.0 )
+                                ? source.weights[0]
+                                : 85.0;
+
+        double sum = 0.0;
+        double count = 0.0;
+        double maxTemp = -1000.0;
+
+        for ( const auto &sid : source.sensorIds )
+        {
+          auto *sensor = findTempSensor( sid );
+          if ( !sensor )
+            continue;
+          if ( auto val = readTemp( *sensor ); val.has_value() )
+          {
+            const double t = val.value();
+            sum += t;
+            count += 1.0;
+            maxTemp = std::max( maxTemp, t );
+          }
+        }
+
+        if ( count <= 0.0 )
+          return std::nullopt;
+
+        const double avg = sum / count;
+        return ( maxTemp >= thresholdC ) ? std::optional< double >( maxTemp )
+                                         : std::optional< double >( avg );
       }
     }
     return std::nullopt;

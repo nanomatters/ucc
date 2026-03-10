@@ -27,6 +27,7 @@
 #include <QDBusInterface>
 #include <QTimer>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QMap>
 
 #include "FanCurveEditorWidget.hpp"
@@ -35,6 +36,11 @@
 #include "CommonTypes.hpp"
 #include "../../libucc-dbus/UccdClient.hpp"
 #include "ProfileManager.hpp"
+
+class QTableWidget;
+class QTableWidgetItem;
+class QLineEdit;
+class QListWidget;
 
 namespace ucc
 {
@@ -70,8 +76,11 @@ public:
   const QMap< QString, FanCurveEditorWidget * > &fanEditors() const { return m_fanEditors; }
   const QMap< QString, PumpCurveEditorWidget * > &pumpEditors() const { return m_pumpEditors; }
 
-  /** Build/rebuild zone editors from profile zone metadata. */
-  void buildZoneEditors( const QJsonArray &zones, const QJsonArray &thermalSources );
+  /** Build/rebuild zone editors from topology/source metadata and raw hardware inventory. */
+  void buildZoneEditors( const QJsonArray &zones,
+                         const QJsonArray &thermalSources,
+                         const QJsonArray &hardwareFanDevices,
+                         const QJsonArray &hardwareSensors );
 
   /** Return the currently selected thermal source ID for a zone. */
   QString thermalSourceForZone( const QString &zoneId ) const;
@@ -139,6 +148,23 @@ private:
   void updateColorButtonState();
   void updateManualControlState();
 
+  // ── Temperature source / zone editor helpers ──
+  void showStatusMessage( const QString &msg, int timeoutMs = 3000 );
+  static QString normalizedSourceGroup( const QJsonObject &sensor );
+  void ensureValidStrategy( QJsonObject &src );
+  QString sensorsSummaryText( const QJsonObject &src ) const;
+  void refreshAllSourceCombos();
+  void installStrategyComboForRow( int row );
+  void refreshSourceRow( int row );
+  void addSensorToSource( int row, const QString &sensorId );
+  void createSourceWithSensor( const QString &sensorId );
+  void onSourceItemChanged( QTableWidgetItem *item );
+  void onSourceCellChanged( int currentRow );
+  void onSourceContextMenu( const QPoint &pos );
+  void onSensorDropped( int row, const QString &sensorId );
+  void onZoneListRowChanged( int row );
+  void onZoneListContextMenu( const QPoint &pos );
+
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;
 
@@ -177,6 +203,30 @@ private:
   bool m_manualControlInitialized = false;
   bool m_waterCoolerSupported = false;
   QWidget *m_wcHardwareWidget = nullptr;
+
+  // ── Source editor state (populated by buildZoneEditors) ──
+  QVector< QJsonObject > m_sourceEditorModel;
+  QVector< QComboBox * > m_strategyCombos;
+  QVector< QComboBox * > m_allSourceCombos;
+  QTableWidget *m_sourceTable = nullptr;
+  QMap< QString, QString > m_sensorLabelById;
+  QLabel *m_srcLabelValue = nullptr;
+  QLabel *m_srcStrategyValue = nullptr;
+  QLabel *m_srcSensorsValue = nullptr;
+
+  // ── Zone editing state ──
+  QVector< QJsonObject > m_zoneCache;
+  QMap< QString, QString > m_fanLabelById;
+  QLineEdit *m_zoneNameEdit = nullptr;
+  QLineEdit *m_zoneTypeEdit = nullptr;
+  QComboBox *m_zoneSourceCombo = nullptr;
+  QListWidget *m_zoneFansList = nullptr;
+  QListWidget *m_zoneList = nullptr;
+
+  // Last build args (needed for rebuild on source removal)
+  QJsonArray m_lastZones;
+  QJsonArray m_lastFanDevices;
+  QJsonArray m_lastSensors;
 };
 
 } // namespace ucc

@@ -280,7 +280,9 @@ void MainWindow::setupFanControlTab()
   // Build zone tabs from hardware topology (this is the source of truth for
   // what zones / editors exist).  Profile data only provides curve overrides.
   m_fanControlTab->buildZoneEditors( m_profileManager->fanZonesData(),
-                                     m_profileManager->thermalSourcesData() );
+                                     m_profileManager->thermalSourcesData(),
+                                     m_profileManager->hardwareFanDevicesData(),
+                                     m_profileManager->hardwareSensorsData() );
 
   if ( m_fanControlTab->fanProfileCombo()->count() > 0 )
     onFanProfileChanged( m_fanControlTab->fanProfileCombo()->currentData().toString() );
@@ -937,67 +939,87 @@ void MainWindow::connectSignals()
 
   // Display controls
 
-  connect( m_brightnessSlider, &QSlider::valueChanged,
-           this, &MainWindow::onBrightnessSliderChanged );
+  if ( m_brightnessSlider )
+  {
+    connect( m_brightnessSlider, &QSlider::valueChanged,
+             this, &MainWindow::onBrightnessSliderChanged );
+  }
 
   // ODM Power Limit controls
 
-  connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
-           this, &MainWindow::onODMPowerLimit1Changed );
+  if ( m_odmPowerLimit1Slider )
+    connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
+             this, &MainWindow::onODMPowerLimit1Changed );
 
-  connect( m_odmPowerLimit2Slider, &QSlider::valueChanged,
-           this, &MainWindow::onODMPowerLimit2Changed );
+  if ( m_odmPowerLimit2Slider )
+    connect( m_odmPowerLimit2Slider, &QSlider::valueChanged,
+             this, &MainWindow::onODMPowerLimit2Changed );
 
-  connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
-           this, &MainWindow::onODMPowerLimit3Changed );
+  if ( m_odmPowerLimit3Slider )
+    connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
+             this, &MainWindow::onODMPowerLimit3Changed );
 
   // CPU frequency controls
 
-  connect( m_cpuCoresSlider, &QSlider::valueChanged,
-           this, &MainWindow::onCpuCoresChanged );
+  if ( m_cpuCoresSlider )
+    connect( m_cpuCoresSlider, &QSlider::valueChanged,
+             this, &MainWindow::onCpuCoresChanged );
 
-  connect( m_maxFrequencySlider, &QSlider::valueChanged,
-           this, &MainWindow::onMaxFrequencyChanged );
+  if ( m_maxFrequencySlider )
+    connect( m_maxFrequencySlider, &QSlider::valueChanged,
+             this, &MainWindow::onMaxFrequencyChanged );
 
-  connect( m_minFrequencySlider, &QSlider::valueChanged,
-           this, [this]( int value ) {
-    double freqGHz = value / 1000000.0;  // Convert kHz to GHz for display
-    m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
-  } );
+  if ( m_minFrequencySlider )
+  {
+    connect( m_minFrequencySlider, &QSlider::valueChanged,
+             this, [this]( int value ) {
+      double freqGHz = value / 1000000.0;  // Convert kHz to GHz for display
+      m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+    } );
+  }
 
   // Enforce min <= max for frequency sliders
-  connect( m_minFrequencySlider, &QSlider::valueChanged,
-           this, [this]( int value ) {
-    if ( value > m_maxFrequencySlider->value() )
-      m_maxFrequencySlider->setValue( value );
-  } );
+  if ( m_minFrequencySlider && m_maxFrequencySlider )
+  {
+    connect( m_minFrequencySlider, &QSlider::valueChanged,
+             this, [this]( int value ) {
+      if ( value > m_maxFrequencySlider->value() )
+        m_maxFrequencySlider->setValue( value );
+    } );
 
-  connect( m_maxFrequencySlider, &QSlider::valueChanged,
-           this, [this]( int value ) {
-    if ( value < m_minFrequencySlider->value() )
-      m_minFrequencySlider->setValue( value );
-  } );
+    connect( m_maxFrequencySlider, &QSlider::valueChanged,
+             this, [this]( int value ) {
+      if ( value < m_minFrequencySlider->value() )
+        m_minFrequencySlider->setValue( value );
+    } );
+  }
 
   // Enforce TDP ordering: sustained <= boost <= peak
-  connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
-           this, [this]( int value ) {
-    if ( value > m_odmPowerLimit2Slider->value() )
-      m_odmPowerLimit2Slider->setValue( value );
-  } );
+  if ( m_odmPowerLimit1Slider && m_odmPowerLimit2Slider )
+  {
+    connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
+             this, [this]( int value ) {
+      if ( value > m_odmPowerLimit2Slider->value() )
+        m_odmPowerLimit2Slider->setValue( value );
+    } );
+  }
 
-  connect( m_odmPowerLimit2Slider, &QSlider::valueChanged,
-           this, [this]( int value ) {
-    if ( value < m_odmPowerLimit1Slider->value() )
-      m_odmPowerLimit1Slider->setValue( value );
-    if ( value > m_odmPowerLimit3Slider->value() )
-      m_odmPowerLimit3Slider->setValue( value );
-  } );
+  if ( m_odmPowerLimit1Slider && m_odmPowerLimit2Slider && m_odmPowerLimit3Slider )
+  {
+    connect( m_odmPowerLimit2Slider, &QSlider::valueChanged,
+             this, [this]( int value ) {
+      if ( value < m_odmPowerLimit1Slider->value() )
+        m_odmPowerLimit1Slider->setValue( value );
+      if ( value > m_odmPowerLimit3Slider->value() )
+        m_odmPowerLimit3Slider->setValue( value );
+    } );
 
-  connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
-           this, [this]( int value ) {
-    if ( value < m_odmPowerLimit2Slider->value() )
-      m_odmPowerLimit2Slider->setValue( value );
-  } );
+    connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
+             this, [this]( int value ) {
+      if ( value < m_odmPowerLimit2Slider->value() )
+        m_odmPowerLimit2Slider->setValue( value );
+    } );
+  }
 
   // Apply and Save buttons
 
@@ -1039,37 +1061,48 @@ void MainWindow::connectSignals()
              onFanProfileChanged(m_profileFanProfileCombo->currentData().toString());
            } );
 
-  connect( m_autoWaterControlCheckBox, &QCheckBox::toggled,
-           this, &MainWindow::markChanged );
-  connect( m_autoWaterControlCheckBox, &QCheckBox::toggled,
-           this, [this]( bool autoControl ) {
-             if ( m_fanControlTab )
-               m_fanControlTab->setWaterCoolerAutoControl( autoControl );
-           } );
+  if ( m_autoWaterControlCheckBox )
+  {
+    connect( m_autoWaterControlCheckBox, &QCheckBox::toggled,
+             this, &MainWindow::markChanged );
+    connect( m_autoWaterControlCheckBox, &QCheckBox::toggled,
+             this, [this]( bool autoControl ) {
+               if ( m_fanControlTab )
+                 m_fanControlTab->setWaterCoolerAutoControl( autoControl );
+             } );
+  }
 
-  connect( m_cpuCoresSlider, &QSlider::valueChanged,
-           this, [this]() { markChanged(); } );
+  if ( m_cpuCoresSlider )
+    connect( m_cpuCoresSlider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
-  connect( m_governorCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-           this, &MainWindow::markChanged );
+  if ( m_governorCombo )
+    connect( m_governorCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+             this, &MainWindow::markChanged );
 
-  connect( m_eppCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-           this, &MainWindow::markChanged );
+  if ( m_eppCombo )
+    connect( m_eppCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+             this, &MainWindow::markChanged );
 
-  connect( m_minFrequencySlider, &QSlider::valueChanged,
-           this, [this]() { markChanged(); } );
+  if ( m_minFrequencySlider )
+    connect( m_minFrequencySlider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
-  connect( m_maxFrequencySlider, &QSlider::valueChanged,
-           this, [this]() { markChanged(); } );
+  if ( m_maxFrequencySlider )
+    connect( m_maxFrequencySlider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
-  connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
-           this, [this]() { markChanged(); } );
+  if ( m_odmPowerLimit1Slider )
+    connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
-  connect( m_odmPowerLimit2Slider, &QSlider::valueChanged,
-           this, [this]() { markChanged(); } );
+  if ( m_odmPowerLimit2Slider )
+    connect( m_odmPowerLimit2Slider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
-  connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
-           this, [this]() { markChanged(); } );
+  if ( m_odmPowerLimit3Slider )
+    connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
   connect( m_profileKeyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this](int index) {
@@ -1103,14 +1136,17 @@ void MainWindow::connectSignals()
   }
 
   // Mains/Battery/Water Cooler activation buttons
-  connect( m_mainsButton, &QPushButton::toggled,
-           this, &MainWindow::markChanged );
+  if ( m_mainsButton )
+    connect( m_mainsButton, &QPushButton::toggled,
+             this, &MainWindow::markChanged );
 
-  connect( m_batteryButton, &QPushButton::toggled,
-           this, &MainWindow::markChanged );
+  if ( m_batteryButton )
+    connect( m_batteryButton, &QPushButton::toggled,
+             this, &MainWindow::markChanged );
 
-  connect( m_waterCoolerButton, &QPushButton::toggled,
-           this, &MainWindow::markChanged );
+  if ( m_waterCoolerButton )
+    connect( m_waterCoolerButton, &QPushButton::toggled,
+             this, &MainWindow::markChanged );
 
   // Error handling
 
@@ -1268,11 +1304,14 @@ void MainWindow::onTabChanged( int index )
 {
   const int fanTabIndex = m_fanControlTab ? m_tabs->indexOf( m_fanControlTab ) : -1;
   const int monitorTabIndex = m_monitorTab ? m_tabs->indexOf( m_monitorTab ) : -1;
+  const int keyboardTabIndex = m_keyboardAndHardwareTab ? m_tabs->indexOf( m_keyboardAndHardwareTab ) : -1;
 
-  // Enable monitoring when dashboard (0) or fan control tab is visible
-  bool needsMonitoring = ( index == 0 || index == fanTabIndex );
+  // Enable monitoring when dashboard, fan control, or monitor tab is visible.
+  bool needsMonitoring = ( index == 0 || index == fanTabIndex || index == monitorTabIndex );
   qDebug() << "Tab changed to" << index << "- Monitoring active:" << needsMonitoring
-           << "(fan tab =" << fanTabIndex << ")";
+           << "(fan tab =" << fanTabIndex
+           << ", monitor tab =" << monitorTabIndex
+           << ", keyboard tab =" << keyboardTabIndex << ")";
   m_systemMonitor->setMonitoringActive( needsMonitoring );
 
   // Activate / deactivate the Monitor tab's incremental fetch
@@ -1290,8 +1329,8 @@ void MainWindow::onTabChanged( int index )
       ed->clearCrosshair();
   }
 
-  // Load current keyboard backlight states when keyboard tab (index 4) is activated
-  if ( index == 4 )
+  // Load current keyboard backlight states when keyboard tab is activated.
+  if ( index == keyboardTabIndex )
   {
     if ( m_keyboardVisualizer )
     {

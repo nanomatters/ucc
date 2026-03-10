@@ -59,22 +59,20 @@ public:
 
   [[nodiscard]] std::vector< UccProfile > getDefaultProfiles( std::optional< UniwillDeviceID > device = std::nullopt ) const noexcept
   {
+    (void) device;
+
     // Prefer HAL profile provider when available
     if ( m_profileProvider )
       return m_profileProvider->getDefaultProfiles();
 
-    // Legacy fallback: direct device-profile lookup
-    std::vector< UccProfile > result;
-
-    if ( device.has_value() )
-    {
-      if ( auto it = deviceProfiles.find( *device ); it != deviceProfiles.end() )
-        return it->second;
-    }
-
-    result = { maxEnergySave, silent, office, highPerformance };
-    syslog( LOG_INFO, "Device not found. Loading %zu generic default profiles", result.size() );
-    return result;
+    // Fallback if provider is unavailable.
+    UccProfile profile;
+    profile.id = DefaultProfileIDs::Office;
+    profile.name = "Default";
+    profile.description = "Generic fallback profile";
+    profile.fan.useControl = true;
+    profile.fan.fanProfile = "fan-platform-default";
+    return { profile };
   }
 
   /**
@@ -354,8 +352,8 @@ public:
       return m_profileProvider->getDefaultCustomProfile();
 
     UccProfile profile;
-    profile.id = "__default_custom_profile__";
-    profile.name = "TUXEDO Defaults";
+    profile.id = defaultCustomProfileID;
+    profile.name = "Defaults";
     profile.description = "Edit profile to change behaviour";
     return profile;
   }

@@ -19,16 +19,76 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLineEdit>
+#include <QFormLayout>
+#include <QListWidget>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QSplitter>
+#include <QTreeWidget>
 #include <QScrollArea>
 #include <QColorDialog>
 #include <QMainWindow>
+#include <QMenu>
 #include <QStatusBar>
 #include <QDBusReply>
 #include <QDebug>
+#include <QDropEvent>
 #include "CommonTypes.hpp"
 
 namespace ucc
 {
+
+class ThermalSourceTableWidget : public QTableWidget
+{
+public:
+  explicit ThermalSourceTableWidget( QWidget *parent = nullptr )
+    : QTableWidget( parent )
+  {}
+
+  std::function< void( int, const QString & ) > onSensorDropped;
+
+protected:
+  void dropEvent( QDropEvent *event ) override
+  {
+    if ( !event )
+      return;
+
+    if ( auto *tree = qobject_cast< QTreeWidget * >( event->source() ) )
+    {
+      if ( QTreeWidgetItem *item = tree->currentItem(); item )
+      {
+        const QString sensorId = item->data( 0, Qt::UserRole ).toString();
+        if ( !sensorId.isEmpty() )
+        {
+          const int targetRow = rowAt( event->position().toPoint().y() );
+          if ( onSensorDropped )
+          {
+            onSensorDropped( targetRow, sensorId );
+            if ( targetRow >= 0 )
+              setCurrentCell( targetRow, 0 );
+            event->acceptProposedAction();
+            return;
+          }
+        }
+      }
+    }
+
+    QTableWidget::dropEvent( event );
+  }
+};
+
+static const QStringList &strategyChoices()
+{
+  static const QStringList list = {
+    QStringLiteral( "single" ),
+    QStringLiteral( "max" ),
+    QStringLiteral( "average" ),
+    QStringLiteral( "weightedAvg" ),
+    QStringLiteral( "percentile90" ),
+    QStringLiteral( "safetyClampedAvg" ),
+  };
+  return list;
+}
 
 FanControlTab::FanControlTab( UccdClient *client,
                               ProfileManager *profileManager,
@@ -591,15 +651,15 @@ PumpCurveEditorWidget *FanControlTab::pumpEditor( const QString &zoneId ) const
   return m_pumpEditors.value( zoneId, nullptr );
 }
 
-void FanControlTab::buildZoneEditors( const QJsonArray &zones, const QJsonArray &thermalSources )
+void FanControlTab::buildZoneEditors( const QJsonArray &zones,
+                                      const QJsonArray &thermalSources,
+                                      const QJsonArray &hardwareFanDevices,
+                                      const QJsonArray &hardwareSensors )
 {
-  // Clear editor maps — old widgets are children of the tab pages
-  // which will be destroyed when we remove tabs below.
   m_fanEditors.clear();
   m_pumpEditors.clear();
   m_thermalSourceCombos.clear();
 
-  // Remove all existing zone tabs.
   while ( m_subTabs->count() > 0 )
   {
     QWidget *w = m_subTabs->widget( 0 );
@@ -607,7 +667,254 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones, const QJsonArray 
     w->deleteLater();
   }
 
-  // Create one sub-tab per zone.
+  // Store build args for rebuild support (source removal rebuilds)
+  m_lastZones = zones;
+  m_lastFanDevices = hardwareFanDevices;
+  m_lastSensors = hardwareSensors;
+
+  // Populate editor model
+  m_sourceEditorModel.clear();
+  m_sourceEditorModel.reserve( thermalSources.size() );
+  for ( const QJsonValue &sv : thermalSources )
+    m_sourceEditorModel.push_back( sv.toObject() );
+
+  m_allSourceCombos.clear();
+  m_strategyCombos.clear();
+
+  // Build sensor label map
+  m_sensorLabelById.clear();
+  for ( const QJsonValue &sv : hardwareSensors )
+  {
+    const QJsonObject s = sv.toObject();
+    const QString sid = s[QStringLiteral( "id" )].toString();
+    const QString d = s[QStringLiteral( "displayLabel" )].toString().trimmed();
+    const QString l = s[QStringLiteral( "label" )].toString();
+    m_sensorLabelById[sid] = d.isEmpty() ? l : d;
+  }
+
+  // ---------------------------------------------------------------------
+  // First tab: Temperature Sources
+  // ---------------------------------------------------------------------
+  {
+    auto *page = new QWidget();
+    auto *pageLayout = new QVBoxLayout( page );
+    pageLayout->setContentsMargins( 6, 6, 6, 6 );
+    pageLayout->setSpacing( 8 );
+
+    auto *split = new QSplitter( Qt::Horizontal );
+
+    // ── Sensor tree pane ──
+    auto *sensorPane = new QGroupBox( QStringLiteral( "Hardware Sensors" ) );
+    auto *sensorPaneLayout = new QVBoxLayout( sensorPane );
+    sensorPaneLayout->setContentsMargins( 6, 6, 6, 6 );
+    auto *sensorTree = new QTreeWidget();
+    sensorTree->setColumnCount( 1 );
+    sensorTree->setHeaderLabels( { QStringLiteral( "Sensor" ) } );
+    sensorTree->header()->setStretchLastSection( true );
+    sensorTree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+    sensorTree->setDragEnabled( true );
+    sensorTree->setDragDropMode( QAbstractItemView::DragOnly );
+
+    QMap< QString, QTreeWidgetItem * > sourceGroups;
+    for ( const QJsonValue &sv : hardwareSensors )
+    {
+      const QJsonObject s = sv.toObject();
+      const QString source = s[QStringLiteral( "source" )].toString();
+      const QString sourceKey = normalizedSourceGroup( s );
+
+      if ( !sourceGroups.contains( sourceKey ) )
+      {
+        auto *group = new QTreeWidgetItem( sensorTree );
+        group->setText( 0, sourceKey );
+        group->setFirstColumnSpanned( true );
+        sourceGroups.insert( sourceKey, group );
+      }
+
+      auto *child = new QTreeWidgetItem( sourceGroups.value( sourceKey ) );
+      const QString displayLabel = s[QStringLiteral( "displayLabel" )].toString().trimmed();
+      const QString rawLabel = s[QStringLiteral( "label" )].toString();
+      child->setText( 0, displayLabel.isEmpty() ? rawLabel : displayLabel );
+      child->setData( 0, Qt::UserRole, s[QStringLiteral( "id" )].toString() );
+      child->setToolTip( 0, QStringLiteral( "Raw source: %1\nRaw label: %2" )
+               .arg( source.isEmpty() ? QStringLiteral( "(none)" ) : source,
+                 rawLabel.isEmpty() ? QStringLiteral( "(none)" ) : rawLabel ) );
+    }
+
+    for ( auto *group : sourceGroups )
+      group->setExpanded( false );
+
+    sensorPaneLayout->addWidget( sensorTree );
+
+    // ── Source table pane ──
+    auto *sourcePane = new QWidget();
+    auto *sourcePaneLayout = new QVBoxLayout( sourcePane );
+    sourcePaneLayout->setContentsMargins( 0, 0, 0, 0 );
+    sourcePaneLayout->setSpacing( 8 );
+
+    auto *sourcesGroup = new QGroupBox( QStringLiteral( "Temperature Sources" ) );
+    auto *sourcesGroupLayout = new QVBoxLayout( sourcesGroup );
+    sourcesGroupLayout->setContentsMargins( 6, 6, 6, 6 );
+
+    auto *sourceTable = new ThermalSourceTableWidget();
+    m_sourceTable = sourceTable;
+    m_sourceTable->setColumnCount( 3 );
+    m_sourceTable->setHorizontalHeaderLabels( { QStringLiteral( "Label" ),
+                           QStringLiteral( "Strategy" ),
+                           QStringLiteral( "Sensors" ) } );
+    m_sourceTable->horizontalHeader()->setStretchLastSection( true );
+    m_sourceTable->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::Stretch );
+    m_sourceTable->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
+    m_sourceTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
+    m_sourceTable->setSelectionBehavior( QAbstractItemView::SelectRows );
+    m_sourceTable->setSelectionMode( QAbstractItemView::SingleSelection );
+    m_sourceTable->setEditTriggers( QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed );
+    m_sourceTable->setContextMenuPolicy( Qt::CustomContextMenu );
+    m_sourceTable->setAcceptDrops( true );
+    m_sourceTable->viewport()->setAcceptDrops( true );
+    m_sourceTable->setDragDropMode( QAbstractItemView::DropOnly );
+    m_sourceTable->setDefaultDropAction( Qt::CopyAction );
+
+    m_sourceTable->setRowCount( m_sourceEditorModel.size() );
+    m_strategyCombos.resize( m_sourceEditorModel.size() );
+
+    sourceTable->onSensorDropped = [this]( int row, const QString &sid ) {
+      onSensorDropped( row, sid );
+    };
+
+    for ( int row = 0; row < m_sourceEditorModel.size(); ++row )
+    {
+      ensureValidStrategy( m_sourceEditorModel[row] );
+      installStrategyComboForRow( row );
+      refreshSourceRow( row );
+    }
+
+    connect( m_sourceTable, &QTableWidget::itemChanged, this, &FanControlTab::onSourceItemChanged );
+    connect( m_sourceTable, &QWidget::customContextMenuRequested, this, &FanControlTab::onSourceContextMenu );
+
+    sourcesGroupLayout->addWidget( m_sourceTable );
+    sourcePaneLayout->addWidget( sourcesGroup, 3 );
+
+    // ── Source details panel ──
+    auto *srcDetailsGroup = new QGroupBox( QStringLiteral( "Source Details" ) );
+    auto *srcDetailsLayout = new QFormLayout( srcDetailsGroup );
+    srcDetailsLayout->setContentsMargins( 6, 6, 6, 6 );
+    m_srcLabelValue = new QLabel( QStringLiteral( "-" ) );
+    m_srcStrategyValue = new QLabel( QStringLiteral( "-" ) );
+    m_srcSensorsValue = new QLabel( QStringLiteral( "-" ) );
+    m_srcSensorsValue->setWordWrap( true );
+    auto *srcNotesValue = new QLabel( QStringLiteral( "Sensor tree is grouped by provider/source (e.g. nvme, gpu)." ) );
+    srcNotesValue->setWordWrap( true );
+    srcDetailsLayout->addRow( QStringLiteral( "Source Label:" ), m_srcLabelValue );
+    srcDetailsLayout->addRow( QStringLiteral( "Strategy:" ), m_srcStrategyValue );
+    srcDetailsLayout->addRow( QStringLiteral( "Sensors:" ), m_srcSensorsValue );
+    srcDetailsLayout->addRow( QStringLiteral( "Notes:" ), srcNotesValue );
+    sourcePaneLayout->addWidget( srcDetailsGroup, 2 );
+
+    split->addWidget( sensorPane );
+    split->addWidget( sourcePane );
+    split->setStretchFactor( 0, 1 );
+    split->setStretchFactor( 1, 1 );
+    pageLayout->addWidget( split, 1 );
+
+    connect( m_sourceTable, &QTableWidget::currentCellChanged, this,
+             [this]( int currentRow, int, int, int ) { onSourceCellChanged( currentRow ); } );
+
+    if ( m_sourceTable->rowCount() > 0 )
+      m_sourceTable->selectRow( 0 );
+
+    m_subTabs->addTab( page, QStringLiteral( "Temperature Sources" ) );
+  }
+
+  // ---------------------------------------------------------------------
+  // Second tab: Zone Editing
+  // ---------------------------------------------------------------------
+  {
+    auto *page = new QWidget();
+    auto *pageLayout = new QVBoxLayout( page );
+    pageLayout->setContentsMargins( 6, 6, 6, 6 );
+    pageLayout->setSpacing( 8 );
+
+    auto *split = new QSplitter( Qt::Horizontal );
+
+    auto *zonesGroup = new QGroupBox( QStringLiteral( "Fan Zones" ) );
+    auto *zonesGroupLayout = new QVBoxLayout( zonesGroup );
+    zonesGroupLayout->setContentsMargins( 6, 6, 6, 6 );
+    m_zoneList = new QListWidget();
+    m_zoneList->setContextMenuPolicy( Qt::CustomContextMenu );
+    zonesGroupLayout->addWidget( m_zoneList );
+    split->addWidget( zonesGroup );
+
+    auto *zoneDetailsGroup = new QGroupBox( QStringLiteral( "Zone Details" ) );
+    auto *zoneForm = new QFormLayout( zoneDetailsGroup );
+    zoneForm->setContentsMargins( 6, 6, 6, 6 );
+    zoneForm->setHorizontalSpacing( 8 );
+    zoneForm->setVerticalSpacing( 6 );
+
+    m_zoneNameEdit = new QLineEdit();
+    m_zoneTypeEdit = new QLineEdit();
+    m_zoneSourceCombo = new QComboBox();
+    m_zoneFansList = new QListWidget();
+
+    m_zoneTypeEdit->setReadOnly( true );
+    m_zoneNameEdit->setPlaceholderText( QStringLiteral( "Zone name" ) );
+    m_zoneFansList->setMinimumHeight( 120 );
+
+    for ( const QJsonObject &src : m_sourceEditorModel )
+    {
+      if ( src[QStringLiteral( "id" )].toString().trimmed().isEmpty() )
+        continue;
+      m_zoneSourceCombo->addItem( src[QStringLiteral( "label" )].toString(),
+                                  src[QStringLiteral( "id" )].toString() );
+    }
+    m_allSourceCombos.push_back( m_zoneSourceCombo );
+
+    zoneForm->addRow( QStringLiteral( "Name:" ), m_zoneNameEdit );
+    zoneForm->addRow( QStringLiteral( "Device Type:" ), m_zoneTypeEdit );
+    zoneForm->addRow( QStringLiteral( "Temp Source:" ), m_zoneSourceCombo );
+    zoneForm->addRow( QStringLiteral( "Assigned Devices:" ), m_zoneFansList );
+    split->addWidget( zoneDetailsGroup );
+    split->setStretchFactor( 0, 1 );
+    split->setStretchFactor( 1, 1 );
+    pageLayout->addWidget( split, 1 );
+
+    m_zoneCache.clear();
+    m_zoneCache.reserve( zones.size() );
+    for ( const QJsonValue &zv : zones )
+    {
+      const QJsonObject zone = zv.toObject();
+      m_zoneCache.push_back( zone );
+      m_zoneList->addItem( QStringLiteral( "%1 (%2)" )
+                           .arg( zone[QStringLiteral( "name" )].toString(),
+                                 zone[QStringLiteral( "id" )].toString() ) );
+    }
+
+    m_fanLabelById.clear();
+    for ( const QJsonValue &dv : hardwareFanDevices )
+    {
+      const QJsonObject d = dv.toObject();
+      m_fanLabelById[d[QStringLiteral( "id" )].toString()] = d[QStringLiteral( "label" )].toString();
+    }
+
+    connect( m_zoneList, &QListWidget::currentRowChanged, this, &FanControlTab::onZoneListRowChanged );
+    connect( m_zoneList, &QWidget::customContextMenuRequested, this, &FanControlTab::onZoneListContextMenu );
+
+    connect( m_zoneSourceCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
+             [this]( int ) {
+               const int row = m_zoneList->currentRow();
+               if ( row < 0 || row >= m_zoneCache.size() ) return;
+               emit thermalSourceChanged( m_zoneCache[row][QStringLiteral( "id" )].toString(),
+                                          m_zoneSourceCombo->currentData().toString() );
+             } );
+
+    if ( m_zoneList->count() > 0 )
+      m_zoneList->setCurrentRow( 0 );
+
+    m_subTabs->addTab( page, QStringLiteral( "Zone Editing" ) );
+  }
+
+  // ---------------------------------------------------------------------
+  // Per-zone curve editor tabs
+  // ---------------------------------------------------------------------
   for ( const QJsonValue &zv : zones )
   {
     QJsonObject zone = zv.toObject();
@@ -616,7 +923,6 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones, const QJsonArray 
     QString devType = zone[QStringLiteral( "deviceType" )].toString();
     QString tsId = zone[QStringLiteral( "thermalSourceId" )].toString();
 
-    // Container: thermal source selector bar + editor
     auto *page = new QWidget();
     auto *pageLayout = new QVBoxLayout( page );
     pageLayout->setContentsMargins( 4, 4, 4, 4 );
@@ -627,25 +933,28 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones, const QJsonArray 
     tsBar->setContentsMargins( 0, 0, 0, 0 );
     auto *tsLabel = new QLabel( QStringLiteral( "Temperature Source:" ) );
     auto *tsCombo = new QComboBox();
-    for ( const QJsonValue &sv : thermalSources )
+    for ( const QJsonObject &src : m_sourceEditorModel )
     {
-      QJsonObject src = sv.toObject();
+      if ( src[QStringLiteral( "id" )].toString().trimmed().isEmpty() )
+        continue;
       tsCombo->addItem( src[QStringLiteral( "label" )].toString(),
                         src[QStringLiteral( "id" )].toString() );
     }
-    // Select the zone's current thermal source
+    int tsIdx = -1;
     for ( int i = 0; i < tsCombo->count(); ++i )
     {
       if ( tsCombo->itemData( i ).toString() == tsId )
       {
-        tsCombo->setCurrentIndex( i );
+        tsIdx = i;
         break;
       }
     }
+    tsCombo->setCurrentIndex( tsIdx );
     tsBar->addWidget( tsLabel );
     tsBar->addWidget( tsCombo, 1 );
     pageLayout->addLayout( tsBar );
     m_thermalSourceCombos[id] = tsCombo;
+    m_allSourceCombos.push_back( tsCombo );
 
     connect( tsCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
              [this, zoneId = id, tsCombo]( int ) {
@@ -675,6 +984,473 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones, const QJsonArray 
 
     m_subTabs->addTab( page, name );
   }
+}
+
+// ── Source / zone editor member functions ────────────────────────────
+
+void FanControlTab::showStatusMessage( const QString &msg, int timeoutMs )
+{
+  if ( auto *mw = qobject_cast< QMainWindow * >( window() ) )
+    if ( auto *sb = mw->statusBar() )
+      sb->showMessage( msg, timeoutMs );
+}
+
+QString FanControlTab::normalizedSourceGroup( const QJsonObject &sensor )
+{
+  const QString rawSource = sensor[QStringLiteral( "source" )].toString();
+  const QString sourceDisplay = sensor[QStringLiteral( "sourceDisplay" )].toString().trimmed();
+  const QString raw = sourceDisplay.isEmpty() ? rawSource : sourceDisplay;
+  const QString s = raw.trimmed().toLower();
+  const QString category = sensor[QStringLiteral( "category" )].toString().trimmed().toLower();
+
+  if ( category == QStringLiteral( "cpu" ) )   return QStringLiteral( "CPU" );
+  if ( category == QStringLiteral( "nvme" ) )  return QStringLiteral( "NVMe" );
+  if ( category == QStringLiteral( "ddr5" ) )  return QStringLiteral( "DDR5" );
+  if ( category == QStringLiteral( "board" ) ) return QStringLiteral( "Board" );
+  if ( category == QStringLiteral( "gpu" ) )
+  {
+    if ( s != QStringLiteral( "gpu" )
+         && s != QStringLiteral( "dgpu" )
+         && s != QStringLiteral( "igpu" )
+         && !raw.trimmed().isEmpty() )
+      return raw.trimmed();
+    return QStringLiteral( "GPU" );
+  }
+
+  if ( s.isEmpty() ) return QStringLiteral( "Other" );
+
+  if ( s != QStringLiteral( "gpu" )
+    && s != QStringLiteral( "dgpu" )
+    && s != QStringLiteral( "igpu" )
+    && ( s.contains( QStringLiteral( "gpu" ) )
+      || s.contains( QStringLiteral( "nvidia" ) )
+      || s.contains( QStringLiteral( "amdgpu" ) )
+      || s.contains( QStringLiteral( "radeon" ) ) ) )
+    return raw.trimmed();
+
+  if ( s.contains( QStringLiteral( "gpu" ) ) || s.contains( QStringLiteral( "nvidia" ) )
+       || s.contains( QStringLiteral( "amdgpu" ) ) || s.contains( QStringLiteral( "radeon" ) ) )
+    return QStringLiteral( "GPU" );
+  if ( s.contains( QStringLiteral( "k10temp" ) ) || s.contains( QStringLiteral( "coretemp" ) )
+       || s.contains( QStringLiteral( "cpu" ) ) )
+    return QStringLiteral( "CPU" );
+  if ( s.contains( QStringLiteral( "nvme" ) ) )
+    return QStringLiteral( "NVMe" );
+  if ( s.contains( QStringLiteral( "spd5118" ) ) || s.contains( QStringLiteral( "spd" ) ) )
+    return QStringLiteral( "DDR5" );
+  if ( s.contains( QStringLiteral( "nct6799" ) ) || s.contains( QStringLiteral( "nct" ) ) )
+    return QStringLiteral( "Board" );
+  if ( s.contains( QStringLiteral( "acpi" ) ) || s.contains( QStringLiteral( "ec" ) )
+       || s.contains( QStringLiteral( "board" ) ) || s.contains( QStringLiteral( "pch" ) )
+       || s.contains( QStringLiteral( "chipset" ) ) )
+    return QStringLiteral( "Board" );
+  return raw;
+}
+
+void FanControlTab::ensureValidStrategy( QJsonObject &src )
+{
+  const int sensorCount = src[QStringLiteral( "sensorIds" )].toArray().size();
+  if ( sensorCount <= 1 )
+  {
+    src[QStringLiteral( "strategy" )] = QStringLiteral( "single" );
+    return;
+  }
+  const QString strategy = src[QStringLiteral( "strategy" )].toString();
+  if ( !strategyChoices().contains( strategy ) )
+    src[QStringLiteral( "strategy" )] = QStringLiteral( "average" );
+}
+
+QString FanControlTab::sensorsSummaryText( const QJsonObject &src ) const
+{
+  QStringList labels;
+  const QJsonArray sensorIds = src[QStringLiteral( "sensorIds" )].toArray();
+  for ( const QJsonValue &v : sensorIds )
+    labels << m_sensorLabelById.value( v.toString(), v.toString() );
+  return labels.isEmpty() ? QStringLiteral( "(none)" ) : labels.join( QStringLiteral( ", " ) );
+}
+
+void FanControlTab::refreshAllSourceCombos()
+{
+  for ( QComboBox *combo : m_allSourceCombos )
+  {
+    if ( !combo ) continue;
+    const QString currentId = combo->currentData().toString();
+    combo->blockSignals( true );
+    combo->clear();
+    for ( const QJsonObject &src : m_sourceEditorModel )
+    {
+      if ( src[QStringLiteral( "id" )].toString().trimmed().isEmpty() )
+        continue;
+      combo->addItem( src[QStringLiteral( "label" )].toString(),
+                      src[QStringLiteral( "id" )].toString() );
+    }
+    for ( int i = 0; i < combo->count(); ++i )
+    {
+      if ( combo->itemData( i ).toString() == currentId )
+      {
+        combo->setCurrentIndex( i );
+        break;
+      }
+    }
+    combo->blockSignals( false );
+  }
+}
+
+void FanControlTab::installStrategyComboForRow( int row )
+{
+  if ( row < 0 || row >= m_sourceEditorModel.size() )
+    return;
+
+  if ( m_strategyCombos.size() <= row )
+    m_strategyCombos.resize( row + 1 );
+
+  if ( m_strategyCombos[row] )
+    return;
+
+  auto *combo = new QComboBox( m_sourceTable );
+  for ( const QString &opt : strategyChoices() )
+    combo->addItem( opt, opt );
+  m_strategyCombos[row] = combo;
+  m_sourceTable->setCellWidget( row, 1, combo );
+
+  connect( combo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
+           [this, row, combo]( int ) {
+             if ( row < 0 || row >= m_sourceEditorModel.size() ) return;
+             QJsonObject src = m_sourceEditorModel[row];
+             if ( src[QStringLiteral( "sensorIds" )].toArray().size() <= 1 )
+             {
+               src[QStringLiteral( "strategy" )] = QStringLiteral( "single" );
+               combo->blockSignals( true );
+               const int idx = combo->findData( QStringLiteral( "single" ) );
+               combo->setCurrentIndex( idx >= 0 ? idx : 0 );
+               combo->blockSignals( false );
+             }
+             else
+             {
+               src[QStringLiteral( "strategy" )] = combo->currentData().toString();
+             }
+             m_sourceEditorModel[row] = src;
+             if ( m_sourceTable->currentRow() == row )
+               m_sourceTable->setCurrentCell( row, m_sourceTable->currentColumn() );
+           } );
+}
+
+void FanControlTab::refreshSourceRow( int row )
+{
+  if ( row < 0 || row >= m_sourceEditorModel.size() ) return;
+
+  QJsonObject src = m_sourceEditorModel[row];
+  ensureValidStrategy( src );
+  m_sourceEditorModel[row] = src;
+
+  auto *labelItem = m_sourceTable->item( row, 0 );
+  if ( !labelItem )
+  {
+    labelItem = new QTableWidgetItem();
+    m_sourceTable->setItem( row, 0, labelItem );
+  }
+  labelItem->setText( src[QStringLiteral( "label" )].toString() );
+  labelItem->setData( Qt::UserRole, src[QStringLiteral( "id" )].toString() );
+  labelItem->setFlags( labelItem->flags() | Qt::ItemIsEditable );
+
+  if ( row < m_strategyCombos.size() && m_strategyCombos[row] )
+  {
+    m_strategyCombos[row]->blockSignals( true );
+    const QString strategy = src[QStringLiteral( "strategy" )].toString();
+    const int idx = m_strategyCombos[row]->findData( strategy );
+    m_strategyCombos[row]->setCurrentIndex( idx >= 0 ? idx : 0 );
+    const int sensorCount = src[QStringLiteral( "sensorIds" )].toArray().size();
+    m_strategyCombos[row]->setEnabled( sensorCount > 1 );
+    m_strategyCombos[row]->blockSignals( false );
+  }
+
+  auto *sensorsItem = m_sourceTable->item( row, 2 );
+  if ( !sensorsItem )
+  {
+    sensorsItem = new QTableWidgetItem();
+    sensorsItem->setFlags( sensorsItem->flags() & ~Qt::ItemIsEditable );
+    m_sourceTable->setItem( row, 2, sensorsItem );
+  }
+  sensorsItem->setText( sensorsSummaryText( src ) );
+}
+
+void FanControlTab::addSensorToSource( int row, const QString &sensorId )
+{
+  if ( row < 0 || row >= m_sourceEditorModel.size() || sensorId.isEmpty() )
+    return;
+
+  QJsonObject src = m_sourceEditorModel[row];
+  QJsonArray sensorIds = src[QStringLiteral( "sensorIds" )].toArray();
+  const int beforeCount = sensorIds.size();
+  for ( const QJsonValue &v : sensorIds )
+  {
+    if ( v.toString() == sensorId )
+      return; // already assigned
+  }
+  sensorIds.append( sensorId );
+  src[QStringLiteral( "sensorIds" )] = sensorIds;
+
+  if ( sensorIds.size() <= 1 )
+    src[QStringLiteral( "strategy" )] = QStringLiteral( "single" );
+  else if ( beforeCount == 1 )
+    src[QStringLiteral( "strategy" )] = QStringLiteral( "max" );
+
+  m_sourceEditorModel[row] = src;
+  refreshSourceRow( row );
+}
+
+void FanControlTab::createSourceWithSensor( const QString &sensorId )
+{
+  if ( sensorId.isEmpty() )
+    return;
+
+  QString newId;
+  for ( int n = 1; ; ++n )
+  {
+    newId = QStringLiteral( "custom-source-%1" ).arg( n );
+    bool exists = false;
+    for ( const QJsonObject &src : m_sourceEditorModel )
+    {
+      if ( src[QStringLiteral( "id" )].toString() == newId )
+      {
+        exists = true;
+        break;
+      }
+    }
+    if ( !exists ) break;
+  }
+
+  QJsonObject src;
+  src[QStringLiteral( "id" )] = newId;
+  src[QStringLiteral( "label" )] = m_sensorLabelById.value( sensorId, QStringLiteral( "New Source" ) );
+  src[QStringLiteral( "strategy" )] = QStringLiteral( "single" );
+  src[QStringLiteral( "sensorIds" )] = QJsonArray{ sensorId };
+  src[QStringLiteral( "weights" )] = QJsonArray{};
+
+  const int row = m_sourceEditorModel.size();
+  m_sourceEditorModel.push_back( src );
+  m_sourceTable->setRowCount( row + 1 );
+  if ( m_strategyCombos.size() <= row )
+    m_strategyCombos.resize( row + 1 );
+  installStrategyComboForRow( row );
+  refreshSourceRow( row );
+  m_sourceTable->setCurrentCell( row, 0 );
+  refreshAllSourceCombos();
+}
+
+void FanControlTab::onSourceItemChanged( QTableWidgetItem *item )
+{
+  if ( !item || item->column() != 0 ) return;
+  const int row = item->row();
+  if ( row < 0 || row >= m_sourceEditorModel.size() ) return;
+
+  QJsonObject src = m_sourceEditorModel[row];
+  src[QStringLiteral( "label" )] = item->text().trimmed();
+  if ( src[QStringLiteral( "label" )].toString().isEmpty() )
+    src[QStringLiteral( "label" )] = QStringLiteral( "Unnamed Source" );
+  m_sourceEditorModel[row] = src;
+  item->setText( src[QStringLiteral( "label" )].toString() );
+  refreshAllSourceCombos();
+}
+
+void FanControlTab::onSourceCellChanged( int currentRow )
+{
+  if ( currentRow < 0 )
+  {
+    m_srcLabelValue->setText( QStringLiteral( "-" ) );
+    m_srcStrategyValue->setText( QStringLiteral( "-" ) );
+    m_srcSensorsValue->setText( QStringLiteral( "-" ) );
+    return;
+  }
+
+  const auto *labelItem = m_sourceTable->item( currentRow, 0 );
+  auto *combo = qobject_cast< QComboBox * >( m_sourceTable->cellWidget( currentRow, 1 ) );
+  m_srcLabelValue->setText( labelItem ? labelItem->text() : QStringLiteral( "-" ) );
+  m_srcStrategyValue->setText( combo ? combo->currentData().toString() : QStringLiteral( "-" ) );
+
+  if ( currentRow < m_sourceEditorModel.size() )
+    m_srcSensorsValue->setText( sensorsSummaryText( m_sourceEditorModel[currentRow] ) );
+  else
+    m_srcSensorsValue->setText( QStringLiteral( "-" ) );
+}
+
+void FanControlTab::onSourceContextMenu( const QPoint &pos )
+{
+  QMenu menu( m_sourceTable );
+  QAction *removeSourceAction = menu.addAction( QStringLiteral( "Remove Source" ) );
+  QMenu *removeSensorMenu = menu.addMenu( QStringLiteral( "Remove Sensor" ) );
+
+  const int row = m_sourceTable->currentRow();
+  removeSourceAction->setEnabled( row >= 0 );
+
+  if ( row >= 0 && row < m_sourceEditorModel.size() )
+  {
+    const QJsonObject src = m_sourceEditorModel[row];
+    const QJsonArray sensorIds = src[QStringLiteral( "sensorIds" )].toArray();
+    if ( sensorIds.isEmpty() )
+    {
+      auto *noneAction = removeSensorMenu->addAction( QStringLiteral( "(none)" ) );
+      noneAction->setEnabled( false );
+    }
+    else
+    {
+      for ( const QJsonValue &v : sensorIds )
+      {
+        const QString sid = v.toString();
+        QAction *a = removeSensorMenu->addAction( m_sensorLabelById.value( sid, sid ) );
+        a->setData( sid );
+        if ( sensorIds.size() <= 1 )
+          a->setEnabled( false );
+      }
+    }
+  }
+  else
+  {
+    removeSensorMenu->setEnabled( false );
+  }
+
+  QAction *chosen = menu.exec( m_sourceTable->viewport()->mapToGlobal( pos ) );
+  if ( !chosen ) return;
+
+  if ( chosen == removeSourceAction )
+  {
+    if ( row < 0 || row >= m_sourceEditorModel.size() ) return;
+
+    if ( m_sourceEditorModel.size() <= 1 )
+    {
+      showStatusMessage( QStringLiteral( "At least one source must remain." ) );
+      return;
+    }
+
+    const QString removedSourceId = m_sourceEditorModel[row][QStringLiteral( "id" )].toString();
+    QJsonArray updatedZones;
+    QStringList affectedZones;
+    for ( const QJsonValue &zv : m_lastZones )
+    {
+      QJsonObject z = zv.toObject();
+      if ( z[QStringLiteral( "thermalSourceId" )].toString() == removedSourceId )
+      {
+        affectedZones << z[QStringLiteral( "name" )].toString();
+        z[QStringLiteral( "thermalSourceId" )] = QString();
+      }
+      updatedZones.append( z );
+    }
+
+    if ( !affectedZones.isEmpty() )
+      showStatusMessage( QStringLiteral( "Removed source was used by: %1. Their sources were invalidated." )
+                           .arg( affectedZones.join( QStringLiteral( ", " ) ) ) );
+
+    m_sourceEditorModel.removeAt( row );
+
+    QJsonArray updatedSources;
+    for ( const QJsonObject &s : m_sourceEditorModel )
+      updatedSources.append( s );
+
+    buildZoneEditors( updatedZones, updatedSources, m_lastFanDevices, m_lastSensors );
+    return;
+  }
+
+  const QVariant sensorData = chosen->data();
+  if ( !sensorData.isValid() || row < 0 || row >= m_sourceEditorModel.size() )
+    return;
+
+  const QString removeSensorId = sensorData.toString();
+  QJsonObject src = m_sourceEditorModel[row];
+  QJsonArray sensorIds = src[QStringLiteral( "sensorIds" )].toArray();
+  if ( sensorIds.size() <= 1 )
+  {
+    showStatusMessage( QStringLiteral( "A source must have at least one sensor." ) );
+    return;
+  }
+
+  QJsonArray filtered;
+  for ( const QJsonValue &v : sensorIds )
+  {
+    if ( v.toString() != removeSensorId )
+      filtered.append( v );
+  }
+  src[QStringLiteral( "sensorIds" )] = filtered;
+  if ( filtered.size() <= 1 )
+    src[QStringLiteral( "strategy" )] = QStringLiteral( "single" );
+
+  m_sourceEditorModel[row] = src;
+  refreshSourceRow( row );
+  refreshAllSourceCombos();
+}
+
+void FanControlTab::onSensorDropped( int row, const QString &sensorId )
+{
+  if ( row >= 0 )
+  {
+    addSensorToSource( row, sensorId );
+    refreshAllSourceCombos();
+  }
+  else
+  {
+    createSourceWithSensor( sensorId );
+  }
+}
+
+void FanControlTab::onZoneListRowChanged( int row )
+{
+  if ( row < 0 || row >= m_zoneCache.size() )
+  {
+    m_zoneNameEdit->clear();
+    m_zoneTypeEdit->clear();
+    m_zoneSourceCombo->setCurrentIndex( -1 );
+    m_zoneFansList->clear();
+    return;
+  }
+
+  const QJsonObject zone = m_zoneCache[row];
+  m_zoneNameEdit->setText( zone[QStringLiteral( "name" )].toString() );
+  m_zoneTypeEdit->setText( zone[QStringLiteral( "deviceType" )].toString() );
+
+  const QString tsId = zone[QStringLiteral( "thermalSourceId" )].toString();
+  int idx = -1;
+  for ( int i = 0; i < m_zoneSourceCombo->count(); ++i )
+  {
+    if ( m_zoneSourceCombo->itemData( i ).toString() == tsId )
+    {
+      idx = i;
+      break;
+    }
+  }
+  m_zoneSourceCombo->setCurrentIndex( idx );
+
+  m_zoneFansList->clear();
+  const QJsonArray fanIds = zone[QStringLiteral( "fanIds" )].toArray();
+  for ( const QJsonValue &fv : fanIds )
+  {
+    const QString fanId = fv.toString();
+    const QString fanLabel = m_fanLabelById.value( fanId );
+    if ( fanLabel.isEmpty() )
+      m_zoneFansList->addItem( fanId );
+    else
+      m_zoneFansList->addItem( QStringLiteral( "%1 (%2)" ).arg( fanLabel, fanId ) );
+  }
+}
+
+void FanControlTab::onZoneListContextMenu( const QPoint &pos )
+{
+  QMenu menu( m_zoneList );
+  QAction *newAction = menu.addAction( QStringLiteral( "New Zone" ) );
+  QAction *renameAction = menu.addAction( QStringLiteral( "Rename Zone" ) );
+  QAction *deleteAction = menu.addAction( QStringLiteral( "Delete Zone" ) );
+
+  const bool hasSelection = m_zoneList->currentRow() >= 0;
+  renameAction->setEnabled( hasSelection );
+  deleteAction->setEnabled( hasSelection );
+
+  QAction *chosen = menu.exec( m_zoneList->viewport()->mapToGlobal( pos ) );
+  if ( !chosen ) return;
+
+  if ( chosen == newAction )
+    showStatusMessage( QStringLiteral( "Create zone from context menu is not implemented yet." ) );
+  else if ( chosen == renameAction )
+    showStatusMessage( QStringLiteral( "Rename zone from context menu is not implemented yet." ) );
+  else if ( chosen == deleteAction )
+    showStatusMessage( QStringLiteral( "Delete zone from context menu is not implemented yet." ) );
 }
 
 QString FanControlTab::thermalSourceForZone( const QString &zoneId ) const
