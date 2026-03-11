@@ -812,10 +812,12 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
     auto *sensorPaneLayout = new QVBoxLayout( sensorPane );
     sensorPaneLayout->setContentsMargins( 6, 6, 6, 6 );
     auto *sensorTree = new QTreeWidget();
-    sensorTree->setColumnCount( 1 );
-    sensorTree->setHeaderLabels( { QStringLiteral( "Hardware Sensors" ) } );
-    sensorTree->header()->setStretchLastSection( true );
+    m_sensorTree = sensorTree;
+    sensorTree->setColumnCount( 2 );
+    sensorTree->setHeaderLabels( { QStringLiteral( "Hardware Sensors" ), QStringLiteral( "°C" ) } );
+    sensorTree->header()->setStretchLastSection( false );
     sensorTree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+    sensorTree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
     sensorTree->setDragEnabled( true );
     sensorTree->setDragDropMode( QAbstractItemView::DragOnly );
     sensorTree->setEditTriggers( QAbstractItemView::DoubleClicked
@@ -985,14 +987,16 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
     auto *sourceTable = new ThermalSourceTableWidget();
     m_sourceTable = sourceTable;
-    m_sourceTable->setColumnCount( 3 );
+    m_sourceTable->setColumnCount( 4 );
     m_sourceTable->setHorizontalHeaderLabels( { QStringLiteral( "Label" ),
                            QStringLiteral( "Strategy" ),
-                           QStringLiteral( "Sensors" ) } );
-    m_sourceTable->horizontalHeader()->setStretchLastSection( true );
+                           QStringLiteral( "Sensors" ),
+                           QStringLiteral( "°C" ) } );
+    m_sourceTable->horizontalHeader()->setStretchLastSection( false );
     m_sourceTable->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::Stretch );
     m_sourceTable->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
     m_sourceTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
+    m_sourceTable->horizontalHeader()->setSectionResizeMode( 3, QHeaderView::ResizeToContents );
     m_sourceTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     m_sourceTable->setSelectionMode( QAbstractItemView::SingleSelection );
     m_sourceTable->setEditTriggers( QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed );
@@ -1030,10 +1034,18 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
     m_zoneTable->setHorizontalHeaderLabels( { QStringLiteral( "Name" ),
                                               QStringLiteral( "Temp Source" ),
                                               QStringLiteral( "Devices" ) } );
-    m_zoneTable->horizontalHeader()->setStretchLastSection( true );
+    m_zoneTable->setColumnCount( 5 );
+    m_zoneTable->setHorizontalHeaderLabels( { QStringLiteral( "Name" ),
+                                 QStringLiteral( "Temp Source" ),
+                                 QStringLiteral( "Devices" ),
+                                 QStringLiteral( "°C" ),
+                                 QStringLiteral( "Fan %" ) } );
+    m_zoneTable->horizontalHeader()->setStretchLastSection( false );
     m_zoneTable->horizontalHeader()->setSectionResizeMode( 0, QHeaderView::Stretch );
     m_zoneTable->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
     m_zoneTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
+    m_zoneTable->horizontalHeader()->setSectionResizeMode( 3, QHeaderView::ResizeToContents );
+    m_zoneTable->horizontalHeader()->setSectionResizeMode( 4, QHeaderView::ResizeToContents );
     m_zoneTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     m_zoneTable->setSelectionMode( QAbstractItemView::SingleSelection );
     m_zoneTable->setEditTriggers( QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed );
@@ -1080,8 +1092,19 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
     if ( m_zoneTable->rowCount() > 0 )
       m_zoneTable->selectRow( 0 );
 
-    m_subTabs->addTab( page, QStringLiteral( "Temperature Sources" ) );
+    m_subTabs->addTab( page, QStringLiteral( "Zone Setup" ) );
   }
+
+  // Start polling sensor readings for the Zone Setup tab
+  if ( !m_sensorPollTimer )
+  {
+    m_sensorPollTimer = new QTimer( this );
+    m_sensorPollTimer->setInterval( 1000 );
+    connect( m_sensorPollTimer, &QTimer::timeout, this, &FanControlTab::pollSensorReadings );
+  }
+  m_sensorPollTimer->start();
+  // Do an initial poll immediately
+  pollSensorReadings();
 
   // ---------------------------------------------------------------------
   // Per-zone curve editor tabs
@@ -1130,7 +1153,29 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
     connect( tsCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
              [this, zoneId = id, tsCombo]( int ) {
-               emit thermalSourceChanged( zoneId, tsCombo->currentData().toString() );
+               const QString tsId = tsCombo->currentData().toString();
+
+               // Sync zone-table combo to match
+               for ( int r = 0; r < m_zoneCache.size(); ++r )
+               {
+                 if ( m_zoneCache[r][QStringLiteral( "id" )].toString() != zoneId )
+                   continue;
+                 if ( r < m_zoneSourceCombos.size() && m_zoneSourceCombos[r] )
+                 {
+                   QSignalBlocker blocker( m_zoneSourceCombos[r] );
+                   for ( int i = 0; i < m_zoneSourceCombos[r]->count(); ++i )
+                   {
+                     if ( m_zoneSourceCombos[r]->itemData( i ).toString() == tsId )
+                     {
+                       m_zoneSourceCombos[r]->setCurrentIndex( i );
+                       break;
+                     }
+                   }
+                 }
+                 break;
+               }
+
+               emit thermalSourceChanged( zoneId, tsId );
              } );
 
     if ( devType == QStringLiteral( "stagedPump" ) )
@@ -1814,7 +1859,24 @@ void FanControlTab::onZoneSourceComboChanged( int row )
   if ( !combo )
     return;
   const QString zoneId = m_zoneCache[row][QStringLiteral( "id" )].toString();
-  emit thermalSourceChanged( zoneId, combo->currentData().toString() );
+  const QString tsId = combo->currentData().toString();
+
+  // Sync per-curve-tab combo to match
+  auto it = m_thermalSourceCombos.find( zoneId );
+  if ( it != m_thermalSourceCombos.end() && it.value() )
+  {
+    QSignalBlocker blocker( it.value() );
+    for ( int i = 0; i < it.value()->count(); ++i )
+    {
+      if ( it.value()->itemData( i ).toString() == tsId )
+      {
+        it.value()->setCurrentIndex( i );
+        break;
+      }
+    }
+  }
+
+  emit thermalSourceChanged( zoneId, tsId );
 }
 
 void FanControlTab::onZoneItemChanged( QTableWidgetItem *item )
@@ -2225,5 +2287,142 @@ void FanControlTab::setThermalSourceForZone( const QString &zoneId, const QStrin
     break;
   }
 }
+
+void FanControlTab::pollSensorReadings()
+{
+  auto json = m_uccdClient->getSensorReadingsJSON();
+  if ( !json )
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+  if ( !doc.isObject() )
+    return;
+
+  m_sensorReadings = doc.object();
+  updateSensorTreeValues();
+  updateSourceTableValues();
+  updateZoneTableValues();
+
+  // Also poll zone telemetry
+  auto telemetryJson = m_uccdClient->getFanZoneTelemetryJSON();
+  if ( telemetryJson )
+  {
+    QJsonDocument telemetryDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *telemetryJson ) );
+    if ( telemetryDoc.isObject() )
+    {
+      m_zoneTelemetry = telemetryDoc.object();
+      updateZoneTableValues();
+    }
+  }
+}
+
+void FanControlTab::updateSensorTreeValues()
+{
+  if ( !m_sensorTree )
+    return;
+
+  QTreeWidgetItemIterator it( m_sensorTree );
+  while ( *it )
+  {
+    QTreeWidgetItem *item = *it;
+    const QString sid = item->data( 0, Qt::UserRole ).toString();
+    if ( !sid.isEmpty() )
+    {
+      auto val = m_sensorReadings.value( sid );
+      if ( val.isDouble() )
+        item->setText( 1, QString::number( val.toInt() ) );
+      else
+        item->setText( 1, QStringLiteral( "--" ) );
+    }
+    ++it;
+  }
+}
+
+void FanControlTab::updateSourceTableValues()
+{
+  if ( !m_sourceTable )
+    return;
+
+  for ( int row = 0; row < m_sourceEditorModel.size(); ++row )
+  {
+    const QJsonObject &src = m_sourceEditorModel[row];
+    const QString sourceId = src[QStringLiteral( "id" )].toString();
+    const QString key = QStringLiteral( "_source:" ) + sourceId;
+
+    auto *valueItem = m_sourceTable->item( row, 3 );
+    if ( !valueItem )
+    {
+      valueItem = new QTableWidgetItem();
+      valueItem->setFlags( valueItem->flags() & ~Qt::ItemIsEditable );
+      valueItem->setTextAlignment( Qt::AlignCenter );
+      m_sourceTable->setItem( row, 3, valueItem );
+    }
+
+    auto val = m_sensorReadings.value( key );
+    if ( val.isDouble() )
+      valueItem->setText( QString::number( val.toInt() ) + QStringLiteral( " °C" ) );
+    else
+      valueItem->setText( QStringLiteral( "--" ) );
+  }
+}
+
+  void FanControlTab::updateZoneTableValues()
+  {
+    if ( !m_zoneTable )
+      return;
+
+    for ( int row = 0; row < m_zoneCache.size(); ++row )
+    {
+      const QJsonObject &zone = m_zoneCache[row];
+      const QString zoneId = zone[QStringLiteral( "id" )].toString();
+
+      // Temp column (col 3)
+      auto *tempItem = m_zoneTable->item( row, 3 );
+      if ( !tempItem )
+      {
+        tempItem = new QTableWidgetItem();
+        tempItem->setFlags( tempItem->flags() & ~Qt::ItemIsEditable );
+        tempItem->setTextAlignment( Qt::AlignCenter );
+        m_zoneTable->setItem( row, 3, tempItem );
+      }
+
+      auto telemetry = m_zoneTelemetry.value( zoneId );
+      if ( telemetry.isObject() )
+      {
+        int temp = telemetry.toObject()[QStringLiteral( "temp" )].toInt( -1 );
+        if ( temp >= 0 )
+          tempItem->setText( QString::number( temp ) );
+        else
+          tempItem->setText( QStringLiteral( "--" ) );
+      }
+      else
+      {
+        tempItem->setText( QStringLiteral( "--" ) );
+      }
+
+      // Fan duty column (col 4)
+      auto *dutyItem = m_zoneTable->item( row, 4 );
+      if ( !dutyItem )
+      {
+        dutyItem = new QTableWidgetItem();
+        dutyItem->setFlags( dutyItem->flags() & ~Qt::ItemIsEditable );
+        dutyItem->setTextAlignment( Qt::AlignCenter );
+        m_zoneTable->setItem( row, 4, dutyItem );
+      }
+
+      if ( telemetry.isObject() )
+      {
+        int duty = telemetry.toObject()[QStringLiteral( "duty" )].toInt( -1 );
+        if ( duty >= 0 )
+          dutyItem->setText( QString::number( duty ) );
+        else
+          dutyItem->setText( QStringLiteral( "--" ) );
+      }
+      else
+      {
+        dutyItem->setText( QStringLiteral( "--" ) );
+      }
+    }
+  }
 
 } // namespace ucc

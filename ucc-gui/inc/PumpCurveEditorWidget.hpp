@@ -15,7 +15,7 @@
  * pump is Off (level 0); each threshold raises the level by one.
  * 12V (level 4) is intentionally omitted — it can be harmful to the pump.
  *
- * This edits the "wc-pump" zone curve in a FanProfile.
+ * This edits the water-cooler pump zone curve in a FanProfile.
  */
 class PumpCurveEditorWidget : public QWidget {
     Q_OBJECT

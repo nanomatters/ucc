@@ -1,6 +1,6 @@
 /*
  * Unit tests for MetricsHistoryStore – push, querySinceJSON,
- * horizon clamping, eviction, and metricName().
+ * horizon clamping, eviction, and querySinceBinary().
  */
 
 #include <QTest>
@@ -20,39 +20,13 @@ class TestMetricsHistory : public QObject
 
 private slots:
 
-  // ---- metricName() ----------------------------------------------------
-
-  void metricName_known()
-  {
-    QCOMPARE( std::string( metricName( MetricId::CpuTemp ) ),
-              std::string( "cpuTemp" ) );
-    QCOMPARE( std::string( metricName( MetricId::GpuPower ) ),
-              std::string( "gpuPower" ) );
-    QCOMPARE( std::string( metricName( MetricId::GpuCoreVoltage ) ),
-              std::string( "gpuCoreVoltage" ) );
-  }
-
-  void metricName_sentinel()
-  {
-    // Count is a sentinel — should return "unknown"
-    QCOMPARE( std::string( metricName( MetricId::Count ) ),
-              std::string( "unknown" ) );
-  }
-
-  void metricName_outOfRange()
-  {
-    auto bad = static_cast< MetricId >( 200 );
-    QCOMPARE( std::string( metricName( bad ) ),
-              std::string( "unknown" ) );
-  }
-
   // ---- push + querySinceJSON() -----------------------------------------
 
   void pushAndQuery_basic()
   {
     MetricsHistoryStore store;
-    store.push( MetricId::CpuTemp, 1000, 45.5 );
-    store.push( MetricId::CpuTemp, 2000, 46.0 );
+    store.push( "cpuTemp", 1000, 45.5 );
+    store.push( "cpuTemp", 2000, 46.0 );
 
     std::string json = store.querySinceJSON( 0 );
 
@@ -65,15 +39,14 @@ private slots:
   void pushAndQuery_sinceFilters()
   {
     MetricsHistoryStore store;
-    store.push( MetricId::CpuTemp, 1000, 10.0 );
-    store.push( MetricId::CpuTemp, 2000, 20.0 );
-    store.push( MetricId::CpuTemp, 3000, 30.0 );
+    store.push( "cpuTemp", 1000, 10.0 );
+    store.push( "cpuTemp", 2000, 20.0 );
+    store.push( "cpuTemp", 3000, 30.0 );
 
     // Query since ts=2000 → should include 2000 and 3000 but not 1000
     std::string json = store.querySinceJSON( 2000 );
     QVERIFY( strContains( json,  "20" ) );
     QVERIFY( strContains( json,  "30" ) );
-    // Value "10" is also a substring of timestamps, so check for the specific point
     // Instead, query since 2500 — only the 3000 point should remain
     std::string json2 = store.querySinceJSON( 2500 );
     QVERIFY( strContains( json2,  "30" ) );
@@ -91,23 +64,28 @@ private slots:
   void pushAndQuery_multipleMetrics()
   {
     MetricsHistoryStore store;
-    store.push( MetricId::CpuTemp, 1000, 50.0 );
-    store.push( MetricId::GpuTemp, 1000, 60.0 );
+    store.push( "cpuTemp", 1000, 50.0 );
+    store.push( "gpuTemp", 1000, 60.0 );
 
     std::string json = store.querySinceJSON( 0 );
     QVERIFY( strContains( json,  "cpuTemp" ) );
     QVERIFY( strContains( json,  "gpuTemp" ) );
   }
 
-  // ---- push() ignores out-of-range MetricId ----------------------------
+  // ---- activeKeys() ----------------------------------------------------
 
-  void push_outOfRange()
+  void activeKeys_returnsAllPushed()
   {
     MetricsHistoryStore store;
-    auto bad = static_cast< MetricId >( 200 );
-    // Should silently do nothing
-    store.push( bad, 1000, 99.0 );
-    QCOMPARE( store.querySinceJSON( 0 ), std::string( "{}" ) );
+    store.push( "cpuTemp", 1000, 50.0 );
+    store.push( "gpuTemp", 1000, 60.0 );
+    store.push( "fan:hwmon3_fan1", 1000, 1200.0 );
+
+    auto keys = store.activeKeys();
+    QCOMPARE( static_cast< int >( keys.size() ), 3 );
+    QVERIFY( std::find( keys.begin(), keys.end(), "cpuTemp" ) != keys.end() );
+    QVERIFY( std::find( keys.begin(), keys.end(), "gpuTemp" ) != keys.end() );
+    QVERIFY( std::find( keys.begin(), keys.end(), "fan:hwmon3_fan1" ) != keys.end() );
   }
 
   // ---- querySinceBinary() basic sanity ---------------------------------
@@ -115,19 +93,37 @@ private slots:
   void binaryQuery_roundTrip()
   {
     MetricsHistoryStore store;
-    store.push( MetricId::CpuTemp, 1000, 45.0 );
+    store.push( "cpuTemp", 1000, 45.0 );
 
     auto blob = store.querySinceBinary( 0 );
-    // At minimum: 1 byte metricId + 4 bytes count + 16 bytes (1 point) = 21
-    QVERIFY( blob.size() >= 21 );
 
-    // Verify metric ID byte
-    QCOMPARE( blob[0], static_cast< uint8_t >( MetricId::CpuTemp ) );
+    // New format: uint16_t keyLen + key chars + uint32_t count + count × 16
+    // "cpuTemp" = 7 chars → 2 + 7 + 4 + 16 = 29 bytes minimum
+    QVERIFY( blob.size() >= 29 );
 
-    // Verify count = 1
-    uint32_t count;
-    std::memcpy( &count, blob.data() + 1, sizeof( count ) );
+    // Read key length
+    uint16_t keyLen = 0;
+    std::memcpy( &keyLen, blob.data(), sizeof( keyLen ) );
+    QCOMPARE( keyLen, static_cast< uint16_t >( 7 ) );
+
+    // Read key string
+    std::string key( reinterpret_cast< const char * >( blob.data() + 2 ), keyLen );
+    QCOMPARE( key, std::string( "cpuTemp" ) );
+
+    // Read count
+    uint32_t count = 0;
+    std::memcpy( &count, blob.data() + 2 + keyLen, sizeof( count ) );
     QCOMPARE( count, 1u );
+
+    // Read timestamp
+    int64_t ts = 0;
+    std::memcpy( &ts, blob.data() + 2 + keyLen + 4, sizeof( ts ) );
+    QCOMPARE( ts, static_cast< int64_t >( 1000 ) );
+
+    // Read value
+    double val = 0.0;
+    std::memcpy( &val, blob.data() + 2 + keyLen + 4 + sizeof( ts ), sizeof( val ) );
+    QCOMPARE( val, 45.0 );
   }
 
   // ---- setHorizon() – clamping -----------------------------------------
@@ -167,20 +163,21 @@ private slots:
     store.setHorizon( 60 );  // minimum = 60 seconds = 60000 ms
 
     // Push a point at t=1000
-    store.push( MetricId::CpuTemp, 1000, 40.0 );
+    store.push( "cpuTemp", 1000, 40.0 );
     // Push a point at t=200000 (well beyond 60s horizon from first point)
-    store.push( MetricId::CpuTemp, 200000, 50.0 );
+    store.push( "cpuTemp", 200000, 50.0 );
 
     // Query from the beginning — old point should have been evicted
     std::string json = store.querySinceJSON( 0 );
     // Only the 50.0 point should remain
-    // The 40.0 point (at t=1000) is older than 200000-60000=140000 cutoff
     QVERIFY( strContains( json,  "50" ) );
 
-    // Binary query should have exactly 1 data point
+    // Binary query: read header then check count = 1
     auto blob = store.querySinceBinary( 0 );
-    uint32_t count;
-    std::memcpy( &count, blob.data() + 1, sizeof( count ) );
+    uint16_t keyLen = 0;
+    std::memcpy( &keyLen, blob.data(), sizeof( keyLen ) );
+    uint32_t count = 0;
+    std::memcpy( &count, blob.data() + 2 + keyLen, sizeof( count ) );
     QCOMPARE( count, 1u );
   }
 };

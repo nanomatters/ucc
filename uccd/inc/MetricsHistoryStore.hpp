@@ -15,60 +15,17 @@
 
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <cstring>
 #include <chrono>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <sstream>
 #include <vector>
 #include <algorithm>
-
-/**
- * @brief Identifiers for each tracked metric.
- *
- * The underlying value is used as an index into the per-metric ring buffers.
- */
-enum class MetricId : uint8_t
-{
-  CpuTemp,
-  CpuFanDuty,
-  CpuPower,
-  CpuFrequency,
-  GpuTemp,
-  GpuFanDuty,
-  GpuPower,
-  GpuFrequency,
-  GpuVramFrequency,
-  GpuCoreVoltage,
-  Fps,            ///< Frames per second from ucc-fps-layer
-  Count  ///< Sentinel — must be last
-};
-
-/**
- * @brief Human-readable name for a metric (matches JSON key).
- */
-constexpr const char *metricName( MetricId id ) noexcept
-{
-  switch ( id )
-  {
-    case MetricId::CpuTemp:             return "cpuTemp";
-    case MetricId::CpuFanDuty:          return "cpuFanDuty";
-    case MetricId::CpuPower:            return "cpuPower";
-    case MetricId::CpuFrequency:        return "cpuFrequency";
-    case MetricId::GpuTemp:             return "gpuTemp";
-    case MetricId::GpuFanDuty:          return "gpuFanDuty";
-    case MetricId::GpuPower:            return "gpuPower";
-    case MetricId::GpuFrequency:        return "gpuFrequency";
-    case MetricId::GpuVramFrequency:    return "gpuVramFrequency";
-    case MetricId::GpuCoreVoltage:      return "gpuCoreVoltage";
-    case MetricId::Fps:                 return "fps";
-    default:                            return "unknown";
-  }
-}
 
 /**
  * @brief A single timestamped data point.
@@ -80,11 +37,11 @@ struct MetricDataPoint
 };
 
 /**
- * @brief Thread-safe ring buffer for hardware monitoring metrics.
+ * @brief Thread-safe, string-keyed ring buffer for hardware monitoring metrics.
  *
- * Workers push data from their own threads; the D-Bus adaptor reads via
- * querySince().  A shared_mutex allows concurrent readers with exclusive
- * writers (each push only locks one metric's deque, so contention is minimal).
+ * Any number of named series can be pushed.  Workers push data from their own
+ * threads; the D-Bus adaptor reads via querySince().  A shared_mutex allows
+ * concurrent readers with exclusive writers.
  *
  * Eviction is age-based: points older than the configured horizon are pruned
  * on every push().
@@ -103,19 +60,15 @@ public:
   // -----------------------------------------------------------------------
 
   /**
-   * @brief Push a new data point for the given metric.
+   * @brief Push a new data point for the given metric key.
    *
    * Automatically trims points outside the configured horizon.
-   * Thread-safe (exclusive lock on the metric's deque).
+   * Thread-safe (exclusive lock).
    */
-  void push( MetricId id, int64_t timestampMs, double value )
+  void push( const std::string &key, int64_t timestampMs, double value )
   {
-    const auto idx = static_cast< size_t >( id );
-    if ( idx >= static_cast< size_t >( MetricId::Count ) )
-      return;
-
     std::unique_lock lock( m_mutex );
-    auto &buf = m_buffers[ idx ];
+    auto &buf = m_buffers[ key ];
     buf.push_back( { timestampMs, value } );
     trim( buf, timestampMs );
   }
@@ -123,11 +76,11 @@ public:
   /**
    * @brief Convenience overload using the current wall-clock time.
    */
-  void push( MetricId id, double value )
+  void push( const std::string &key, double value )
   {
     const auto now = std::chrono::duration_cast< std::chrono::milliseconds >(
       std::chrono::system_clock::now().time_since_epoch() ).count();
-    push( id, now, value );
+    push( key, now, value );
   }
 
   // -----------------------------------------------------------------------
@@ -140,8 +93,7 @@ public:
    * Output format:
    * @code
    * {
-   *   "cpuTemp": [[ts, val], [ts, val], ...],
-   *   "cpuFanDuty": [[ts, val], ...],
+   *   "someKey": [[ts, val], [ts, val], ...],
    *   ...
    * }
    * @endcode
@@ -156,13 +108,11 @@ public:
     os << '{';
     bool firstMetric = true;
 
-    for ( size_t i = 0; i < static_cast< size_t >( MetricId::Count ); ++i )
+    for ( const auto &[key, buf] : m_buffers )
     {
-      const auto &buf = m_buffers[ i ];
       if ( buf.empty() )
         continue;
 
-      // Binary search for the first element >= sinceMs
       auto it = std::lower_bound(
         buf.begin(), buf.end(), sinceMs,
         []( const MetricDataPoint &pt, int64_t ts ) { return pt.timestampMs < ts; } );
@@ -174,7 +124,7 @@ public:
         os << ',';
       firstMetric = false;
 
-      os << '"' << metricName( static_cast< MetricId >( i ) ) << "\":[";
+      os << '"' << key << "\":[";
       bool firstPt = true;
       for ( ; it != buf.end(); ++it )
       {
@@ -195,24 +145,25 @@ public:
    * Wire layout (native endian — same-host IPC only):
    * @code
    *   Repeated for each non-empty metric series:
-   *     uint8_t  metricId
-   *     uint32_t count         (number of data points)
+   *     uint16_t keyLen          (length of key string, no NUL)
+   *     char     key[keyLen]     (key bytes)
+   *     uint32_t count           (number of data points)
    *     count × { int64_t timestampMs, double value }   (16 bytes each)
    * @endcode
    *
    * Empty series are omitted.  The caller detects end-of-data by consuming
-   * exactly (1 + 4 + count * 16) bytes per block until the buffer is exhausted.
+   * exactly (2 + keyLen + 4 + count * 16) bytes per block until the buffer
+   * is exhausted.
    */
   [[nodiscard]] std::vector< uint8_t > querySinceBinary( int64_t sinceMs ) const
   {
     std::shared_lock lock( m_mutex );
 
     std::vector< uint8_t > out;
-    out.reserve( 2048 );
+    out.reserve( 4096 );
 
-    for ( size_t i = 0; i < static_cast< size_t >( MetricId::Count ); ++i )
+    for ( const auto &[key, buf] : m_buffers )
     {
-      const auto &buf = m_buffers[ i ];
       if ( buf.empty() )
         continue;
 
@@ -225,9 +176,12 @@ public:
 
       const uint32_t count = static_cast< uint32_t >( std::distance( it, buf.end() ) );
 
-      // --- header: metricId (1 byte) + count (4 bytes) ---
-      const uint8_t id = static_cast< uint8_t >( i );
-      out.push_back( id );
+      // --- header: keyLen (2 bytes) + key chars + count (4 bytes) ---
+      const uint16_t keyLen = static_cast< uint16_t >( key.size() );
+      out.insert( out.end(),
+                  reinterpret_cast< const uint8_t * >( &keyLen ),
+                  reinterpret_cast< const uint8_t * >( &keyLen ) + sizeof( keyLen ) );
+      out.insert( out.end(), key.begin(), key.end() );
       out.insert( out.end(),
                   reinterpret_cast< const uint8_t * >( &count ),
                   reinterpret_cast< const uint8_t * >( &count ) + sizeof( count ) );
@@ -245,6 +199,22 @@ public:
     }
 
     return out;
+  }
+
+  /**
+   * @brief Return all keys that currently have at least one data point.
+   */
+  [[nodiscard]] std::vector< std::string > activeKeys() const
+  {
+    std::shared_lock lock( m_mutex );
+    std::vector< std::string > keys;
+    keys.reserve( m_buffers.size() );
+    for ( const auto &[k, buf] : m_buffers )
+    {
+      if ( !buf.empty() )
+        keys.push_back( k );
+    }
+    return keys;
   }
 
   // -----------------------------------------------------------------------
@@ -278,7 +248,6 @@ private:
   }
 
   mutable std::shared_mutex m_mutex;
-  std::array< std::deque< MetricDataPoint >,
-              static_cast< size_t >( MetricId::Count ) > m_buffers;
+  std::map< std::string, std::deque< MetricDataPoint > > m_buffers;
   int64_t m_horizonMs = static_cast< int64_t >( DEFAULT_HORIZON_S ) * 1000;
 };

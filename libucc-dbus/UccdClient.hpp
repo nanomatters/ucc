@@ -76,6 +76,7 @@ public:
   std::optional< std::string > getHardwareFanDevicesJSON();
   std::optional< std::string > getHardwareSensorsJSON();
   std::optional< std::string > getThermalSourcesJSON();
+  std::optional< std::string > getSensorReadingsJSON();
   std::optional< std::string > getFanZonesJSON();
 
   // Fan sub-profiles (built-in + custom, with editable flag)
@@ -120,6 +121,7 @@ public:
   // Fan Control
   bool applyFanProfiles( const std::string &fanProfilesJSON );
   bool revertFanProfiles();
+  std::optional< std::string > getFanZoneTelemetryJSON();
   std::optional< std::string > getCurrentFanSpeed();
   std::optional< std::string > getFanTemperatures();
 
@@ -250,6 +252,7 @@ public:
   std::optional< QByteArray > getMonitorDataSince( qint64 sinceTimestampMs );
   bool setMonitorHistoryHorizon( int seconds );
   std::optional< int > getMonitorHistoryHorizon();
+  std::optional< std::string > getMonitorSourcesJSON();
   std::optional< std::string > getFpsSourcesJSON();
   std::optional< std::string > getAutoUvAutoApplyStatusJSON();
   bool setFpsSourceApp( const std::string &appName );

@@ -240,9 +240,67 @@ UccProfile getUniwillDefaultCustomProfile()
   return makeDefaultCustomProfile();
 }
 
-std::vector< FanProfile > getUniwillDefaultFanProfiles()
+std::vector< FanProfile > getUniwillDefaultFanProfiles(
+  const std::vector< ucc::hal::FanZone > &zones )
 {
-  return defaultFanProfiles;
+  using CP = ucc::hal::FanCurvePoint;
+
+  struct ProfileTemplate
+  {
+    const char *id;
+    const char *name;
+    std::vector< CP > fanCurve;
+    std::vector< CP > pumpCurve;
+  };
+
+  const std::vector< ProfileTemplate > templates = {
+    { DefaultFanProfileIDs::Silent, "Silent",
+      { {20,0},{25,0},{30,0},{35,0},{40,0},{45,0},{50,0},{55,0},{60,0},
+        {65,20},{70,28},{75,40},{80,53},{85,65},{90,83},{95,96},{100,100} },
+      { {20,30},{30,30},{50,35},{65,45},{75,60},{85,80},{90,100} } },
+    { DefaultFanProfileIDs::Quiet, "Quiet",
+      { {20,0},{25,0},{30,0},{35,0},{40,0},{45,0},{50,0},{55,10},{60,20},
+        {65,24},{70,33},{75,46},{80,55},{85,68},{90,85},{95,96},{100,100} },
+      { {20,30},{30,30},{50,35},{65,45},{75,60},{85,80},{90,100} } },
+    { DefaultFanProfileIDs::Balanced, "Balanced",
+      { {20,0},{25,0},{30,0},{35,0},{40,0},{45,0},{50,17},{55,25},{60,31},
+        {65,38},{70,50},{75,55},{80,65},{85,78},{90,88},{95,96},{100,100} },
+      { {20,30},{30,30},{50,35},{65,50},{75,65},{85,85},{90,100} } },
+    { DefaultFanProfileIDs::Cool, "Cool",
+      { {20,0},{25,0},{30,0},{35,0},{40,3},{45,20},{50,25},{55,29},{60,35},
+        {65,43},{70,50},{75,58},{80,72},{85,85},{90,93},{95,96},{100,100} },
+      { {20,30},{30,35},{50,45},{65,60},{75,75},{85,90},{90,100} } },
+    { DefaultFanProfileIDs::Freezy, "Freezy",
+      { {20,20},{25,20},{30,21},{35,23},{40,26},{45,30},{50,40},{55,40},{60,45},
+        {65,50},{70,55},{75,60},{80,73},{85,85},{90,91},{95,96},{100,100} },
+      { {20,35},{30,40},{50,50},{65,65},{75,80},{85,95},{90,100} } },
+  };
+
+  std::vector< FanProfile > result;
+  result.reserve( templates.size() );
+
+  for ( const auto &tmpl : templates )
+  {
+    FanProfile fp;
+    fp.id = tmpl.id;
+    fp.name = tmpl.name;
+
+    for ( const auto &zone : zones )
+    {
+      const bool isPump = ( zone.defaultType == ucc::hal::FanDeviceType::Pump
+                         || zone.defaultType == ucc::hal::FanDeviceType::StagedPump );
+      fp.zoneCurves.emplace_back(
+        zone.id,
+        isPump ? tmpl.pumpCurve : tmpl.fanCurve,
+        zone.hysteresisDeg,
+        zone.enabled,
+        zone.thermalSourceId );
+    }
+
+    result.push_back( std::move( fp ) );
+  }
+
+  return result;
 }
 
 } // namespace ucc::hal

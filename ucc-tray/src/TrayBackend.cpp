@@ -338,16 +338,6 @@ void TrayBackend::applyFanProfileFromJson( const std::string &jsonStr, const QSt
 
   if ( src.contains( "zones" ) && src["zones"].isArray() )
   {
-    QJsonArray zones = src["zones"].toArray();
-    for ( const QJsonValue &zv : zones )
-    {
-      QJsonObject zone = zv.toObject();
-      QString id = zone["id"].toString();
-      if ( id == "zone-cpu" )       dst["cpu"]            = zone["curve"];
-      else if ( id == "zone-gpu" )  dst["gpu"]            = zone["curve"];
-      else if ( id == "wc-pump" )   dst["pump"]           = zone["curve"];
-      else if ( id == "wc-fan" )    dst["waterCoolerFan"] = zone["curve"];
-    }
     dst["zones"] = src["zones"];
   }
 

@@ -190,10 +190,10 @@ public:
             std::string zoneJson = zonesArrayJson.substr( start, i - start + 1 );
             ucc::hal::FanZoneCurve zc;
             zc.zoneId = extractString( zoneJson, "id" );
-
-            // name and deviceType are ignored on deserialization —
-            // they are derived from the zone ID during serialization.
-
+            zc.name = extractString( zoneJson, "name" );
+            zc.deviceType = ucc::hal::fanDeviceTypeFromString(
+              extractString( zoneJson, "deviceType", "fan" ) );
+            zc.fanIds = extractStringArray( zoneJson, "fanIds" );
             zc.hysteresisDeg = extractInt( zoneJson, "hysteresisDeg", 3 );
             zc.enabled = extractBool( zoneJson, "enabled", true );
             zc.thermalSourceId = extractString( zoneJson, "thermalSourceId" );
@@ -207,6 +207,36 @@ public:
           }
         }
       }
+    }
+
+    // Parse custom thermal sources
+    std::string tsArrayJson = extractArray( json, "thermalSources" );
+    if ( !tsArrayJson.empty() )
+    {
+      try
+      {
+        auto arr = nlohmann::json::parse( tsArrayJson );
+        if ( arr.is_array() )
+        {
+          for ( const auto &item : arr )
+          {
+            if ( !item.is_object() ) continue;
+            ucc::hal::ThermalSource ts;
+            ts.id    = item.value( "id", "" );
+            ts.label = item.value( "label", "" );
+            ts.strategy = ucc::hal::thermalStrategyFromString( item.value( "strategy", "single" ) );
+            if ( item.contains( "sensorIds" ) && item["sensorIds"].is_array() )
+              for ( const auto &s : item["sensorIds"] )
+                if ( s.is_string() ) ts.sensorIds.push_back( s.get< std::string >() );
+            if ( item.contains( "weights" ) && item["weights"].is_array() )
+              for ( const auto &w : item["weights"] )
+                if ( w.is_number() ) ts.weights.push_back( w.get< double >() );
+            if ( !ts.id.empty() && !ts.sensorIds.empty() )
+              fp.thermalSources.push_back( std::move( ts ) );
+          }
+        }
+      }
+      catch ( ... ) { /* malformed JSON — ignore */ }
     }
 
     return fp;
@@ -939,6 +969,35 @@ private:
     }
 
     return "";
+  }
+
+  [[nodiscard]] static std::vector< std::string > extractStringArray( const std::string &json, const std::string &key )
+  {
+    std::vector< std::string > result;
+    std::string arrayJson = extractArray( json, key );
+    if ( arrayJson.empty() )
+      return result;
+
+    size_t pos = 1; // Skip '['
+    while ( pos < arrayJson.length() )
+    {
+      while ( pos < arrayJson.length() && ( std::isspace( arrayJson[pos] ) || arrayJson[pos] == ',' ) )
+        ++pos;
+      if ( pos >= arrayJson.length() || arrayJson[pos] == ']' )
+        break;
+      if ( arrayJson[pos] == '"' )
+      {
+        ++pos;
+        size_t end = arrayJson.find( '"', pos );
+        if ( end == std::string::npos )
+          break;
+        result.push_back( arrayJson.substr( pos, end - pos ) );
+        pos = end + 1;
+      }
+      else
+        ++pos;
+    }
+    return result;
   }
 
   [[nodiscard]] static std::vector< int32_t > extractIntArray( const std::string &json, const std::string &key )

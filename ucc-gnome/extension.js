@@ -721,14 +721,8 @@ class UccIndicator extends PanelMenu.Button {
         try {
             const src = JSON.parse(raw);
             const dst = {};
-            // Extract per-zone curves from zones array
+            // Pass zones array directly
             if (src.zones && Array.isArray(src.zones)) {
-                for (const zone of src.zones) {
-                    if (zone.id === 'zone-cpu')  dst.cpu            = zone.curve;
-                    else if (zone.id === 'zone-gpu')  dst.gpu            = zone.curve;
-                    else if (zone.id === 'wc-pump')   dst.pump           = zone.curve;
-                    else if (zone.id === 'wc-fan')    dst.waterCoolerFan = zone.curve;
-                }
                 dst.zones = src.zones;
             }
             this._client.applyFanProfiles(JSON.stringify(dst));

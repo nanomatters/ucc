@@ -28,6 +28,7 @@ namespace ucc::hal
 [[nodiscard]] std::vector< UccProfile > getUniwillFallbackDefaultProfiles();
 [[nodiscard]] UccProfile getUniwillDefaultCustomProfile( UniwillDeviceID deviceId );
 [[nodiscard]] UccProfile getUniwillDefaultCustomProfile();
-[[nodiscard]] std::vector< FanProfile > getUniwillDefaultFanProfiles();
+[[nodiscard]] std::vector< FanProfile > getUniwillDefaultFanProfiles(
+  const std::vector< ucc::hal::FanZone > &zones );
 
 } // namespace ucc::hal

@@ -1209,54 +1209,62 @@ void MainWindow::updateFanCrosshairs()
   if ( !m_fanControlTab || m_tabs->currentIndex() != fanTabIndex )
     return;
 
-  // CPU fan editor
-  if ( auto *ed = m_fanControlTab->fanEditor( QStringLiteral( "zone-cpu" ) ) )
+  if ( !m_UccdClient || !m_UccdClient->isConnected() )
+    return;
+
+  // Fetch per-zone telemetry from daemon: { "zone-id": {"temp": T, "duty": D}, ... }
+  auto jsonOpt = m_UccdClient->getFanZoneTelemetryJSON();
+  if ( !jsonOpt )
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
+  if ( !doc.isObject() )
+    return;
+
+  QJsonObject root = doc.object();
+
+  // Update fan editors
+  for ( auto it = m_fanControlTab->fanEditors().constBegin();
+        it != m_fanControlTab->fanEditors().constEnd(); ++it )
   {
-    auto temp = parseMonitorValue( m_systemMonitor->cpuTemp() );
-    auto duty = parseMonitorValue( m_systemMonitor->cpuFanSpeed() );
-    if ( temp && duty )
-      ed->setCrosshair( *temp, *duty );
+    const QString &zoneId = it.key();
+    auto *editor = it.value();
+    if ( root.contains( zoneId ) )
+    {
+      QJsonObject zt = root[zoneId].toObject();
+      int temp = zt["temp"].toInt( -1 );
+      int duty = zt["duty"].toInt( -1 );
+      if ( temp >= 0 && duty >= 0 )
+        editor->setCrosshair( temp, duty );
+      else
+        editor->clearCrosshair();
+    }
     else
-      ed->clearCrosshair();
+    {
+      editor->clearCrosshair();
+    }
   }
 
-  // GPU fan editor
-  if ( auto *ed = m_fanControlTab->fanEditor( QStringLiteral( "zone-gpu" ) ) )
+  // Update pump editors
+  for ( auto it = m_fanControlTab->pumpEditors().constBegin();
+        it != m_fanControlTab->pumpEditors().constEnd(); ++it )
   {
-    auto temp = parseMonitorValue( m_systemMonitor->gpuTemp() );
-    auto duty = parseMonitorValue( m_systemMonitor->gpuFanSpeed() );
-    if ( temp && duty )
-      ed->setCrosshair( *temp, *duty );
+    const QString &zoneId = it.key();
+    auto *editor = it.value();
+    if ( root.contains( zoneId ) )
+    {
+      QJsonObject zt = root[zoneId].toObject();
+      int temp = zt["temp"].toInt( -1 );
+      int duty = zt["duty"].toInt( -1 );
+      if ( temp >= 0 && duty >= 0 )
+        editor->setCrosshair( temp, duty );
+      else
+        editor->clearCrosshair();
+    }
     else
-      ed->clearCrosshair();
-  }
-
-  // Water cooler fan editor (uses CPU temp as temperature source)
-  if ( auto *ed = m_fanControlTab->fanEditor( QStringLiteral( "wc-fan" ) ) )
-  {
-    auto temp = parseMonitorValue( m_systemMonitor->cpuTemp() );
-    auto duty = parseMonitorValue( m_systemMonitor->waterCoolerFanSpeed() );
-    if ( temp && duty )
-      ed->setCrosshair( *temp, *duty );
-    else
-      ed->clearCrosshair();
-  }
-
-  // Pump curve editor (uses CPU temp and pump voltage level)
-  if ( auto *ed = m_fanControlTab->pumpEditor( QStringLiteral( "wc-pump" ) ) )
-  {
-    auto temp = parseMonitorValue( m_systemMonitor->cpuTemp() );
-    int pumpLevel = -1;
-    const QString &lvlStr = m_systemMonitor->waterCoolerPumpLevel();
-    if ( lvlStr == "Off" )       pumpLevel = 0;
-    else if ( lvlStr == "Low" )  pumpLevel = 1;
-    else if ( lvlStr == "Med" )  pumpLevel = 2;
-    else if ( lvlStr == "High" ) pumpLevel = 3;
-
-    if ( temp && pumpLevel >= 0 )
-      ed->setCrosshair( *temp, pumpLevel );
-    else
-      ed->clearCrosshair();
+    {
+      editor->clearCrosshair();
+    }
   }
 }
 
@@ -2812,14 +2820,6 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
   updateButtonStates();
 }
 
-void MainWindow::onCpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points)
-{
-  QVector< FanPoint > cached;
-  for ( const auto &p : points )
-    cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
-  m_fanZonePoints[QStringLiteral( "zone-cpu" )] = cached;
-}
-
 void MainWindow::reloadFanProfiles()
 {
   // Delegate to FanControlTab which owns the combo and builtin list
@@ -2880,14 +2880,6 @@ void MainWindow::onUccdConnectionChanged( bool connected )
 
   // Refresh button/widget enabled states
   updateButtonStates();
-}
-
-void MainWindow::onGpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points)
-{
-  QVector< FanPoint > cached;
-  for ( const auto &p : points )
-    cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
-  m_fanZonePoints[QStringLiteral( "zone-gpu" )] = cached;
 }
 
 void MainWindow::onFanCurveChanged( const QString &zoneId, const QVector< FanCurveEditorWidget::Point > &points )
@@ -3019,6 +3011,7 @@ void MainWindow::onApplyFanProfilesClicked()
   }
 
   root["zones"] = zonesArr;
+  root["thermalSources"] = m_fanControlTab->thermalSourcesData();
   if ( !m_currentFanProfile.isEmpty() )
     root["fanProfileId"] = m_currentFanProfile;
 

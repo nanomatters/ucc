@@ -226,7 +226,9 @@ public:
     std::function< UccProfile() > getActiveProfile,
     std::function< bool() > getFanControlEnabled,
     std::function< void( size_t, int64_t, int ) > updateFanSpeed,
-    std::function< void( size_t, int64_t, int ) > updateFanTemp
+    std::function< void( size_t, int64_t, int ) > updateFanTemp,
+    std::function< FanProfile( const std::string & ) > resolveFanProfile,
+    std::function< void( const std::string &, int64_t, int, int ) > updateZoneTelemetry = nullptr
   )
     : DaemonWorker( std::chrono::milliseconds( 1000 ) )
     , m_hw( hw )
@@ -234,6 +236,8 @@ public:
     , m_getFanControlEnabled( getFanControlEnabled )
     , m_updateFanSpeed( updateFanSpeed )
     , m_updateFanTemp( updateFanTemp )
+    , m_resolveFanProfile( resolveFanProfile )
+    , m_updateZoneTelemetry( updateZoneTelemetry )
     , m_modeSameSpeed( true )
     , m_controlAvailableMessageShown( false )
     , m_hasTemporaryCurves( false )
@@ -276,6 +280,23 @@ public:
 
   [[nodiscard]] bool hasTemporaryCurves() const noexcept { return m_hasTemporaryCurves; }
 
+  /**
+   * @brief Update the thermal source for one or more zones.
+   * @param sources Map of zoneId → thermalSourceId
+   *
+   * This allows profiles to override which temperature sensor drives each zone
+   * without restarting the worker.
+   */
+  void applyZoneThermalSources( const std::map< std::string, std::string > &sources )
+  {
+    for ( auto &zone : m_zoneInfos )
+    {
+      auto it = sources.find( zone.id );
+      if ( it != sources.end() && !it->second.empty() )
+        zone.thermalSourceId = it->second;
+    }
+  }
+
   [[nodiscard]] const std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > &
   tempZoneCurves() const noexcept { return m_tempZoneCurves; }
 
@@ -306,7 +327,7 @@ protected:
 
     // Resolve the active fan profile's curves
     auto profile = m_getActiveProfile();
-    FanProfile fanProfile = getDefaultFanProfile( profile.fan.fanProfile );
+    FanProfile fanProfile = m_resolveFanProfile( profile.fan.fanProfile );
 
     // Get hardware fan limits
     m_fansMinSpeedHWLimit = 0;
@@ -381,7 +402,10 @@ protected:
 
     int highestSpeed = 0;
 
-    // Process each zone
+    // Process each zone — collect per-zone telemetry alongside per-fan data
+    struct ZoneTelemetryData { int temp; int speed; };
+    std::vector< std::pair< std::string, ZoneTelemetryData > > zoneTelemetry;
+
     for ( const auto &zone : m_zoneInfos )
     {
       auto logicIt = m_zoneLogics.find( zone.id );
@@ -411,6 +435,8 @@ protected:
 
       if ( zoneSpeed > highestSpeed )
         highestSpeed = zoneSpeed;
+
+      zoneTelemetry.push_back( { zone.id, { tempCelsius, zoneSpeed } } );
 
       // Apply speed to all fans in this zone and record for publishing
       for ( const auto &fanId : zone.fanIds )
@@ -468,6 +494,13 @@ protected:
       m_updateFanTemp( i, timestamp, fanTemps[i] );
       m_updateFanSpeed( i, timestamp, currentSpeed );
     }
+
+    // Publish per-zone telemetry
+    if ( m_updateZoneTelemetry )
+    {
+      for ( const auto &[zoneId, zt] : zoneTelemetry )
+        m_updateZoneTelemetry( zoneId, timestamp, zt.temp, zt.speed );
+    }
   }
 
   void onExit() override {}
@@ -481,17 +514,7 @@ private:
       syslog( LOG_INFO, "FanControlWorker: sameSpeed mode changed to %d", m_modeSameSpeed ? 1 : 0 );
 
     // Resolve the fan profile
-    FanProfile fanProfile;
-    for ( const auto &p : defaultFanProfiles )
-    {
-      if ( p.id == profile.fan.fanProfile || p.name == profile.fan.fanProfile )
-      { fanProfile = p; break; }
-    }
-    if ( !fanProfile.isValid() )
-      for ( const auto &p : defaultFanProfiles )
-        if ( p.name == "Balanced" ) { fanProfile = p; break; }
-    if ( !fanProfile.isValid() && !defaultFanProfiles.empty() )
-      fanProfile = defaultFanProfiles[0];
+    FanProfile fanProfile = m_resolveFanProfile( profile.fan.fanProfile );
 
     // Update each zone's curve
     for ( auto &[zoneId, logic] : m_zoneLogics )
@@ -519,6 +542,8 @@ private:
   std::function< bool() > m_getFanControlEnabled;
   std::function< void( size_t, int64_t, int ) > m_updateFanSpeed;
   std::function< void( size_t, int64_t, int ) > m_updateFanTemp;
+  std::function< FanProfile( const std::string & ) > m_resolveFanProfile;
+  std::function< void( const std::string &, int64_t, int, int ) > m_updateZoneTelemetry;
 
   // Zone-based control
   std::map< std::string, FanControlLogic > m_zoneLogics;

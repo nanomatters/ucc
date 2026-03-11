@@ -22,6 +22,7 @@
 #include <QSlider>
 #include <QLabel>
 #include <QTabWidget>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QScrollArea>
 #include <QDBusInterface>
@@ -253,6 +254,16 @@ private:
   QJsonArray m_lastZones;
   QJsonArray m_lastFanDevices;
   QJsonArray m_lastSensors;
+
+  // ── Live sensor readings polling ──
+  QTimer *m_sensorPollTimer = nullptr;
+  QTreeWidget *m_sensorTree = nullptr;
+  QJsonObject m_sensorReadings;      // sensorId → value, _source:id → value
+  QJsonObject m_zoneTelemetry;       // zoneId → {temp, duty}
+  void pollSensorReadings();
+  void updateSensorTreeValues();
+  void updateSourceTableValues();
+  void updateZoneTableValues();
 };
 
 } // namespace ucc

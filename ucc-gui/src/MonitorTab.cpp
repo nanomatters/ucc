@@ -19,7 +19,6 @@
 #include <QLabel>
 #include <QScrollArea>
 #include <QGridLayout>
-#include <QStackedWidget>
 #include <QToolTip>
 #include <QDir>
 #include <QSettings>
@@ -37,190 +36,80 @@ namespace ucc
 {
 
 // ---------------------------------------------------------------------------
-// Clickable graphics rect — calls a callback on mouse press
+// Colour palette — cycling, high-contrast on dark background
 // ---------------------------------------------------------------------------
 
-class ClickableRectItem : public QGraphicsRectItem
-{
-public:
-  explicit ClickableRectItem( QGraphicsItem *parent = nullptr )
-    : QGraphicsRectItem( parent )
-  {
-    setAcceptedMouseButtons( Qt::LeftButton );
-    setCursor( Qt::PointingHandCursor );
-  }
-
-  void setClickCallback( std::function< void() > cb ) { m_onClick = std::move( cb ); }
-
-protected:
-  void mousePressEvent( QGraphicsSceneMouseEvent *event ) override
-  {
-    if ( m_onClick )
-      m_onClick();
-    event->accept();
-  }
-
-private:
-  std::function< void() > m_onClick;
+static const QColor kPalette[] = {
+    QColor( 124, 179, 66 ),   // green
+    QColor( 86, 182, 255 ),   // blue
+    QColor( 255, 167, 38 ),   // orange
+    QColor( 171, 71, 188 ),   // purple
+    QColor( 0, 230, 118 ),    // emerald
+    QColor( 255, 193, 7 ),    // amber
+    QColor( 0, 188, 212 ),    // cyan
+    QColor( 244, 67, 54 ),    // red
+    QColor( 174, 234, 0 ),    // lime
+    QColor( 46, 204, 113 ),   // sea green
+    QColor( 255, 109, 0 ),    // deep orange
+    QColor( 102, 187, 106 ),  // light green
+    QColor( 255, 82, 82 ),    // red accent
+    QColor( 156, 39, 176 ),   // deep purple
+    QColor( 100, 181, 246 ),  // light blue
+    QColor( 255, 241, 118 ),  // yellow
 };
-
-// ---------------------------------------------------------------------------
-// Metric definitions — higher-contrast palette with more greens to improve
-// readability between neighbouring lines.
-// ---------------------------------------------------------------------------
-struct MetricDef
-{
-  const char *key;       // JSON key from MetricsHistoryStore
-  const char *label;     // Human-readable label
-  QColor      color;     // Line colour
-  MetricGroup group;
-};
-
-static constexpr int METRIC_COUNT = 11;
-
-// Order matches MetricId enum in MetricsHistoryStore.hpp
-static const MetricDef kMetrics[ METRIC_COUNT ] =
-{
-  { "cpuTemp",             "CPU Temp",            QColor( 124, 179, 66 ),  MetricGroup::Temp  },
-  { "cpuFanDuty",          "CPU Fan Duty",        QColor( 255, 193, 7 ),   MetricGroup::Duty  },
-  { "cpuPower",            "CPU Power",           QColor( 102, 187, 106 ), MetricGroup::Power },
-  { "cpuFrequency",        "CPU Frequency",       QColor( 0, 200, 83 ),    MetricGroup::Freq  },
-  { "gpuTemp",             "dGPU Temp",           QColor( 0, 230, 118 ),   MetricGroup::Temp  },
-  { "gpuFanDuty",          "dGPU Fan Duty",       QColor( 0, 188, 212 ),   MetricGroup::Duty  },
-  { "gpuPower",            "dGPU Power",          QColor( 171, 71, 188 ),  MetricGroup::Power },
-  { "gpuFrequency",        "dGPU Frequency",      QColor( 255, 167, 38 ),  MetricGroup::Freq  },
-  { "gpuVramFrequency",    "dGPU VRAM Freq",      QColor( 46, 204, 113 ),  MetricGroup::Freq  },
-  { "gpuCoreVoltage",      "dGPU Core Voltage",   QColor( 174, 234, 0 ),   MetricGroup::Volt  },
-  { "fps",                 "FPS",                 QColor( 86, 182, 255 ),  MetricGroup::Fps   },
-};
+static constexpr int kPaletteSize = static_cast< int >( sizeof( kPalette ) / sizeof( kPalette[0] ) );
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * @brief Undo the normalisation applied to a metric value to restore its real value.
- * Inverse of metricToNormalisedScale().
- */
-double MonitorTab::metricFromNormalisedScale( double normalisedValue, MetricGroup g )
-{
-  switch ( g )
-  {
-    case MetricGroup::Temp:  return normalisedValue / (100.0 / 105.0);  // 0–100 → 0–105 °C
-    case MetricGroup::Duty:  return normalisedValue;                     // already %
-    case MetricGroup::Power: return normalisedValue / (100.0 / m_maxPowerW);  // 0–100 → 0–m_maxPowerW W
-    case MetricGroup::Freq:  return normalisedValue / (100.0 / 6000.0);  // 0–100 → 0–6000 MHz
-    case MetricGroup::Volt:  return normalisedValue / (100.0 / 1500.0);  // 0–100 → 0–1500 mV
-    case MetricGroup::Fps:   return normalisedValue / (100.0 / 300.0);   // 0–100 → 0–300 fps
-  }
-  return normalisedValue;
-}
-
-/**
- * @brief Scale factor for normalising a metric group value to [0, 100].
- * Used by the unified chart's shadow series (accesses this->m_maxPowerW for Power group).
- */
-double MonitorTab::metricToNormalisedScale( MetricGroup g )
-{
-  switch ( g )
-  {
-    case MetricGroup::Temp:  return 100.0 / 105.0;  // 0–105 °C  → 0–100
-    case MetricGroup::Duty:  return 1.0;             // already %
-    case MetricGroup::Power: return 100.0 / m_maxPowerW;  // 0–m_maxPowerW W → 0–100
-    case MetricGroup::Freq:  return 100.0 / 6000.0;  // 0–6000 MHz→ 0–100
-    case MetricGroup::Volt:  return 100.0 / 1500.0;  // 0–1500 mV → 0–100
-    case MetricGroup::Fps:   return 100.0 / 300.0;   // 0–300 fps → 0–100
-  }
-  return 1.0;
-}
-
-static const char *metricGroupUnit( MetricGroup g )
-{
-  switch ( g )
-  {
-    case MetricGroup::Temp:  return "°C";
-    case MetricGroup::Duty:  return "%";
-    case MetricGroup::Power: return "W";
-    case MetricGroup::Freq:  return "MHz";
-    case MetricGroup::Volt:  return "mV";
-    case MetricGroup::Fps:   return "fps";
-  }
-  return "";
-}
-
-void MonitorTab::initializeMaxPowerFromHardware()
-{
-  // Get GPU TGP (cTGP) maximum
-  int maxGpuTgp = 0;
-  int maxBoostTdp = 0;
-
-  if ( auto gpuMax = m_client->getNVIDIAPowerCTRLMaxPowerLimit() )
-    maxGpuTgp = *gpuMax;
-
-  // Get boost TDP maximum (index 1 from ODM power limits)
-  if ( auto tdpLimits = m_client->getODMPowerLimits() )
-  {
-    // Index 1 is typically "Boost TDP"
-    if ( tdpLimits->size() > 1 )
-      maxBoostTdp = (*tdpLimits)[1];
-  }
-
-  if ( m_maxPowerW = std::max( maxGpuTgp, maxBoostTdp ); m_maxPowerW <= 0 )
-    m_maxPowerW = 200;  // Fallback to default
-}
-
 static QChart *createChart()
 {
-  auto *chart = new QChart();
-  // Don't set title — will save vertical space for graphs
-  chart->setAnimationOptions( QChart::NoAnimation );
-  chart->legend()->setVisible( false );
-  chart->setMargins( QMargins( 4, 4, 4, 4 ) );
-
-  // Black chart background
-  chart->setBackgroundBrush( QBrush( Qt::black ) );
-  chart->setPlotAreaBackgroundBrush( QBrush( Qt::black ) );
-  chart->setPlotAreaBackgroundVisible( true );
-  chart->setTitleBrush( QBrush( Qt::white ) );
-
-  return chart;
+    auto *chart = new QChart();
+    chart->setAnimationOptions( QChart::NoAnimation );
+    chart->legend()->setVisible( false );
+    chart->setMargins( QMargins( 4, 4, 4, 4 ) );
+    chart->setBackgroundBrush( QBrush( Qt::black ) );
+    chart->setPlotAreaBackgroundBrush( QBrush( Qt::black ) );
+    chart->setPlotAreaBackgroundVisible( true );
+    return chart;
 }
 
 static void styleAxis( QAbstractAxis *axis )
 {
-  axis->setLabelsBrush( QBrush( Qt::white ) );
-  axis->setTitleBrush( QBrush( Qt::white ) );
-  QPen linePen( QColor( 100, 100, 100 ) );
-  axis->setLinePen( linePen );
-  axis->setGridLinePen( QPen( QColor( 45, 45, 45 ) ) );
-  axis->setShadesBrush( QBrush( Qt::transparent ) );
+    axis->setLabelsBrush( QBrush( Qt::white ) );
+    axis->setTitleBrush( QBrush( Qt::white ) );
+    QPen linePen( QColor( 100, 100, 100 ) );
+    axis->setLinePen( linePen );
+    axis->setGridLinePen( QPen( QColor( 45, 45, 45 ) ) );
+    axis->setShadesBrush( QBrush( Qt::transparent ) );
 }
 
 static QDateTimeAxis *createXAxis()
 {
-  auto *axis = new QDateTimeAxis();
-  axis->setFormat( "HH:mm:ss" );
-  axis->setTickCount( 6 );
-  styleAxis( axis );
-  return axis;
+    auto *axis = new QDateTimeAxis();
+    axis->setFormat( "HH:mm:ss" );
+    axis->setTickCount( 6 );
+    styleAxis( axis );
+    return axis;
 }
 
 static QValueAxis *createYAxis( const QString &title, double min, double max )
 {
-  auto *axis = new QValueAxis();
-  axis->setTitleText( title );
-  axis->setRange( min, max );
-  axis->setLabelFormat( "%.0f" );
-  styleAxis( axis );
-  return axis;
+    auto *axis = new QValueAxis();
+    axis->setTitleText( title );
+    axis->setRange( min, max );
+    axis->setLabelFormat( "%.0f" );
+    styleAxis( axis );
+    return axis;
 }
 
 static QChartView *createChartView( QChart *chart )
 {
-  auto *view = new QChartView( chart );
-  view->setRenderHint( QPainter::Antialiasing );
-  view->setMinimumHeight( 180 );
-  return view;
+    auto *view = new QChartView( chart );
+    view->setRenderHint( QPainter::Antialiasing );
+    view->setMinimumHeight( 400 );
+    return view;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,51 +117,39 @@ static QChartView *createChartView( QChart *chart )
 // ---------------------------------------------------------------------------
 
 MonitorTab::MonitorTab( UccdClient *client, QWidget *parent )
-  : QWidget( parent )
-  , m_client( client )
+    : QWidget( parent )
+    , m_client( client )
 {
-  initializeMaxPowerFromHardware();
-  setupUI();
+    setupUI();
+    setFocusPolicy( Qt::StrongFocus );
 
-  setFocusPolicy( Qt::StrongFocus );  // Enable keyboard events for spacebar pause
-
-  m_fetchTimer.setInterval( 1000 );
-  connect( &m_fetchTimer, &QTimer::timeout, this, &MonitorTab::fetchData );
+    m_fetchTimer.setInterval( 1000 );
+    connect( &m_fetchTimer, &QTimer::timeout, this, &MonitorTab::fetchData );
 }
 
 void MonitorTab::setMonitoringActive( bool active )
 {
-  if ( active )
-  {
-    // Clear all in-memory buffers and series to avoid overlapping time ranges
-    // (which cause crossed lines when the same timestamps appear twice).
-    for ( auto &[key, info] : m_seriesMap )
+    if ( active )
     {
-      info.buffer.clear();
-      info.series->clear();
+        // Clear all buffers
+        for ( auto &[key, info] : m_seriesMap )
+        {
+            info.buffer.clear();
+            info.series->clear();
+        }
 
-      QVariant uv = info.series->property( "_uniSeries" );
-      if ( uv.isValid() )
-      {
-        auto *uni = qobject_cast< QLineSeries * >( uv.value< QObject * >() );
-        if ( uni )
-          uni->clear();
-      }
+        refreshAvailableSources();
+
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
+        fetchData();
+        m_fetchTimer.start();
+        m_chartView->setFocus();
     }
-
-    // Only fetch data that fits in the current visible window — not the full
-    // daemon history horizon (which can be 30 minutes).  This bounds the
-    // initial render cost to m_windowSeconds worth of points.
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
-    fetchData();
-    m_fetchTimer.start();
-    m_unifiedChartView->setFocus();  // Immediate key events (crosshair Ctrl)
-  }
-  else
-  {
-    m_fetchTimer.stop();
-  }
+    else
+    {
+        m_fetchTimer.stop();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,1818 +158,1082 @@ void MonitorTab::setMonitoringActive( bool active )
 
 void MonitorTab::setupUI()
 {
-  auto *mainLayout = new QVBoxLayout( this );
+    auto *mainLayout = new QVBoxLayout( this );
 
-  setupControls();
+    // ── Controls row (FPS source) ──
+    setupControls();
 
-  // ── (1) Legend / series-toggle group box — full width at top ──────────
-  auto *legendBox = new QGroupBox();
-  auto *legendLayout = new QGridLayout( legendBox );
-  legendLayout->setContentsMargins( 4, 4, 4, 4 );
-  int col = 0, row = 0;
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    const auto &md = kMetrics[ i ];
-    auto *cb = new QCheckBox( md.label );
-    cb->setChecked( true );
-    cb->setStyleSheet( QStringLiteral( "QCheckBox { color: %1; }" ).arg( md.color.name() ) );
+    // ── Source selector panel (left) + Chart (right) ──
+    auto *hSplit = new QHBoxLayout();
 
-    legendLayout->addWidget( cb, row, col );
-    if ( ++col >= 5 ) { col = 0; ++row; }
+    // Source selector
+    auto *selectorBox = new QGroupBox( "Sources" );
+    selectorBox->setMinimumWidth( 280 );
+    selectorBox->setMaximumWidth( 360 );
+    auto *selectorOuterLayout = new QVBoxLayout( selectorBox );
 
-    // Create series
-    auto *series = new QLineSeries();
-    series->setName( md.label );
-    QPen pen( md.color );
-    pen.setWidth( 1 );
-    series->setPen( pen );
-    series->setProperty( "_unit", QString::fromUtf8( metricGroupUnit( md.group ) ) );
-    series->setProperty( "_metricKey", QString::fromStdString( md.key ) );
+    auto *selectorScroll = new QScrollArea();
+    selectorScroll->setWidgetResizable( true );
+    selectorScroll->setFrameShape( QFrame::NoFrame );
 
-    connect( cb, &QCheckBox::toggled, series, &QLineSeries::setVisible );
+    auto *selectorInner = new QWidget();
+    m_selectorLayout = new QVBoxLayout( selectorInner );
+    m_selectorLayout->setContentsMargins( 0, 0, 0, 0 );
+    m_selectorLayout->addStretch();
 
-    m_seriesMap[ md.key ] = { series, cb, md.label, md.color, {} };
-  }
+    selectorScroll->setWidget( selectorInner );
+    selectorOuterLayout->addWidget( selectorScroll, 1 );
 
-  m_unifiedCheckBox = new QCheckBox( "Unified Graph" );
-  m_unifiedCheckBox->setChecked( false );
-  connect( m_unifiedCheckBox, &QCheckBox::toggled, this, &MonitorTab::setUnifiedMode );
-  legendLayout->addWidget( m_unifiedCheckBox, row, col );
+    m_addSourceBtn = new QPushButton( "+ Add Source" );
+    connect( m_addSourceBtn, &QPushButton::clicked, this, [this]() { addSourceRow(); } );
+    selectorOuterLayout->addWidget( m_addSourceBtn );
 
-  if ( ++col >= 5 ) { col = 0; ++row; }
-  // Pause indicator (hidden by default, shown when spacebar pauses updates)
-  m_pauseLabel = new QLabel( "⏸ PAUSED" );
-  m_pauseLabel->setStyleSheet( "QLabel { color: #FF6B6B; font-weight: bold; padding: 0 8px; }" );
-  m_pauseLabel->hide();
-  legendLayout->addWidget( m_pauseLabel, row, col );
+    hSplit->addWidget( selectorBox );
 
-  mainLayout->addWidget( legendBox );
+    // Chart
+    setupChart();
+    hSplit->addWidget( m_chartView, 1 );
 
-  // ---------- Per-group page (4 charts filling available space) ----------
-  auto *chartsWidget = new QWidget();
-  auto *chartsLayout = new QVBoxLayout( chartsWidget );
-  chartsLayout->setContentsMargins( 0, 0, 0, 0 );
-  chartsLayout->setSpacing( 2 );
+    mainLayout->addLayout( hSplit, 1 );
 
-  setupTemperatureChart();
-  setupDutyChart();
-  setupPowerChart();
-  setupFrequencyChart();
-  setupVoltageChart();
-  setupFpsChart();
+    // Pause label
+    m_pauseLabel = new QLabel( "PAUSED" );
+    m_pauseLabel->setStyleSheet( "QLabel { color: #FF6B6B; font-weight: bold; padding: 0 8px; }" );
+    m_pauseLabel->hide();
+    mainLayout->addWidget( m_pauseLabel );
 
-  chartsLayout->addWidget( m_tempChartView, 1 );
-  chartsLayout->addWidget( m_dutyChartView, 1 );
-  chartsLayout->addWidget( m_powerChartView, 1 );
-  chartsLayout->addWidget( m_freqChartView, 1 );
-  chartsLayout->addWidget( m_voltChartView, 1 );
-  chartsLayout->addWidget( m_fpsChartView, 1 );
+    // Load saved source selection
+    loadSourceSelection();
+}
 
-  // Wrap the per-group charts in a scroll area so the window can be
-  // resized smaller than the combined minimum height of 4 charts.
-  auto *scrollArea = new QScrollArea();
-  scrollArea->setWidget( chartsWidget );
-  scrollArea->setWidgetResizable( true );
-  scrollArea->setFrameShape( QFrame::NoFrame );
-  scrollArea->setContentsMargins( 0, 0, 0, 0 );
+void MonitorTab::setupChart()
+{
+    m_chart = createChart();
+    m_xAxis = createXAxis();
+    m_yAxis = createYAxis( "", 0, 100 );
+    m_chart->addAxis( m_xAxis, Qt::AlignBottom );
+    m_chart->addAxis( m_yAxis, Qt::AlignLeft );
 
-  m_perGroupPage = scrollArea;  // stacked page 0
+    m_chartView = createChartView( m_chart );
+    m_chartView->viewport()->installEventFilter( this );
 
-  // ---------- Unified "all-in-one" chart (page 1) ----------
-  setupUnifiedChart();
+    // Crosshair line
+    m_crosshairLine = new QGraphicsLineItem( m_chart );
+    m_crosshairLine->setPen( QPen( QColor( 200, 200, 200, 100 ), 1, Qt::DashLine ) );
+    m_crosshairLine->setZValue( 80 );
+    m_crosshairLine->hide();
 
-  // ---------- Stacked widget to switch between the two views ----------
-  m_chartStack = new QStackedWidget();
-  m_chartStack->addWidget( m_perGroupPage );      // index 0
-  m_chartStack->addWidget( m_unifiedChartView );   // index 1
-  m_chartStack->setCurrentIndex( 0 );
-
-  mainLayout->addWidget( m_chartStack, 1 );
-
-  // ---------- Install hover callout on every chart ----------
-  installHoverCallout( m_tempChart );
-  installHoverCallout( m_dutyChart );
-  installHoverCallout( m_powerChart );
-  installHoverCallout( m_freqChart );
-  installHoverCallout( m_voltChart );
-  installHoverCallout( m_fpsChart );
-  // Unified chart hover is installed lazily in setUnifiedMode()
-  // because its series don't exist yet at this point.
-
-  // ---------- Load saved checkbox states ----------
-  loadCheckboxStates();
-
-  // Connect all checkboxes to auto-save on toggle and update group visibility
-  for ( auto &[key, info] : m_seriesMap )
-  {
-    connect( info.toggle, &QCheckBox::toggled,
-             this, &MonitorTab::saveCheckboxStates );
-    connect( info.toggle, &QCheckBox::toggled,
-             this, &MonitorTab::updateGroupChartVisibility );
-    connect( info.toggle, &QCheckBox::toggled,
-             this, &MonitorTab::updateStickyMarkPositions );
-  }
-
-  // Apply initial group visibility after loading saved states
-  updateGroupChartVisibility();
+    // Hover callout
+    installHoverCallout( m_chart );
 }
 
 void MonitorTab::setupControls()
 {
-  auto *mainLayout = qobject_cast< QVBoxLayout * >( layout() );
-  if ( !mainLayout )
-    return;
+    auto *mainLayout = qobject_cast< QVBoxLayout * >( layout() );
+    if ( !mainLayout )
+        return;
 
-  auto *controls = new QWidget( this );
-  auto *row = new QHBoxLayout( controls );
-  row->setContentsMargins( 0, 0, 0, 0 );
+    auto *controls = new QWidget( this );
+    auto *row = new QHBoxLayout( controls );
+    row->setContentsMargins( 0, 0, 0, 0 );
 
-  auto *sourceLabel = new QLabel( "FPS Source:", controls );
-  m_fpsSourceCombo = new QComboBox( controls );
-  m_fpsSourceCombo->setMinimumWidth( 260 );
-  m_fpsSourceCombo->addItem( "Auto", "auto" );
+    auto *sourceLabel = new QLabel( "FPS Source:", controls );
+    m_fpsSourceCombo = new QComboBox( controls );
+    m_fpsSourceCombo->setMinimumWidth( 260 );
+    m_fpsSourceCombo->addItem( "Auto", "auto" );
 
-  m_fpsRequireP0Check = new QCheckBox( "Require NVIDIA P0", controls );
-  m_fpsRequireP0Check->setChecked( true );
+    m_fpsRequireP0Check = new QCheckBox( "Require NVIDIA P0", controls );
+    m_fpsRequireP0Check->setChecked( true );
 
-  m_fpsCurrentAppLabel = new QLabel( "Current: -", controls );
+    m_fpsCurrentAppLabel = new QLabel( "Current: -", controls );
 
-  row->addWidget( sourceLabel );
-  row->addWidget( m_fpsSourceCombo );
-  row->addWidget( m_fpsRequireP0Check );
-  row->addWidget( m_fpsCurrentAppLabel, 1 );
+    row->addWidget( sourceLabel );
+    row->addWidget( m_fpsSourceCombo );
+    row->addWidget( m_fpsRequireP0Check );
+    row->addWidget( m_fpsCurrentAppLabel, 1 );
 
-  connect( m_fpsSourceCombo, &QComboBox::currentIndexChanged, this, [this]( int ) {
-    if ( m_syncingFpsControls || !m_client || !m_fpsSourceCombo )
-      return;
-    m_client->setFpsSourceApp( m_fpsSourceCombo->currentData().toString().toStdString() );
-  } );
+    connect( m_fpsSourceCombo, &QComboBox::currentIndexChanged, this, [this]( int ) {
+        if ( m_syncingFpsControls || !m_client || !m_fpsSourceCombo )
+            return;
+        m_client->setFpsSourceApp( m_fpsSourceCombo->currentData().toString().toStdString() );
+    } );
 
-  connect( m_fpsRequireP0Check, &QCheckBox::toggled, this, [this]( bool checked ) {
-    if ( m_syncingFpsControls || !m_client )
-      return;
-    m_client->setFpsRequireP0( checked );
-  } );
+    connect( m_fpsRequireP0Check, &QCheckBox::toggled, this, [this]( bool checked ) {
+        if ( m_syncingFpsControls || !m_client )
+            return;
+        m_client->setFpsRequireP0( checked );
+    } );
 
-  mainLayout->addWidget( controls );
-  refreshFpsSourceControls();
+    mainLayout->addWidget( controls );
+    refreshFpsSourceControls();
 }
 
 void MonitorTab::refreshFpsSourceControls()
 {
-  if ( !m_client || !m_fpsSourceCombo || !m_fpsRequireP0Check || !m_fpsCurrentAppLabel )
-    return;
+    if ( !m_client || !m_fpsSourceCombo || !m_fpsRequireP0Check || !m_fpsCurrentAppLabel )
+        return;
 
-  auto jsonOpt = m_client->getFpsSourcesJSON();
-  if ( !jsonOpt.has_value() )
-    return;
+    auto jsonOpt = m_client->getFpsSourcesJSON();
+    if ( !jsonOpt.has_value() )
+        return;
 
-  const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
-  if ( !doc.isObject() )
-    return;
+    const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
+    if ( !doc.isObject() )
+        return;
 
-  const QJsonObject root = doc.object();
-  const QString selected = root.value( "selectedApp" ).toString( "auto" );
-  const bool requireP0 = root.value( "requireP0" ).toBool( true );
-  const QString currentApp = root.value( "currentApp" ).toString();
-  const qint64 currentPid = root.value( "currentPid" ).toInteger( 0 );
+    const QJsonObject root = doc.object();
+    const QString selected = root.value( "selectedApp" ).toString( "auto" );
+    const bool requireP0 = root.value( "requireP0" ).toBool( true );
+    const QString currentApp = root.value( "currentApp" ).toString();
+    const qint64 currentPid = root.value( "currentPid" ).toInteger( 0 );
 
-  QStringList apps;
-  apps.append( "auto" );
-  const QJsonArray appArr = root.value( "apps" ).toArray();
-  for ( const auto &v : appArr )
-  {
-    const QString a = v.toString().trimmed();
-    if ( !a.isEmpty() && !apps.contains( a, Qt::CaseInsensitive ) )
-      apps.append( a );
-  }
-  if ( !selected.isEmpty() && !apps.contains( selected, Qt::CaseInsensitive ) )
-    apps.append( selected );
-
-  m_syncingFpsControls = true;
-
-  m_fpsSourceCombo->clear();
-  for ( const QString &a : apps )
-  {
-    const QString label = ( a.compare( "auto", Qt::CaseInsensitive ) == 0 ) ? "Auto" : a;
-    m_fpsSourceCombo->addItem( label, a );
-  }
-
-  int idx = m_fpsSourceCombo->findData( selected );
-  if ( idx < 0 )
-    idx = m_fpsSourceCombo->findData( QStringLiteral( "auto" ) );
-  if ( idx >= 0 )
-    m_fpsSourceCombo->setCurrentIndex( idx );
-
-  m_fpsRequireP0Check->setChecked( requireP0 );
-
-  const QString currentText = currentApp.isEmpty()
-    ? QStringLiteral( "Current: -" )
-    : QStringLiteral( "Current: %1 (pid %2)" ).arg( currentApp ).arg( currentPid );
-  m_fpsCurrentAppLabel->setText( currentText );
-
-  m_syncingFpsControls = false;
-}
-
-void MonitorTab::setTimeWindow( int seconds )
-{
-  m_windowSeconds = std::clamp( seconds, 60, 1800 );
-
-  // Update the main window status bar
-  if ( auto *mw = qobject_cast< QMainWindow * >( window() ) )
-  {
-    const int mins = m_windowSeconds / 60;
-    const int secs = m_windowSeconds % 60;
-    QString text;
-    if ( secs == 0 )
-      text = QStringLiteral( "Time window: %1 min" ).arg( mins );
-    else
-      text = QStringLiteral( "Time window: %1:%2" )
-          .arg( mins ).arg( secs, 2, 10, QLatin1Char( '0' ) );
-    mw->statusBar()->showMessage( text, 3000 );
-  }
-
-  if ( m_paused )
-  {
-    // When paused we cannot re-fetch, so just shift the visible axis range.
-    // Do NOT trim or clear buffers — the data must survive zoom-in so that a
-    // subsequent zoom-out can reveal it again.
-    updateAxes();
-    updateStickyMarkPositions();
-  }
-  else
-  {
-    // Clear all in-memory buffers and re-fetch from the new horizon so that
-    // widening the window loads fresh history and narrowing immediately trims.
-    for ( auto &[key, info] : m_seriesMap )
+    QStringList apps;
+    apps.append( "auto" );
+    const QJsonArray appArr = root.value( "apps" ).toArray();
+    for ( const auto &v : appArr )
     {
-      info.buffer.clear();
-      info.series->clear();
-      QVariant uv = info.series->property( "_uniSeries" );
-      if ( uv.isValid() )
-        if ( auto *uni = qobject_cast< QLineSeries * >( uv.value< QObject * >() ) )
-          uni->clear();
+        const QString a = v.toString().trimmed();
+        if ( !a.isEmpty() && !apps.contains( a, Qt::CaseInsensitive ) )
+            apps.append( a );
     }
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
-    fetchData();
-    updateAxes();
-  }
+    if ( !selected.isEmpty() && !apps.contains( selected, Qt::CaseInsensitive ) )
+        apps.append( selected );
 
-  // Persist only the time window value
-  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-  settings.beginGroup( "MonitorTab" );
-  settings.setValue( "TimeWindowSeconds", m_windowSeconds );
-  settings.endGroup();
-  settings.sync();
-}
+    m_syncingFpsControls = true;
 
-void MonitorTab::wheelEvent( QWheelEvent *event )
-{
-  // Only change the time window when Ctrl is held; otherwise let the
-  // event propagate normally so the scroll area can scroll.
-  if ( !( event->modifiers() & Qt::ControlModifier ) )
-  {
-    QWidget::wheelEvent( event );
-    return;
-  }
+    m_fpsSourceCombo->clear();
+    for ( const QString &a : apps )
+    {
+        const QString label = ( a.compare( "auto", Qt::CaseInsensitive ) == 0 ) ? "Auto" : a;
+        m_fpsSourceCombo->addItem( label, a );
+    }
 
-  // Ctrl + scroll: each 120-unit notch changes the window by 30 seconds
-  const int delta = event->angleDelta().y();
-  if ( delta == 0 )
-    return;
+    int idx = m_fpsSourceCombo->findData( selected );
+    if ( idx < 0 )
+        idx = m_fpsSourceCombo->findData( QStringLiteral( "auto" ) );
+    if ( idx >= 0 )
+        m_fpsSourceCombo->setCurrentIndex( idx );
 
-  // Scroll up = zoom in (shorter window), scroll down = zoom out (longer)
-  const int step = ( delta > 0 ) ? -30 : 30;
-  setTimeWindow( m_windowSeconds + step );
-  event->accept();
+    m_fpsRequireP0Check->setChecked( requireP0 );
+
+    const QString currentText = currentApp.isEmpty()
+        ? QStringLiteral( "Current: -" )
+        : QStringLiteral( "Current: %1 (pid %2)" ).arg( currentApp ).arg( currentPid );
+    m_fpsCurrentAppLabel->setText( currentText );
+
+    m_syncingFpsControls = false;
 }
 
 // ---------------------------------------------------------------------------
-// Unified chart — normalised 0–100 % Y axis
+// Available sources — fetch from daemon
 // ---------------------------------------------------------------------------
 
-void MonitorTab::setupUnifiedChart()
+void MonitorTab::refreshAvailableSources()
 {
-  m_unifiedChart = createChart();
-  m_unifiedXAxis = createXAxis();
-  m_unifiedYAxis = createYAxis( "%", 0, 100 );
-  m_unifiedChart->addAxis( m_unifiedXAxis, Qt::AlignBottom );
-  m_unifiedChart->addAxis( m_unifiedYAxis, Qt::AlignLeft );
-  m_unifiedChart->legend()->setVisible( false );
+    if ( !m_client )
+        return;
 
-  // Add an invisible anchor series so that the axes render their labels
-  // even before the real (lazy) shadow series are created.
-  auto *anchor = new QLineSeries();
-  anchor->setVisible( false );
-  anchor->setPen( QPen( Qt::transparent ) );
-  m_unifiedChart->addSeries( anchor );
-  anchor->attachAxis( m_unifiedXAxis );
-  anchor->attachAxis( m_unifiedYAxis );
+    auto jsonOpt = m_client->getMonitorSourcesJSON();
+    if ( !jsonOpt.has_value() )
+        return;
 
-  // Shadow series created lazily in createUnifiedSeries() when the
-  // unified view is first activated.
-  m_unifiedChartView = createChartView( m_unifiedChart );
+    const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
+    if ( !doc.isArray() )
+        return;
 
-  // --- Crosshair line (hidden by default) ---
-  m_crosshairLine = new QGraphicsLineItem( m_unifiedChart );
-  m_crosshairLine->setPen( QPen( QColor( 200, 200, 200, 150 ), 1, Qt::DashLine ) );
-  m_crosshairLine->setZValue( 80 );
-  m_crosshairLine->hide();
+    m_availableSources.clear();
+    for ( const auto &v : doc.array() )
+    {
+        const QJsonObject obj = v.toObject();
+        SourceDef sd;
+        sd.key   = obj.value( "key" ).toString().toStdString();
+        sd.label = obj.value( "label" ).toString().toStdString();
+        sd.group = obj.value( "group" ).toString().toStdString();
+        sd.unit  = obj.value( "unit" ).toString().toStdString();
+        if ( !sd.key.empty() )
+            m_availableSources.push_back( std::move( sd ) );
+    }
 
-  // Enable mouse tracking so we get move events without button press
-  m_unifiedChartView->setMouseTracking( true );
-  m_unifiedChartView->viewport()->setMouseTracking( true );
-  m_unifiedChartView->viewport()->installEventFilter( this );
-  m_unifiedChartView->setFocusPolicy( Qt::StrongFocus );
+    // Re-populate existing combo boxes with the updated source list
+    for ( auto &row : m_sourceRows )
+    {
+        if ( !row.combo )
+            continue;
+
+        const std::string savedKey = row.activeKey;
+        row.combo->blockSignals( true );
+        row.combo->clear();
+        row.combo->addItem( QString::fromUtf8( "\xe2\x80\x94 Select source \xe2\x80\x94" ), QString() );
+
+        // Group sources in the combo
+        QString lastGroup;
+        for ( const auto &sd : m_availableSources )
+        {
+            const QString group = QString::fromStdString( sd.group );
+            if ( group != lastGroup )
+            {
+                row.combo->insertSeparator( row.combo->count() );
+                lastGroup = group;
+            }
+            const QString display = QStringLiteral( "%1 (%2)" )
+                .arg( QString::fromStdString( sd.label ) )
+                .arg( QString::fromStdString( sd.unit ) );
+            row.combo->addItem( display, QString::fromStdString( sd.key ) );
+        }
+
+        // Restore previous selection
+        if ( !savedKey.empty() )
+        {
+            int idx = row.combo->findData( QString::fromStdString( savedKey ) );
+            if ( idx >= 0 )
+                row.combo->setCurrentIndex( idx );
+        }
+        row.combo->blockSignals( false );
+    }
 }
 
-void MonitorTab::createUnifiedSeries()
-{
-  if ( m_unifiedSeriesActive )
-    return;  // Already created
+// ---------------------------------------------------------------------------
+// Source rows — combo + checkbox + remove
+// ---------------------------------------------------------------------------
 
-  // Create a shadow normalised series for each metric and synchronise it
-  // with the original series via property mirroring in applyBinaryData().
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    const auto &md = kMetrics[ i ];
-    auto *ns = new QLineSeries();
-    ns->setName( md.label );
-    QPen pen( md.color );
+void MonitorTab::addSourceRow( const std::string &key )
+{
+    auto *rowWidget = new QWidget();
+    auto *rowLayout = new QHBoxLayout( rowWidget );
+    rowLayout->setContentsMargins( 0, 2, 0, 2 );
+
+    auto *cb = new QCheckBox();
+    cb->setChecked( true );
+
+    auto *combo = new QComboBox();
+    combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+    combo->addItem( QString::fromUtf8( "\xe2\x80\x94 Select source \xe2\x80\x94" ), QString() );
+
+    // Populate from available sources
+    QString lastGroup;
+    for ( const auto &sd : m_availableSources )
+    {
+        const QString group = QString::fromStdString( sd.group );
+        if ( group != lastGroup )
+        {
+            combo->insertSeparator( combo->count() );
+            lastGroup = group;
+        }
+        const QString display = QStringLiteral( "%1 (%2)" )
+            .arg( QString::fromStdString( sd.label ) )
+            .arg( QString::fromStdString( sd.unit ) );
+        combo->addItem( display, QString::fromStdString( sd.key ) );
+    }
+
+    auto *removeBtn = new QPushButton( QString::fromUtf8( "\xe2\x9c\x95" ) );
+    removeBtn->setFixedWidth( 24 );
+    removeBtn->setFixedHeight( 24 );
+
+    rowLayout->addWidget( cb );
+    rowLayout->addWidget( combo, 1 );
+    rowLayout->addWidget( removeBtn );
+
+    // Insert before the stretch at the end
+    const int insertIdx = m_selectorLayout->count() - 1;
+    m_selectorLayout->insertWidget( insertIdx, rowWidget );
+
+    SourceRow row;
+    row.combo = combo;
+    row.checkbox = cb;
+    row.removeBtn = removeBtn;
+    row.activeKey = key;
+
+    const int rowIndex = static_cast< int >( m_sourceRows.size() );
+    m_sourceRows.push_back( row );
+
+    // Select the key if provided
+    if ( !key.empty() )
+    {
+        int idx = combo->findData( QString::fromStdString( key ) );
+        if ( idx >= 0 )
+            combo->setCurrentIndex( idx );
+        ensureSeries( key );
+    }
+
+    // Connect combo change -> create/remove series
+    connect( combo, &QComboBox::currentIndexChanged, this, [this, rowIndex]( int ) {
+        if ( rowIndex >= static_cast< int >( m_sourceRows.size() ) )
+            return;
+
+        auto &r = m_sourceRows[static_cast< size_t >( rowIndex )];
+        const std::string newKey = r.combo->currentData().toString().toStdString();
+
+        // Remove old series if key changed
+        if ( !r.activeKey.empty() && r.activeKey != newKey )
+            removeSeries( r.activeKey );
+
+        r.activeKey = newKey;
+
+        if ( !newKey.empty() )
+        {
+            ensureSeries( newKey );
+            // Apply checkbox state
+            auto it = m_seriesMap.find( newKey );
+            if ( it != m_seriesMap.end() )
+                it->second.series->setVisible( r.checkbox->isChecked() );
+        }
+        saveSourceSelection();
+    } );
+
+    // Connect checkbox toggle -> show/hide series
+    connect( cb, &QCheckBox::toggled, this, [this, rowIndex]( bool checked ) {
+        if ( rowIndex >= static_cast< int >( m_sourceRows.size() ) )
+            return;
+        const auto &r = m_sourceRows[static_cast< size_t >( rowIndex )];
+        if ( !r.activeKey.empty() )
+        {
+            auto it = m_seriesMap.find( r.activeKey );
+            if ( it != m_seriesMap.end() )
+                it->second.series->setVisible( checked );
+        }
+        saveSourceSelection();
+    } );
+
+    // Connect remove button
+    connect( removeBtn, &QPushButton::clicked, this, [this, rowIndex]() {
+        removeSourceRow( rowIndex );
+    } );
+}
+
+void MonitorTab::removeSourceRow( int row )
+{
+    if ( row < 0 || row >= static_cast< int >( m_sourceRows.size() ) )
+        return;
+
+    auto &r = m_sourceRows[static_cast< size_t >( row )];
+
+    // Remove the series
+    if ( !r.activeKey.empty() )
+        removeSeries( r.activeKey );
+
+    // Remove the widget from the layout
+    if ( r.combo )
+    {
+        QWidget *rowWidget = r.combo->parentWidget();
+        m_selectorLayout->removeWidget( rowWidget );
+        delete rowWidget;
+    }
+
+    m_sourceRows.erase( m_sourceRows.begin() + row );
+    saveSourceSelection();
+}
+
+// ---------------------------------------------------------------------------
+// Series management
+// ---------------------------------------------------------------------------
+
+QColor MonitorTab::nextColor()
+{
+    const QColor c = kPalette[ m_colorIndex % kPaletteSize ];
+    ++m_colorIndex;
+    return c;
+}
+
+void MonitorTab::ensureSeries( const std::string &key )
+{
+    if ( key.empty() || m_seriesMap.count( key ) )
+        return;
+
+    // Find the SourceDef for label and unit
+    QString label = QString::fromStdString( key );
+    QString unit;
+    for ( const auto &sd : m_availableSources )
+    {
+        if ( sd.key == key )
+        {
+            label = QString::fromStdString( sd.label );
+            unit = QString::fromStdString( sd.unit );
+            break;
+        }
+    }
+
+    auto *series = new QLineSeries();
+    series->setName( label );
+    const QColor color = nextColor();
+    QPen pen( color );
     pen.setWidth( 1 );
-    ns->setPen( pen );
+    series->setPen( pen );
+    series->setProperty( "_unit", unit );
+    series->setProperty( "_metricKey", QString::fromStdString( key ) );
 
-    m_unifiedChart->addSeries( ns );
-    ns->attachAxis( m_unifiedXAxis );
-    ns->attachAxis( m_unifiedYAxis );
+    m_chart->addSeries( series );
+    series->attachAxis( m_xAxis );
+    series->attachAxis( m_yAxis );
 
-    // Store reverse-scale and unit on the shadow series
-    const double fwdScale = metricToNormalisedScale( md.group );
-    ns->setProperty( "_realScale", 1.0 / fwdScale );
-    ns->setProperty( "_unit", QString::fromUtf8( metricGroupUnit( md.group ) ) );
-    ns->setProperty( "_metricKey", QString::fromStdString( md.key ) );
+    // Install hover callout for this new series
+    connect( series, &QLineSeries::hovered,
+             this, [this, series]( const QPointF &point, bool state ) {
+        showHoverCallout( series, m_chart, point, state );
+    } );
 
-    // Store the shadow series on the original for applyBinaryData/trimSeries
-    m_seriesMap[ md.key ].series->setProperty( "_uniSeries",
-        QVariant::fromValue( static_cast< QObject * >( ns ) ) );
-    m_seriesMap[ md.key ].series->setProperty( "_uniScale",
-        metricToNormalisedScale( md.group ) );
-
-    // Respect the toggle checkbox (connect and sync initial state)
-    connect( m_seriesMap[ md.key ].toggle, &QCheckBox::toggled,
-             ns, &QLineSeries::setVisible );
-    ns->setVisible( m_seriesMap[ md.key ].toggle->isChecked() );
-
-    // Copy existing raw data into the shadow series (normalised)
-    // so the unified chart is immediately populated with all visible history.
-    auto &rawBuffer = m_seriesMap[ md.key ].buffer;
-    const double scale = metricToNormalisedScale( md.group );
-    if ( !rawBuffer.isEmpty() )
-    {
-      QList< QPointF > pts;
-      pts.reserve( rawBuffer.size() );
-      for ( const auto &pt : rawBuffer )
-        pts.append( QPointF( pt.x(), pt.y() * scale ) );
-      ns->replace( pts );
-    }
-  }
-
-  m_unifiedSeriesActive = true;
+    m_seriesMap[ key ] = { series, label, color, unit, {} };
 }
 
-void MonitorTab::destroyUnifiedSeries()
+void MonitorTab::removeSeries( const std::string &key )
 {
-  if ( !m_unifiedSeriesActive )
-    return;  // Already destroyed
+    auto it = m_seriesMap.find( key );
+    if ( it == m_seriesMap.end() )
+        return;
 
-  // Remove all shadow series from the unified chart (keep invisible anchor).
-  // The anchor has no name and is not visible; shadow series always have names.
-  const auto allSeries = m_unifiedChart->series();   // snapshot (QList copy)
-  for ( auto *abstractSeries : allSeries )
-  {
-    if ( !abstractSeries->isVisible() && abstractSeries->name().isEmpty() )
-      continue;   // invisible anchor — keep
-    m_unifiedChart->removeSeries( abstractSeries );
-    delete abstractSeries;
-  }
-
-  // Clear the property references
-  for ( auto &[key, info] : m_seriesMap )
-  {
-    info.series->setProperty( "_uniSeries", QVariant() );
-    info.series->setProperty( "_uniScale", QVariant() );
-  }
-
-  m_unifiedSeriesActive = false;
-}
-
-void MonitorTab::setUnifiedMode( bool unified )
-{
-  if ( unified && !m_unifiedSeriesActive )
-  {
-    // Lazily create shadow series on first activation
-    createUnifiedSeries();
-    // Install hover callout now that the series actually exist
-    installHoverCallout( m_unifiedChart );
-    // Create unified-side sticky mark graphics for existing marks
-    createUnifiedMarkGfx();
-  }
-  else if ( !unified && m_unifiedSeriesActive )
-  {
-    // Reclaim memory when switching back to per-group view
-    destroyUnifiedMarkGfx();
-    destroyUnifiedSeries();
-  }
-  m_chartStack->setCurrentIndex( unified ? 1 : 0 );
-  updateAxes();
-  updateStickyMarkPositions();
+    m_chart->removeSeries( it->second.series );
+    delete it->second.series;
+    m_seriesMap.erase( it );
 }
 
 // ---------------------------------------------------------------------------
-// Hover callout — shows exact value under the pointer
+// Hover callout
 // ---------------------------------------------------------------------------
 
 void MonitorTab::installHoverCallout( QChart *chart )
 {
-  // Clean up any previous callout for this chart (important for the
-  // unified chart whose series are destroyed and recreated).
-  auto it = m_callouts.find( chart );
-  if ( it != m_callouts.end() )
-  {
-    delete it->second.bg;
-    delete it->second.text;
-    m_callouts.erase( it );
-  }
-
-  // Create a semi-transparent background rect + text item living in the
-  // chart's scene.  Hidden by default; shown on hover.
-  auto *bg   = new QGraphicsRectItem( chart );
-  auto *text = new QGraphicsSimpleTextItem( chart );
-  bg->setBrush( QBrush( QColor( 30, 30, 30, 200 ) ) );
-  bg->setPen( QPen( QColor( 200, 200, 200 ) ) );
-  bg->setZValue( 100 );
-  text->setBrush( Qt::white );
-  text->setZValue( 101 );
-  bg->hide();
-  text->hide();
-
-  m_callouts[ chart ] = { bg, text };
-
-  // Connect hovered() on every series belonging to this chart.
-  for ( auto *abstractSeries : chart->series() )
-  {
-    auto *ls = qobject_cast< QLineSeries * >( abstractSeries );
-    if ( !ls )
-      continue;
-
-    connect( ls, &QLineSeries::hovered,
-             this, [this, ls, chart]( const QPointF &point, bool state ) {
-      showHoverCallout( ls, chart, point, state );
-    } );
-
-    // Sticky mark — click to pin/unpin a data-point label
-    connect( ls, &QLineSeries::clicked,
-             this, [this, ls]( const QPointF &point )
+    auto it = m_callouts.find( chart );
+    if ( it != m_callouts.end() )
     {
-      handleSeriesClick( ls, point );
-    } );
-  }
-}
+        delete it->second.bg;
+        delete it->second.text;
+        m_callouts.erase( it );
+    }
 
-// ---------------------------------------------------------------------------
-// showHoverCallout — extracted body of the per-series hovered() callback
-// ---------------------------------------------------------------------------
+    auto *bg   = new QGraphicsRectItem( chart );
+    auto *text = new QGraphicsSimpleTextItem( chart );
+    bg->setBrush( QBrush( QColor( 30, 30, 30, 200 ) ) );
+    bg->setPen( QPen( QColor( 200, 200, 200 ) ) );
+    bg->setZValue( 100 );
+    text->setBrush( Qt::white );
+    text->setZValue( 101 );
+    bg->hide();
+    text->hide();
+
+    m_callouts[ chart ] = { bg, text };
+}
 
 void MonitorTab::showHoverCallout( QLineSeries *ls, QChart *chart,
                                    const QPointF &point, bool state )
 {
-  auto &co = m_callouts[ chart ];
-  if ( !state )
-  {
-    co.bg->hide();
-    co.text->hide();
-    return;
-  }
+    auto calloutIt = m_callouts.find( chart );
+    if ( calloutIt == m_callouts.end() )
+        return;
 
-  // Format the timestamp and value.
-  // _realScale is set on unified shadow series to invert the normalisation;
-  // _unit is set on all series for the physical unit suffix.
-  const QDateTime dt = QDateTime::fromMSecsSinceEpoch(
-                          static_cast< qint64 >( point.x() ) );
-  const QVariant rvProp = ls->property( "_realScale" );
-  const double realVal  = rvProp.isValid()
-                          ? point.y() * rvProp.toDouble()
-                          : point.y();
-  const QString unit    = ls->property( "_unit" ).toString();
+    auto &co = calloutIt->second;
+    if ( !state )
+    {
+        co.bg->hide();
+        co.text->hide();
+        return;
+    }
 
-  const QString label = unit.isEmpty()
-      ? QStringLiteral( "%1\n%2: %3" )
-          .arg( dt.toString( "HH:mm:ss" ) )
-          .arg( ls->name() )
-          .arg( realVal, 0, 'f', 1 )
-      : QStringLiteral( "%1\n%2: %3 %4" )
-          .arg( dt.toString( "HH:mm:ss" ) )
-          .arg( ls->name() )
-          .arg( realVal, 0, 'f', 1 )
-          .arg( unit );
+    const QDateTime dt = QDateTime::fromMSecsSinceEpoch(
+                            static_cast< qint64 >( point.x() ) );
+    const QString unit = ls->property( "_unit" ).toString();
 
-  co.text->setText( label );
+    const QString label = unit.isEmpty()
+        ? QStringLiteral( "%1\n%2: %3" )
+            .arg( dt.toString( "HH:mm:ss" ), ls->name() )
+            .arg( point.y(), 0, 'f', 1 )
+        : QStringLiteral( "%1\n%2: %3 %4" )
+            .arg( dt.toString( "HH:mm:ss" ), ls->name() )
+            .arg( point.y(), 0, 'f', 1 )
+            .arg( unit );
 
-  // Position near the data point (in scene coordinates)
-  const QPointF scenePos = chart->mapToPosition( point );
-  constexpr qreal pad = 4.0;
-  const QRectF textRect = co.text->boundingRect();
-  co.text->setPos( scenePos.x() + 10, scenePos.y() - textRect.height() - 6 );
-  co.bg->setRect( co.text->pos().x() - pad,
-                  co.text->pos().y() - pad,
-                  textRect.width() + 2 * pad,
-                  textRect.height() + 2 * pad );
+    co.text->setText( label );
 
-  co.bg->show();
-  co.text->show();
-}
-
-// ---------------------------------------------------------------------------
-// Sticky marks — click to pin/unpin a data-point callout
-// ---------------------------------------------------------------------------
-
-int MonitorTab::metricIndexForKey( const std::string &key )
-{
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    if ( kMetrics[ i ].key == key )
-      return i;
-  }
-  return -1;
-}
-
-QChart *MonitorTab::chartForGroup( MetricGroup g ) const
-{
-  switch ( g )
-  {
-    case MetricGroup::Temp:  return m_tempChart;
-    case MetricGroup::Duty:  return m_dutyChart;
-    case MetricGroup::Power: return m_powerChart;
-    case MetricGroup::Freq:  return m_freqChart;
-    case MetricGroup::Volt:  return m_voltChart;
-    case MetricGroup::Fps:   return m_fpsChart;
-  }
-  return m_tempChart;
-}
-
-MonitorTab::MarkGfx MonitorTab::createMarkGfx( QChart *chart, const QColor &borderColor,
-                                               std::function< void() > onClick )
-{
-  auto *bg   = new ClickableRectItem( chart );
-  auto *text = new QGraphicsSimpleTextItem( chart );
-
-  bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
-  bg->setPen( QPen( borderColor, 2 ) );
-  bg->setZValue( 90 );
-  if ( onClick )
-    bg->setClickCallback( std::move( onClick ) );
-
-  // Let mouse clicks pass through the text to the bg rect behind it
-  text->setAcceptedMouseButtons( Qt::NoButton );
-  text->setBrush( Qt::white );
-  text->setZValue( 91 );
-  bg->hide();
-  text->hide();
-
-  return { bg, text };
-}
-
-void MonitorTab::positionMarkGfx( MarkGfx &gfx, QChart *chart,
-                                  const QPointF &dataPoint, const QString &label )
-{
-  if ( !gfx.bg || !gfx.text )
-    return;
-
-  const QRectF plotArea = chart->plotArea();
-  const QPointF scenePos = chart->mapToPosition( dataPoint );
-
-  // Hide if the mark has scrolled outside the visible plot area
-  if ( scenePos.x() < plotArea.left() || scenePos.x() > plotArea.right() )
-  {
-    gfx.bg->hide();
-    gfx.text->hide();
-    return;
-  }
-
-  gfx.text->setText( label );
-
-  constexpr qreal pad = 4.0;
-  const QRectF textRect = gfx.text->boundingRect();
-
-  // Position above and to the right of the data point
-  qreal tx = scenePos.x() + 10;
-  qreal ty = scenePos.y() - textRect.height() - 10;
-
-  // If it would overflow the right edge, flip to the left side
-  if ( tx + textRect.width() + 2 * pad > plotArea.right() )
-    tx = scenePos.x() - textRect.width() - 2 * pad - 10;
-
-  // If it would overflow the top edge, flip below
-  if ( ty - pad < plotArea.top() )
-    ty = scenePos.y() + 10;
-
-  gfx.text->setPos( tx, ty );
-  gfx.bg->setRect( tx - pad, ty - pad,
+    const QPointF scenePos = chart->mapToPosition( point );
+    constexpr qreal pad = 4.0;
+    const QRectF textRect = co.text->boundingRect();
+    co.text->setPos( scenePos.x() + 10, scenePos.y() - textRect.height() - 6 );
+    co.bg->setRect( co.text->pos().x() - pad,
+                    co.text->pos().y() - pad,
                     textRect.width() + 2 * pad,
                     textRect.height() + 2 * pad );
 
-  gfx.bg->show();
-  gfx.text->show();
-}
-
-void MonitorTab::handleSeriesClick( QLineSeries *ls, const QPointF &point )
-{
-  const QString keyStr = ls->property( "_metricKey" ).toString();
-  if ( keyStr.isEmpty() )
-    return;
-
-  const std::string key = keyStr.toStdString();
-  const int idx = metricIndexForKey( key );
-  if ( idx < 0 )
-    return;
-
-  // Determine raw value — denormalize if this is a unified shadow series
-  const QVariant rvProp = ls->property( "_realScale" );
-  const double rawValue = rvProp.isValid()
-                          ? point.y() * rvProp.toDouble()
-                          : point.y();
-
-  const qint64 clickTs = static_cast< qint64 >( point.x() );
-
-  if ( static_cast< int >( m_stickyMarks.size() ) >= MAX_STICKY_MARKS )
-    return;
-
-  // Snap to the nearest actual data point in the raw buffer
-  auto &buf = m_seriesMap[ key ].buffer;
-  if ( buf.isEmpty() )
-    return;
-
-  qint64 snapTs  = clickTs;
-  double snapVal = rawValue;
-  qint64 bestDist = m_windowSeconds * 1000LL + 1;
-
-  for ( const auto &pt : buf )
-  {
-    const qint64 d = std::abs( static_cast< qint64 >( pt.x() ) - clickTs );
-    if ( d < bestDist )
-    {
-      bestDist = d;
-      snapTs  = static_cast< qint64 >( pt.x() );
-      snapVal = pt.y();
-    }
-  }
-
-  // Create a single-metric group mark — place box at vertical centre of plot
-  addStickyMarkGroup( snapTs, 0.5, { { key, snapVal } } );
-}
-
-void MonitorTab::addStickyMarkGroup( qint64 ts, double clickDataY,
-                                     const std::vector< StickyMetricEntry > &entries )
-{
-  StickyMark mark;
-  mark.timestamp  = ts;
-  mark.clickDataY = clickDataY;
-  mark.entries    = entries;
-
-  // Build a remove callback
-  const qint64 capturedTs = ts;
-  auto removeCb = [this, capturedTs]() {
-    for ( auto it = m_stickyMarks.begin(); it != m_stickyMarks.end(); ++it )
-    {
-      if ( it->timestamp == capturedTs )
-      {
-        removeStickyMark( it );
-        return;
-      }
-    }
-  };
-
-  // Create per-group chart graphics (one MarkGfx per entry)
-  for ( const auto &entry : entries )
-  {
-    const int idx = metricIndexForKey( entry.metricKey );
-    if ( idx < 0 )
-    {
-      mark.groupGfxList.push_back( {} );
-      continue;
-    }
-    const auto &md = kMetrics[ idx ];
-    mark.groupGfxList.push_back( createMarkGfx( chartForGroup( md.group ), md.color, removeCb ) );
-  }
-
-  // Create unified chart graphics if the unified view is active
-  if ( m_unifiedSeriesActive && m_unifiedChart )
-  {
-    // Background rect (clickable)
-    auto *bg = new ClickableRectItem( m_unifiedChart );
-    bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
-    bg->setPen( QPen( QColor( 200, 200, 200 ), 1 ) );
-    bg->setZValue( 90 );
-    bg->setClickCallback( removeCb );
-    mark.uniBg = bg;
-
-    // One text item per entry + timestamp header
-    auto *tsText = new QGraphicsSimpleTextItem( m_unifiedChart );
-    tsText->setBrush( Qt::white );
-    tsText->setZValue( 91 );
-    tsText->setAcceptedMouseButtons( Qt::NoButton );
-    mark.uniTexts.push_back( tsText );
-
-    for ( const auto &entry : entries )
-    {
-      const int idx = metricIndexForKey( entry.metricKey );
-      const QColor col = ( idx >= 0 ) ? kMetrics[ idx ].color : Qt::white;
-      auto *txt = new QGraphicsSimpleTextItem( m_unifiedChart );
-      txt->setBrush( col );
-      txt->setZValue( 91 );
-      txt->setAcceptedMouseButtons( Qt::NoButton );
-      mark.uniTexts.push_back( txt );
-    }
-
-    // Vertical marker line
-    auto *line = new QGraphicsLineItem( m_unifiedChart );
-    line->setPen( QPen( QColor( 200, 200, 200, 150 ), 1, Qt::DashLine ) );
-    line->setZValue( 89 );
-    mark.uniLine = line;
-  }
-
-  m_stickyMarks.push_back( std::move( mark ) );
-  updateStickyMarkPositions();
-}
-
-void MonitorTab::removeStickyMark( std::vector< StickyMark >::iterator it )
-{
-  // Per-group graphics
-  for ( auto &gfx : it->groupGfxList )
-  {
-    delete gfx.bg;
-    delete gfx.text;
-  }
-
-  // Unified graphics
-  for ( auto *txt : it->uniTexts )
-    delete txt;
-  delete it->uniBg;
-  delete it->uniLine;
-
-  m_stickyMarks.erase( it );
-}
-
-void MonitorTab::updateStickyMarkPositions()
-{
-  for ( auto &mark : m_stickyMarks )
-  {
-    // --- Per-group chart positioning (one per entry) ---
-    for ( size_t e = 0; e < mark.entries.size(); ++e )
-    {
-      if ( e >= mark.groupGfxList.size() )
-        break;
-
-      const auto &entry = mark.entries[ e ];
-      auto &gfx = mark.groupGfxList[ e ];
-
-      const int idx = metricIndexForKey( entry.metricKey );
-      if ( idx < 0 )
-        continue;
-
-      const auto &md = kMetrics[ idx ];
-      auto it = m_seriesMap.find( md.key );
-      const bool visible = ( it != m_seriesMap.end() && it->second.toggle->isChecked() );
-
-      if ( !visible )
-      {
-        if ( gfx.bg ) { gfx.bg->hide(); gfx.text->hide(); }
-        continue;
-      }
-
-      const QDateTime dt = QDateTime::fromMSecsSinceEpoch( mark.timestamp );
-      const QString unit = QString::fromUtf8( metricGroupUnit( md.group ) );
-      const QString label = QStringLiteral( "%1\n%2: %3 %4" )
-          .arg( dt.toString( "HH:mm:ss" ) )
-          .arg( md.label )
-          .arg( entry.rawValue, 0, 'f', 1 )
-          .arg( unit );
-
-      positionMarkGfx( gfx, chartForGroup( md.group ),
-          QPointF( static_cast< qreal >( mark.timestamp ), entry.rawValue ), label );
-    }
-
-    // --- Unified chart grouped label ---
-    if ( !mark.uniBg || !m_unifiedChart )
-      continue;
-
-    // Check if any entry is visible
-    bool anyVisible = false;
-    for ( const auto &entry : mark.entries )
-    {
-      const int idx = metricIndexForKey( entry.metricKey );
-      if ( idx >= 0 )
-      {
-        auto it = m_seriesMap.find( entry.metricKey );
-        if ( it != m_seriesMap.end() && it->second.toggle->isChecked() )
-        {
-          anyVisible = true;
-          break;
-        }
-      }
-    }
-
-    const QRectF plotArea = m_unifiedChart->plotArea();
-    const QPointF sceneX = m_unifiedChart->mapToPosition(
-        QPointF( static_cast< qreal >( mark.timestamp ), 0 ) );
-
-    if ( !anyVisible || sceneX.x() < plotArea.left() || sceneX.x() > plotArea.right() )
-    {
-      mark.uniBg->hide();
-      for ( auto *txt : mark.uniTexts )
-        txt->hide();
-      if ( mark.uniLine )
-        mark.uniLine->hide();
-      continue;
-    }
-
-    // Set timestamp header text
-    const QDateTime dt = QDateTime::fromMSecsSinceEpoch( mark.timestamp );
-    mark.uniTexts[ 0 ]->setText( dt.toString( "HH:mm:ss" ) );
-
-    // Set per-metric texts, build up total height
-    constexpr qreal pad = 4.0;
-    constexpr qreal rowGap = 1.0;
-    qreal totalH = 0;
-    qreal maxW   = 0;
-
-    // Measure timestamp row
-    {
-      const QRectF r = mark.uniTexts[ 0 ]->boundingRect();
-      totalH += r.height() + rowGap;
-      maxW = std::max( maxW, r.width() );
-    }
-
-    // Measure + set metric rows
-    size_t txtIdx = 1;
-    for ( const auto &entry : mark.entries )
-    {
-      if ( txtIdx >= mark.uniTexts.size() )
-        break;
-
-      const int idx = metricIndexForKey( entry.metricKey );
-      if ( idx < 0 ) { ++txtIdx; continue; }
-
-      const auto &md = kMetrics[ idx ];
-      auto it = m_seriesMap.find( md.key );
-      const bool vis = ( it != m_seriesMap.end() && it->second.toggle->isChecked() );
-
-      if ( !vis )
-      {
-        mark.uniTexts[ txtIdx ]->hide();
-        ++txtIdx;
-        continue;
-      }
-
-      const QString unit = QString::fromUtf8( metricGroupUnit( md.group ) );
-      const QString rowText = QStringLiteral( "%1: %2 %3" )
-          .arg( md.label )
-          .arg( entry.rawValue, 0, 'f', 1 )
-          .arg( unit );
-
-      mark.uniTexts[ txtIdx ]->setText( rowText );
-      mark.uniTexts[ txtIdx ]->show();
-
-      const QRectF r = mark.uniTexts[ txtIdx ]->boundingRect();
-      totalH += r.height() + rowGap;
-      maxW = std::max( maxW, r.width() );
-      ++txtIdx;
-    }
-
-    // Position the label box above the data, anchored at sceneX
-    const qreal boxW = maxW + 2 * pad;
-    const qreal boxH = totalH + 2 * pad - rowGap;  // remove last rowGap
-
-    qreal bx = sceneX.x() + 8;
-    if ( bx + boxW > plotArea.right() )
-      bx = sceneX.x() - boxW - 8;
-
-    // Place box at the stored plot-fraction Y — independent of axis zoom
-    qreal by = plotArea.top() + mark.clickDataY * plotArea.height() - boxH / 2.0;
-    by = std::max( plotArea.top() + 2.0, by );
-    by = std::min( plotArea.bottom() - boxH - 2.0, by );
-
-    mark.uniBg->setRect( bx, by, boxW, boxH );
-    mark.uniBg->show();
-
-    // Position text rows inside the box
-    qreal rowY = by + pad;
-    for ( size_t t = 0; t < mark.uniTexts.size(); ++t )
-    {
-      auto *txt = mark.uniTexts[ t ];
-      if ( !txt->isVisible() && t != 0 )
-        continue;
-
-      if ( t == 0 )
-        txt->show();
-
-      txt->setPos( bx + pad, rowY );
-      rowY += txt->boundingRect().height() + rowGap;
-    }
-
-    // Vertical line from bottom of box to X axis
-    if ( mark.uniLine )
-    {
-      mark.uniLine->setLine( sceneX.x(), plotArea.top(), sceneX.x(), plotArea.bottom() );
-      mark.uniLine->show();
-    }
-  }
-}
-
-void MonitorTab::createUnifiedMarkGfx()
-{
-  for ( auto &mark : m_stickyMarks )
-  {
-    if ( mark.uniBg )
-      continue;  // Already has unified graphics
-
-    const qint64 capturedTs = mark.timestamp;
-    auto removeCb = [this, capturedTs]() {
-      for ( auto it = m_stickyMarks.begin(); it != m_stickyMarks.end(); ++it )
-      {
-        if ( it->timestamp == capturedTs )
-        {
-          removeStickyMark( it );
-          return;
-        }
-      }
-    };
-
-    auto *bg = new ClickableRectItem( m_unifiedChart );
-    bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
-    bg->setPen( QPen( QColor( 200, 200, 200 ), 1 ) );
-    bg->setZValue( 90 );
-    bg->setClickCallback( removeCb );
-    mark.uniBg = bg;
-
-    // Timestamp text
-    auto *tsText = new QGraphicsSimpleTextItem( m_unifiedChart );
-    tsText->setBrush( Qt::white );
-    tsText->setZValue( 91 );
-    tsText->setAcceptedMouseButtons( Qt::NoButton );
-    mark.uniTexts.push_back( tsText );
-
-    // Per-metric texts
-    for ( const auto &entry : mark.entries )
-    {
-      const int idx = metricIndexForKey( entry.metricKey );
-      const QColor col = ( idx >= 0 ) ? kMetrics[ idx ].color : Qt::white;
-      auto *txt = new QGraphicsSimpleTextItem( m_unifiedChart );
-      txt->setBrush( col );
-      txt->setZValue( 91 );
-      txt->setAcceptedMouseButtons( Qt::NoButton );
-      mark.uniTexts.push_back( txt );
-    }
-
-    auto *line = new QGraphicsLineItem( m_unifiedChart );
-    line->setPen( QPen( QColor( 200, 200, 200, 150 ), 1, Qt::DashLine ) );
-    line->setZValue( 89 );
-    mark.uniLine = line;
-  }
-}
-
-void MonitorTab::destroyUnifiedMarkGfx()
-{
-  for ( auto &mark : m_stickyMarks )
-  {
-    for ( auto *txt : mark.uniTexts )
-      delete txt;
-    mark.uniTexts.clear();
-    delete mark.uniBg;
-    mark.uniBg = nullptr;
-    delete mark.uniLine;
-    mark.uniLine = nullptr;
-  }
+    co.bg->show();
+    co.text->show();
 }
 
 // ---------------------------------------------------------------------------
-// Unified crosshair — vertical line + per-series labels on Ctrl
-// ---------------------------------------------------------------------------
-
-bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
-{
-  // Only handle mouse events on the unified chart viewport
-  if ( watched != m_unifiedChartView->viewport() )
-    return QWidget::eventFilter( watched, event );
-
-  switch ( event->type() )
-  {
-    case QEvent::MouseMove:
-    {
-      auto *me = static_cast< QMouseEvent * >( event );
-
-      // Rubber-band zoom drag in progress
-      if ( m_zoomDragging )
-      {
-        m_zoomBand->setGeometry( QRect( m_zoomOrigin, me->pos() ).normalized() );
-        return true;
-      }
-
-      m_lastCrosshairPos = me->pos();
-      m_cursorInPlot = true;
-      updateCrosshair( me->pos(), m_annotationsVisible );
-      break;
-    }
-    case QEvent::MouseButtonPress:
-    {
-      auto *me = static_cast< QMouseEvent * >( event );
-
-      // Ctrl+LMB starts rubber-band zoom
-      if ( me->button() == Qt::LeftButton
-           && ( me->modifiers() & Qt::ControlModifier ) )
-      {
-        m_zoomOrigin = me->pos();
-        if ( !m_zoomBand )
-          m_zoomBand = new QRubberBand( QRubberBand::Rectangle, m_unifiedChartView->viewport() );
-        m_zoomBand->setGeometry( QRect( m_zoomOrigin, QSize() ) );
-        m_zoomBand->show();
-        m_zoomDragging = true;
-        return true;
-      }
-
-      if ( me->button() == Qt::LeftButton && m_annotationsVisible )
-      {
-        // Check if the click is on a sticky mark graphics item
-        const QPointF scenePos = m_unifiedChartView->mapToScene(
-            static_cast< int >( me->pos().x() ),
-            static_cast< int >( me->pos().y() ) );
-        const auto items = m_unifiedChart->scene()->items( scenePos );
-        
-        // If a graphics item was clicked (mark bg rect), let it through
-        for ( auto *item : items )
-        {
-          if ( dynamic_cast< ClickableRectItem * >( item ) )
-            return false;  // Don't consume; let the item handle it
-        }
-        
-        // No mark clicked; create a new one on empty space
-        crosshairClick( me->pos() );
-        return true;
-      }
-      break;
-    }
-    case QEvent::MouseButtonRelease:
-    {
-      auto *me = static_cast< QMouseEvent * >( event );
-
-      // Finish rubber-band zoom
-      if ( me->button() == Qt::LeftButton && m_zoomDragging )
-      {
-        m_zoomDragging = false;
-        m_zoomBand->hide();
-        const QRect rect = QRect( m_zoomOrigin, me->pos() ).normalized();
-        if ( rect.width() > 4 && rect.height() > 4 )
-          applyZoomRect( rect );
-        return true;
-      }
-
-      if ( me->button() == Qt::RightButton )
-      {
-        m_annotationsVisible = !m_annotationsVisible;
-        updateCrosshair( me->pos(), m_annotationsVisible );
-        return true;  // suppress context menu
-      }
-      break;
-    }
-    case QEvent::Leave:
-      m_cursorInPlot = false;
-      hideCrosshair();
-      break;
-    default:
-      break;
-  }
-
-  return QWidget::eventFilter( watched, event );
-}
-
-void MonitorTab::hideCrosshair()
-{
-  if ( m_crosshairLine )
-    m_crosshairLine->hide();
-
-  for ( auto &cl : m_crosshairLabels )
-  {
-    delete cl.bg;
-    delete cl.text;
-  }
-  m_crosshairLabels.clear();
-  m_crosshairVisible = false;
-}
-
-void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
-{
-  if ( !m_unifiedSeriesActive || !m_unifiedChart )
-  {
-    hideCrosshair();
-    return;
-  }
-
-  // Map the widget position to chart coordinates.
-  // The viewport() pos maps to the QGraphicsView, which we convert to scene
-  // and then to chart-value coordinates.
-  const QPointF scenePos = m_unifiedChartView->mapToScene(
-      static_cast< int >( widgetPos.x() ),
-      static_cast< int >( widgetPos.y() ) );
-  const QRectF plotArea = m_unifiedChart->plotArea();
-
-  if ( !plotArea.contains( scenePos ) )
-  {
-    hideCrosshair();
-    return;
-  }
-
-  // Draw the vertical crosshair line spanning the full plot height
-  m_crosshairLine->setLine( scenePos.x(), plotArea.top(),
-                             scenePos.x(), plotArea.bottom() );
-  m_crosshairLine->show();
-
-  // Clean up old labels
-  for ( auto &cl : m_crosshairLabels )
-  {
-    delete cl.bg;
-    delete cl.text;
-  }
-  m_crosshairLabels.clear();
-
-  if ( !ctrlHeld )
-  {
-    m_crosshairVisible = true;
-    return;
-  }
-
-  // Map scenePos to a data-space X (timestamp)
-  const QPointF dataPos = m_unifiedChart->mapToValue( scenePos );
-  const qint64 cursorTs = static_cast< qint64 >( dataPos.x() );
-
-  // Pre-count visible metrics so we can center the label stack on the cursor Y
-  int totalLabels = 1; // +1 for the timestamp row
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    const auto &md  = kMetrics[ i ];
-    const auto &info = m_seriesMap[ md.key ];
-    if ( info.toggle->isChecked() && !info.buffer.isEmpty() )
-      ++totalLabels;
-  }
-
-  // For each visible metric, find the nearest data point and create a label
-  int labelIndex = 0;
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    const auto &md  = kMetrics[ i ];
-    auto &info = m_seriesMap[ md.key ];
-    if ( !info.toggle->isChecked() )
-      continue;
-
-    const auto &buf = info.buffer;
-    if ( buf.isEmpty() )
-      continue;
-
-    // Binary search for the nearest timestamp in the raw buffer
-    int lo = 0, hi = buf.size() - 1;
-    while ( lo < hi )
-    {
-      const int mid = lo + ( hi - lo ) / 2;
-      if ( static_cast< qint64 >( buf[ mid ].x() ) < cursorTs )
-        lo = mid + 1;
-      else
-        hi = mid;
-    }
-
-    // Check the neighbor as well to find the truly closest
-    int bestIdx = lo;
-    if ( lo > 0 )
-    {
-      const qint64 dLo = std::abs( static_cast< qint64 >( buf[ lo ].x() ) - cursorTs );
-      const qint64 dPrev = std::abs( static_cast< qint64 >( buf[ lo - 1 ].x() ) - cursorTs );
-      if ( dPrev < dLo )
-        bestIdx = lo - 1;
-    }
-
-    const double rawVal = buf[ bestIdx ].y();
-    const qint64 snapTs = static_cast< qint64 >( buf[ bestIdx ].x() );
-
-    // Compute the normalised data point for potential future use
-    const double scale = metricToNormalisedScale( md.group );
-    (void) scale; // Used below for mapToPosition if needed
-
-    // Build label text
-    const QDateTime dt = QDateTime::fromMSecsSinceEpoch( snapTs );
-    const QString unit = QString::fromUtf8( metricGroupUnit( md.group ) );
-    const QString label = QStringLiteral( "%1: %2 %3" )
-        .arg( md.label )
-        .arg( rawVal, 0, 'f', 1 )
-        .arg( unit );
-
-    // Create graphics items
-    auto *bg   = new QGraphicsRectItem( m_unifiedChart );
-    auto *text = new QGraphicsSimpleTextItem( m_unifiedChart );
-
-    bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
-    bg->setPen( QPen( md.color, 1 ) );
-    bg->setZValue( 95 );
-    text->setBrush( md.color );
-    text->setZValue( 96 );
-    text->setAcceptedMouseButtons( Qt::NoButton );
-
-    text->setText( label );
-
-    constexpr qreal pad = 3.0;
-    const QRectF textRect = text->boundingRect();
-
-    // Stack labels centered on the cursor Y
-    const qreal rowH   = textRect.height() + 2 * pad + 2;
-    const qreal startY = std::max( plotArea.top() + 2,
-                           std::min( scenePos.y() - totalLabels * rowH / 2.0,
-                                     plotArea.bottom() - totalLabels * rowH - 2 ) );
-    const qreal baseY  = startY + labelIndex * rowH;
-    qreal tx = scenePos.x() + 12;
-
-    // If it would overflow the right edge, flip to the left
-    if ( tx + textRect.width() + 2 * pad > plotArea.right() )
-      tx = scenePos.x() - textRect.width() - 2 * pad - 12;
-
-    text->setPos( tx, baseY );
-    bg->setRect( tx - pad, baseY - pad,
-                 textRect.width() + 2 * pad,
-                 textRect.height() + 2 * pad );
-
-    bg->show();
-    text->show();
-
-    m_crosshairLabels.push_back( { bg, text } );
-    ++labelIndex;
-  }
-
-  // Time label — always shown at the bottom of the stack (white)
-  {
-    constexpr qreal pad = 3.0;
-    auto *bg   = new QGraphicsRectItem( m_unifiedChart );
-    auto *text = new QGraphicsSimpleTextItem( m_unifiedChart );
-
-    bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
-    bg->setPen( QPen( QColor( 150, 150, 150 ), 1 ) );
-    bg->setZValue( 95 );
-    text->setBrush( Qt::white );
-    text->setZValue( 96 );
-    text->setAcceptedMouseButtons( Qt::NoButton );
-
-    const QDateTime dt = QDateTime::fromMSecsSinceEpoch( cursorTs );
-    text->setText( dt.toString( "HH:mm:ss" ) );
-
-    const QRectF textRect = text->boundingRect();
-    const qreal rowH   = textRect.height() + 2 * pad + 2;
-    const qreal startY = std::max( plotArea.top() + 2,
-                           std::min( scenePos.y() - totalLabels * rowH / 2.0,
-                                     plotArea.bottom() - totalLabels * rowH - 2 ) );
-    const qreal baseY  = startY + labelIndex * rowH;
-    qreal tx = scenePos.x() + 12;
-    if ( tx + textRect.width() + 2 * pad > plotArea.right() )
-      tx = scenePos.x() - textRect.width() - 2 * pad - 12;
-
-    text->setPos( tx, baseY );
-    bg->setRect( tx - pad, baseY - pad,
-                 textRect.width() + 2 * pad,
-                 textRect.height() + 2 * pad );
-    bg->show();
-    text->show();
-
-    m_crosshairLabels.push_back( { bg, text } );
-  }
-
-  m_crosshairVisible = true;
-}
-
-void MonitorTab::crosshairClick( const QPointF &widgetPos )
-{
-  if ( !m_unifiedSeriesActive || !m_unifiedChart )
-    return;
-
-  const QPointF scenePos = m_unifiedChartView->mapToScene(
-      static_cast< int >( widgetPos.x() ),
-      static_cast< int >( widgetPos.y() ) );
-  const QRectF plotArea = m_unifiedChart->plotArea();
-
-  if ( !plotArea.contains( scenePos ) )
-    return;
-
-  const QPointF dataPos = m_unifiedChart->mapToValue( scenePos );
-  const qint64 cursorTs = static_cast< qint64 >( dataPos.x() );
-
-  if ( static_cast< int >( m_stickyMarks.size() ) >= MAX_STICKY_MARKS )
-    return;
-
-  // Collect all visible metrics at this timestamp
-  std::vector< StickyMetricEntry > entries;
-  qint64 snapTs = cursorTs;
-
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    const auto &md  = kMetrics[ i ];
-    auto &info = m_seriesMap[ md.key ];
-    if ( !info.toggle->isChecked() )
-      continue;
-
-    const auto &buf = info.buffer;
-    if ( buf.isEmpty() )
-      continue;
-
-    // Binary search for the nearest timestamp
-    int lo = 0, hi = buf.size() - 1;
-    while ( lo < hi )
-    {
-      const int mid = lo + ( hi - lo ) / 2;
-      if ( static_cast< qint64 >( buf[ mid ].x() ) < cursorTs )
-        lo = mid + 1;
-      else
-        hi = mid;
-    }
-
-    int bestIdx = lo;
-    if ( lo > 0 )
-    {
-      const qint64 dLo = std::abs( static_cast< qint64 >( buf[ lo ].x() ) - cursorTs );
-      const qint64 dPrev = std::abs( static_cast< qint64 >( buf[ lo - 1 ].x() ) - cursorTs );
-      if ( dPrev < dLo )
-        bestIdx = lo - 1;
-    }
-
-    // Use the first metric's snapped timestamp as the group timestamp
-    if ( entries.empty() )
-      snapTs = static_cast< qint64 >( buf[ bestIdx ].x() );
-
-    entries.push_back( { md.key, buf[ bestIdx ].y() } );
-  }
-
-  if ( !entries.empty() )
-  {
-    const double plotFrac = ( plotArea.height() > 0 )
-        ? ( scenePos.y() - plotArea.top() ) / plotArea.height()
-        : 0.5;
-    addStickyMarkGroup( snapTs, plotFrac, entries );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Ctrl+LMB rubber-band zoom
-// ---------------------------------------------------------------------------
-
-void MonitorTab::applyZoomRect( const QRect &viewportRect )
-{
-  if ( !m_unifiedChart || !m_unifiedXAxis || !m_unifiedYAxis )
-    return;
-
-  // Map viewport corners to scene, then to data coordinates
-  const QPointF topLeft = m_unifiedChartView->mapToScene( viewportRect.topLeft() );
-  const QPointF bottomRight = m_unifiedChartView->mapToScene( viewportRect.bottomRight() );
-
-  const QRectF plotArea = m_unifiedChart->plotArea();
-
-  // Clamp to the plot area
-  const QPointF clampedTL(
-      std::max( topLeft.x(), plotArea.left() ),
-      std::max( topLeft.y(), plotArea.top() ) );
-  const QPointF clampedBR(
-      std::min( bottomRight.x(), plotArea.right() ),
-      std::min( bottomRight.y(), plotArea.bottom() ) );
-
-  const QPointF dataMin = m_unifiedChart->mapToValue( clampedTL );
-  const QPointF dataMax = m_unifiedChart->mapToValue( clampedBR );
-
-  // dataMin.y() is the top of the rect → higher value (Y axis is inverted in screen coords)
-  // dataMax.y() is the bottom of the rect → lower value
-  const qreal yLo = std::min( dataMin.y(), dataMax.y() );
-  const qreal yHi = std::max( dataMin.y(), dataMax.y() );
-  const qint64 tLo = static_cast< qint64 >( std::min( dataMin.x(), dataMax.x() ) );
-  const qint64 tHi = static_cast< qint64 >( std::max( dataMin.x(), dataMax.x() ) );
-
-  // Pause data fetching
-  m_paused = true;
-  if ( m_pauseLabel )
-    m_pauseLabel->setVisible( true );
-
-  // Apply zoomed ranges
-  m_unifiedXAxis->setRange(
-      QDateTime::fromMSecsSinceEpoch( tLo ),
-      QDateTime::fromMSecsSinceEpoch( tHi ) );
-  m_unifiedYAxis->setRange( yLo, yHi );
-
-  m_zoomed = true;
-  updateStickyMarkPositions();
-}
-
-void MonitorTab::resetZoom()
-{
-  if ( !m_unifiedYAxis )
-    return;
-
-  m_unifiedYAxis->setRange( 0, 100 );
-  m_zoomed = false;
-  updateStickyMarkPositions();
-  // The X axis will be restored by updateAxes() on the next tick
-}
-
-// ---------------------------------------------------------------------------
-// Chart setup helpers — attach series to charts
-// ---------------------------------------------------------------------------
-
-void MonitorTab::setupTemperatureChart()
-{
-  m_tempChart = createChart();
-  m_tempXAxis = createXAxis();
-  m_tempYAxis = createYAxis( "Temperature (°C)", 0, 105 );
-  m_tempChart->addAxis( m_tempXAxis, Qt::AlignBottom );
-  m_tempChart->addAxis( m_tempYAxis, Qt::AlignLeft );
-
-  for ( const auto &md : kMetrics )
-  {
-    if ( md.group != MetricGroup::Temp ) continue;
-    auto *s = m_seriesMap[ md.key ].series;
-    m_tempChart->addSeries( s );
-    s->attachAxis( m_tempXAxis );
-    s->attachAxis( m_tempYAxis );
-  }
-  m_tempChartView = createChartView( m_tempChart );
-}
-
-void MonitorTab::setupDutyChart()
-{
-  m_dutyChart = createChart();
-  m_dutyXAxis = createXAxis();
-  m_dutyYAxis = createYAxis( "Fan Duty (%)", 0, 100 );
-  m_dutyChart->addAxis( m_dutyXAxis, Qt::AlignBottom );
-  m_dutyChart->addAxis( m_dutyYAxis, Qt::AlignLeft );
-
-  for ( const auto &md : kMetrics )
-  {
-    if ( md.group != MetricGroup::Duty ) continue;
-    auto *s = m_seriesMap[ md.key ].series;
-    m_dutyChart->addSeries( s );
-    s->attachAxis( m_dutyXAxis );
-    s->attachAxis( m_dutyYAxis );
-  }
-  m_dutyChartView = createChartView( m_dutyChart );
-}
-
-void MonitorTab::setupPowerChart()
-{
-  m_powerChart = createChart();
-  m_powerXAxis = createXAxis();
-  m_powerYAxis = createYAxis( QStringLiteral( "Power (W)" ), 0, m_maxPowerW );
-  m_powerChart->addAxis( m_powerXAxis, Qt::AlignBottom );
-  m_powerChart->addAxis( m_powerYAxis, Qt::AlignLeft );
-
-  for ( const auto &md : kMetrics )
-  {
-    if ( md.group != MetricGroup::Power ) continue;
-    auto *s = m_seriesMap[ md.key ].series;
-    m_powerChart->addSeries( s );
-    s->attachAxis( m_powerXAxis );
-    s->attachAxis( m_powerYAxis );
-  }
-  m_powerChartView = createChartView( m_powerChart );
-}
-
-void MonitorTab::setupFrequencyChart()
-{
-  m_freqChart = createChart();
-  m_freqXAxis = createXAxis();
-  m_freqYAxis = createYAxis( "Frequency (MHz)", 0, 6000 );
-  m_freqChart->addAxis( m_freqXAxis, Qt::AlignBottom );
-  m_freqChart->addAxis( m_freqYAxis, Qt::AlignLeft );
-
-  for ( const auto &md : kMetrics )
-  {
-    if ( md.group != MetricGroup::Freq ) continue;
-    auto *s = m_seriesMap[ md.key ].series;
-    m_freqChart->addSeries( s );
-    s->attachAxis( m_freqXAxis );
-    s->attachAxis( m_freqYAxis );
-  }
-  m_freqChartView = createChartView( m_freqChart );
-}
-
-void MonitorTab::setupVoltageChart()
-{
-  m_voltChart = createChart();
-  m_voltXAxis = createXAxis();
-  m_voltYAxis = createYAxis( "Core Voltage (mV)", 0, 1500 );
-  m_voltChart->addAxis( m_voltXAxis, Qt::AlignBottom );
-  m_voltChart->addAxis( m_voltYAxis, Qt::AlignLeft );
-
-  for ( const auto &md : kMetrics )
-  {
-    if ( md.group != MetricGroup::Volt ) continue;
-    auto *s = m_seriesMap[ md.key ].series;
-    m_voltChart->addSeries( s );
-    s->attachAxis( m_voltXAxis );
-    s->attachAxis( m_voltYAxis );
-  }
-  m_voltChartView = createChartView( m_voltChart );
-}
-
-void MonitorTab::setupFpsChart()
-{
-  m_fpsChart = createChart();
-  m_fpsXAxis = createXAxis();
-  m_fpsYAxis = createYAxis( "FPS", 0, 300 );
-  m_fpsChart->addAxis( m_fpsXAxis, Qt::AlignBottom );
-  m_fpsChart->addAxis( m_fpsYAxis, Qt::AlignLeft );
-
-  for ( const auto &md : kMetrics )
-  {
-    if ( md.group != MetricGroup::Fps ) continue;
-    auto *s = m_seriesMap[ md.key ].series;
-    m_fpsChart->addSeries( s );
-    s->attachAxis( m_fpsXAxis );
-    s->attachAxis( m_fpsYAxis );
-  }
-  m_fpsChartView = createChartView( m_fpsChart );
-}
-
-// ---------------------------------------------------------------------------
-// Incremental data fetch
+// Data fetching
 // ---------------------------------------------------------------------------
 
 void MonitorTab::fetchData()
 {
-  if ( !m_client || m_paused )
-    return;
+    if ( !m_client || m_paused )
+        return;
 
-  ++m_fpsSourceRefreshTicks;
-  if ( m_fpsSourceRefreshTicks % 5 == 0 )
-    refreshFpsSourceControls();
+    ++m_fpsSourceRefreshTicks;
+    if ( m_fpsSourceRefreshTicks % 5 == 0 )
+        refreshFpsSourceControls();
 
-  auto result = m_client->getMonitorDataSince( m_lastTimestamp );
-  if ( !result.has_value() || result->isEmpty() )
-    return;
+    auto result = m_client->getMonitorDataSince( m_lastTimestamp );
+    if ( !result.has_value() || result->isEmpty() )
+        return;
 
-  // ── Suspend painting on ALL chart views during the batch update ────
-  m_tempChartView->setUpdatesEnabled( false );
-  m_dutyChartView->setUpdatesEnabled( false );
-  m_powerChartView->setUpdatesEnabled( false );
-  m_freqChartView->setUpdatesEnabled( false );
-  m_voltChartView->setUpdatesEnabled( false );
-  m_fpsChartView->setUpdatesEnabled( false );
-  m_unifiedChartView->setUpdatesEnabled( false );
+    m_chartView->setUpdatesEnabled( false );
 
-  applyBinaryData( *result );
-  trimSeries();
-  commitSeries();
-  updateAxes();
-  updateStickyMarkPositions();
+    applyBinaryData( *result );
+    trimSeries();
+    commitSeries();
+    updateAxes();
+    updateYRange();
 
-  // ── Resume painting — triggers a single composite repaint ─────────
-  m_tempChartView->setUpdatesEnabled( true );
-  m_dutyChartView->setUpdatesEnabled( true );
-  m_powerChartView->setUpdatesEnabled( true );
-  m_freqChartView->setUpdatesEnabled( true );
-  m_voltChartView->setUpdatesEnabled( true );
-  m_fpsChartView->setUpdatesEnabled( true );
-  m_unifiedChartView->setUpdatesEnabled( true );
+    m_chartView->setUpdatesEnabled( true );
 
-  // Refresh floating crosshair labels so they don't lag behind the scrolling data
-  if ( m_cursorInPlot )
-    updateCrosshair( m_lastCrosshairPos, m_annotationsVisible );
-}
-
-// ---------------------------------------------------------------------------
-// Pause / resume via spacebar
-// ---------------------------------------------------------------------------
-
-void MonitorTab::keyPressEvent( QKeyEvent *event )
-{
-  if ( event->key() == Qt::Key_Space )
-  {
-    m_paused = !m_paused;
-    if ( !m_paused && m_zoomed )
-      resetZoom();
-    if ( m_pauseLabel )
-    {
-      m_pauseLabel->setVisible( m_paused );
-    }
-    event->accept();
-    return;
-  }
-
-  QWidget::keyPressEvent( event );
+    if ( m_cursorInPlot )
+        updateCrosshair( m_lastCrosshairPos, true );
 }
 
 void MonitorTab::applyBinaryData( const QByteArray &data )
 {
-  // Wire layout (native endian — same-host IPC):
-  //   per non-empty metric: uint8_t metricId, uint32_t count,
-  //                         count × { int64_t timestampMs, double value }  (16 bytes each)
-  //
-  // Points are appended to in-memory buffers only.  The actual QLineSeries
-  // objects are updated in commitSeries() via a single replace() call,
-  // which emits exactly one signal per series instead of one per append +
-  // one per trim.
+    // Wire layout (native endian -- same-host IPC):
+    //   per non-empty metric:
+    //     uint16_t keyLen, char key[keyLen], uint32_t count,
+    //     count x { int64_t timestampMs, double value }  (16 bytes each)
 
-  static constexpr size_t kPointSize = sizeof( int64_t ) + sizeof( double );  // 16
+    static constexpr size_t kPointSize = sizeof( int64_t ) + sizeof( double );  // 16
 
-  const auto *p   = reinterpret_cast< const uint8_t * >( data.constData() );
-  const auto *end = p + data.size();
-  qint64 maxTs = m_lastTimestamp;
+    const auto *p   = reinterpret_cast< const uint8_t * >( data.constData() );
+    const auto *end = p + data.size();
+    qint64 maxTs = m_lastTimestamp;
 
-  while ( p < end )
-  {
-    if ( p + 1 + sizeof( uint32_t ) > end )
-      break;
-
-    const uint8_t metricId = *p++;
-
-    uint32_t count = 0;
-    std::memcpy( &count, p, sizeof( count ) );
-    p += sizeof( count );
-
-    if ( p + static_cast< size_t >( count ) * kPointSize > end )
-      break;
-
-    const bool valid = ( metricId < METRIC_COUNT )
-                       && ( m_seriesMap.count( kMetrics[ metricId ].key ) > 0 );
-
-    for ( uint32_t j = 0; j < count; ++j )
+    while ( p < end )
     {
-      int64_t ts  = 0;
-      double  val = 0.0;
-      std::memcpy( &ts,  p,             sizeof( ts ) );
-      std::memcpy( &val, p + sizeof(ts), sizeof( val ) );
-      p += kPointSize;
+        // Read key length
+        if ( p + sizeof( uint16_t ) > end )
+            break;
+        uint16_t keyLen = 0;
+        std::memcpy( &keyLen, p, sizeof( keyLen ) );
+        p += sizeof( keyLen );
 
-      if ( valid )
-      {
-        m_seriesMap[ kMetrics[ metricId ].key ].buffer.append(
-            QPointF( static_cast< qreal >( ts ), val ) );
-        if ( ts > maxTs )
-          maxTs = ts;
-      }
+        // Read key string
+        if ( p + keyLen > end )
+            break;
+        std::string key( reinterpret_cast< const char * >( p ), keyLen );
+        p += keyLen;
+
+        // Read count
+        if ( p + sizeof( uint32_t ) > end )
+            break;
+        uint32_t count = 0;
+        std::memcpy( &count, p, sizeof( count ) );
+        p += sizeof( count );
+
+        if ( p + static_cast< size_t >( count ) * kPointSize > end )
+            break;
+
+        // Only append to series we are actively tracking
+        const bool tracked = ( m_seriesMap.count( key ) > 0 );
+
+        for ( uint32_t j = 0; j < count; ++j )
+        {
+            int64_t ts  = 0;
+            double  val = 0.0;
+            std::memcpy( &ts,  p,              sizeof( ts ) );
+            std::memcpy( &val, p + sizeof(ts), sizeof( val ) );
+            p += kPointSize;
+
+            if ( tracked )
+            {
+                m_seriesMap[ key ].buffer.append(
+                    QPointF( static_cast< qreal >( ts ), val ) );
+                if ( ts > maxTs )
+                    maxTs = ts;
+            }
+        }
     }
-  }
 
-  // Advance cursor so the next fetch only returns new points.
-  if ( maxTs > m_lastTimestamp )
-    m_lastTimestamp = maxTs + 1;
+    if ( maxTs > m_lastTimestamp )
+        m_lastTimestamp = maxTs + 1;
 }
 
 void MonitorTab::trimSeries()
 {
-  const qint64 now = QDateTime::currentMSecsSinceEpoch();
-  const qreal cutoff = static_cast< qreal >( now - static_cast< qint64 >( m_windowSeconds ) * 1000 );
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qreal cutoff = static_cast< qreal >( now - static_cast< qint64 >( m_windowSeconds ) * 1000 );
 
-  // Trim leading stale points from in-memory buffers only.
-  // The QLineSeries objects are updated in commitSeries().
-  for ( auto &[key, info] : m_seriesMap )
-  {
-    auto &buf = info.buffer;
-    int stale = 0;
-    while ( stale < buf.size() && buf[ stale ].x() < cutoff )
-      ++stale;
-    if ( stale > 0 )
-      buf.remove( 0, stale );
-  }
+    for ( auto &[key, info] : m_seriesMap )
+    {
+        auto &buf = info.buffer;
+        int stale = 0;
+        while ( stale < buf.size() && buf[ stale ].x() < cutoff )
+            ++stale;
+        if ( stale > 0 )
+            buf.remove( 0, stale );
+    }
 }
 
 void MonitorTab::commitSeries()
 {
-  // Push in-memory buffers into QLineSeries via a single replace() call.
-  // This emits exactly ONE pointsReplaced signal per series, instead of
-  // separate pointsAdded + pointsRemoved signals from append() + removePoints().
-
-  for ( int i = 0; i < METRIC_COUNT; ++i )
-  {
-    auto &info = m_seriesMap[ kMetrics[ i ].key ];
-    info.series->replace( info.buffer );
-
-    // Update unified shadow series if active — build normalised list on the fly
-    QVariant uv = info.series->property( "_uniSeries" );
-    if ( uv.isValid() )
-    {
-      auto *uni = qobject_cast< QLineSeries * >( uv.value< QObject * >() );
-      if ( uni )
-      {
-        const double scale = metricToNormalisedScale( kMetrics[ i ].group );
-        QList< QPointF > scaled;
-        scaled.reserve( info.buffer.size() );
-        for ( const auto &pt : info.buffer )
-          scaled.append( QPointF( pt.x(), pt.y() * scale ) );
-        uni->replace( scaled );
-      }
-    }
-  }
+    for ( auto &[key, info] : m_seriesMap )
+        info.series->replace( info.buffer );
 }
 
 void MonitorTab::updateAxes()
 {
-  const QDateTime now = QDateTime::currentDateTime();
-  const QDateTime start = now.addSecs( -m_windowSeconds );
+    if ( m_zoomed )
+        return;
 
-  // Only update axes for the currently visible chart view — the invisible
-  // ones will be updated when they become visible again.
-  const bool perGroup = ( m_chartStack->currentIndex() == 0 );
-
-  if ( perGroup )
-  {
-    auto setRange = [&]( QDateTimeAxis *axis ) {
-      if ( axis ) axis->setRange( start, now );
-    };
-    setRange( m_tempXAxis );
-    setRange( m_dutyXAxis );
-    setRange( m_powerXAxis );
-    setRange( m_freqXAxis );
-    setRange( m_voltXAxis );
-    setRange( m_fpsXAxis );
-  }
-  else
-  {
-    if ( m_unifiedXAxis && !m_zoomed )
-      m_unifiedXAxis->setRange( start, now );
-  }
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime start = now.addSecs( -m_windowSeconds );
+    m_xAxis->setRange( start, now );
 }
 
-// ---------------------------------------------------------------------------
-// Group chart visibility — hide empty groups, stretch remaining
-// ---------------------------------------------------------------------------
-
-void MonitorTab::updateGroupChartVisibility()
+void MonitorTab::updateYRange()
 {
-  // Map each MetricGroup to its per-group chart view
-  const std::pair< MetricGroup, QChartView * > groupViews[] = {
-    { MetricGroup::Temp,  m_tempChartView  },
-    { MetricGroup::Duty,  m_dutyChartView  },
-    { MetricGroup::Power, m_powerChartView },
-    { MetricGroup::Freq,  m_freqChartView  },
-    { MetricGroup::Volt,  m_voltChartView  },
-    { MetricGroup::Fps,   m_fpsChartView   },
-  };
+    if ( m_zoomed )
+        return;
 
-  for ( const auto &[group, view] : groupViews )
-  {
-    bool anyEnabled = false;
-    for ( int i = 0; i < METRIC_COUNT; ++i )
+    // Compute Y range from all visible series
+    double yMin = std::numeric_limits< double >::max();
+    double yMax = std::numeric_limits< double >::lowest();
+    bool anyData = false;
+
+    for ( const auto &[key, info] : m_seriesMap )
     {
-      if ( kMetrics[ i ].group == group )
-      {
-        auto it = m_seriesMap.find( kMetrics[ i ].key );
-        if ( it != m_seriesMap.end() && it->second.toggle->isChecked() )
+        if ( !info.series->isVisible() || info.buffer.isEmpty() )
+            continue;
+
+        for ( const auto &pt : info.buffer )
         {
-          anyEnabled = true;
-          break;
+            if ( pt.y() < yMin ) yMin = pt.y();
+            if ( pt.y() > yMax ) yMax = pt.y();
+            anyData = true;
         }
-      }
     }
-    view->setVisible( anyEnabled );
-  }
+
+    if ( !anyData )
+    {
+        m_yAxis->setRange( 0, 100 );
+        return;
+    }
+
+    // Add 10% padding
+    const double range = yMax - yMin;
+    const double pad = ( range > 0 ) ? range * 0.1 : 10.0;
+    m_yAxis->setRange( std::max( 0.0, yMin - pad ), yMax + pad );
 }
 
-void MonitorTab::saveCheckboxStates()
+// ---------------------------------------------------------------------------
+// Time window
+// ---------------------------------------------------------------------------
+
+void MonitorTab::setTimeWindow( int seconds )
 {
-  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-  settings.beginGroup( "MonitorTab" );
+    m_windowSeconds = std::clamp( seconds, 60, 1800 );
 
-  // Save individual metric visibility states
-  for ( const auto &[key, info] : m_seriesMap )
-  {
-    settings.setValue( QString::fromStdString( key ), info.toggle->isChecked() );
-  }
+    if ( auto *mw = qobject_cast< QMainWindow * >( window() ) )
+    {
+        const int mins = m_windowSeconds / 60;
+        const int secs = m_windowSeconds % 60;
+        QString text;
+        if ( secs == 0 )
+            text = QStringLiteral( "Time window: %1 min" ).arg( mins );
+        else
+            text = QStringLiteral( "Time window: %1:%2" )
+                .arg( mins ).arg( secs, 2, 10, QLatin1Char( '0' ) );
+        mw->statusBar()->showMessage( text, 3000 );
+    }
 
-  // Save unified mode checkbox state
-  settings.setValue( "UnifiedMode", m_unifiedCheckBox->isChecked() );
+    if ( m_paused )
+    {
+        updateAxes();
+    }
+    else
+    {
+        for ( auto &[key, info] : m_seriesMap )
+        {
+            info.buffer.clear();
+            info.series->clear();
+        }
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
+        fetchData();
+        updateAxes();
+    }
 
-  settings.endGroup();
-  settings.sync();
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    settings.beginGroup( "MonitorTab" );
+    settings.setValue( "TimeWindowSeconds", m_windowSeconds );
+    settings.endGroup();
+    settings.sync();
 }
 
-void MonitorTab::loadCheckboxStates()
+// ---------------------------------------------------------------------------
+// Keyboard and mouse events
+// ---------------------------------------------------------------------------
+
+void MonitorTab::keyPressEvent( QKeyEvent *event )
 {
-  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-  settings.beginGroup( "MonitorTab" );
+    if ( event->key() == Qt::Key_Space )
+    {
+        m_paused = !m_paused;
+        if ( !m_paused && m_zoomed )
+            resetZoom();
+        if ( m_pauseLabel )
+            m_pauseLabel->setVisible( m_paused );
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent( event );
+}
 
-  // Load individual metric visibility states (default to checked)
-  for ( auto &[key, info] : m_seriesMap )
-  {
-    const bool checked = settings.value( QString::fromStdString( key ), true ).toBool();
-    info.toggle->setChecked( checked );
-  }
+void MonitorTab::wheelEvent( QWheelEvent *event )
+{
+    if ( event->modifiers() & Qt::ControlModifier )
+    {
+        const int delta = event->angleDelta().y();
+        if ( delta > 0 )
+            setTimeWindow( m_windowSeconds - 30 );
+        else if ( delta < 0 )
+            setTimeWindow( m_windowSeconds + 30 );
+        event->accept();
+        return;
+    }
+    QWidget::wheelEvent( event );
+}
 
-  // Load time window in seconds (default 5 min = 300s)
-  m_windowSeconds = std::clamp( settings.value( "TimeWindowSeconds", 300 ).toInt(), 60, 1800 );
+bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
+{
+    if ( watched != m_chartView->viewport() )
+        return QWidget::eventFilter( watched, event );
 
-  // Load unified mode checkbox state (default to false)
-  const bool unifiedMode = settings.value( "UnifiedMode", false ).toBool();
-  m_unifiedCheckBox->setChecked( unifiedMode );
+    switch ( event->type() )
+    {
+        case QEvent::MouseMove:
+        {
+            auto *me = static_cast< QMouseEvent * >( event );
+            m_lastCrosshairPos = me->pos();
+            m_cursorInPlot = true;
+            updateCrosshair( me->pos(), true );
+            break;
+        }
+        case QEvent::MouseButtonPress:
+        {
+            auto *me = static_cast< QMouseEvent * >( event );
 
-  settings.endGroup();
+            // Ctrl+LMB starts rubber-band zoom
+            if ( me->button() == Qt::LeftButton
+                 && ( me->modifiers() & Qt::ControlModifier ) )
+            {
+                m_zoomOrigin = me->pos();
+                if ( !m_zoomBand )
+                    m_zoomBand = new QRubberBand( QRubberBand::Rectangle, m_chartView->viewport() );
+                m_zoomBand->setGeometry( QRect( m_zoomOrigin, QSize() ) );
+                m_zoomBand->show();
+                m_zoomDragging = true;
+                return true;
+            }
+            break;
+        }
+        case QEvent::MouseButtonRelease:
+        {
+            auto *me = static_cast< QMouseEvent * >( event );
+
+            if ( me->button() == Qt::LeftButton && m_zoomDragging )
+            {
+                m_zoomDragging = false;
+                if ( m_zoomBand )
+                    m_zoomBand->hide();
+                const QRect rect = QRect( m_zoomOrigin, me->pos() ).normalized();
+                if ( rect.width() > 4 && rect.height() > 4 )
+                    applyZoomRect( rect );
+                return true;
+            }
+            break;
+        }
+        case QEvent::MouseButtonDblClick:
+        {
+            // Double-click to reset zoom
+            if ( m_zoomed )
+            {
+                resetZoom();
+                m_paused = false;
+                if ( m_pauseLabel )
+                    m_pauseLabel->hide();
+                return true;
+            }
+            break;
+        }
+        case QEvent::Leave:
+            m_cursorInPlot = false;
+            hideCrosshair();
+            break;
+        default:
+            break;
+    }
+
+    return QWidget::eventFilter( watched, event );
+}
+
+// ---------------------------------------------------------------------------
+// Crosshair
+// ---------------------------------------------------------------------------
+
+void MonitorTab::hideCrosshair()
+{
+    if ( m_crosshairLine )
+        m_crosshairLine->hide();
+
+    for ( auto &cl : m_crosshairLabels )
+    {
+        delete cl.bg;
+        delete cl.text;
+    }
+    m_crosshairLabels.clear();
+    m_crosshairVisible = false;
+}
+
+void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
+{
+    if ( !m_chart )
+    {
+        hideCrosshair();
+        return;
+    }
+
+    const QPointF scenePos = m_chartView->mapToScene(
+        static_cast< int >( widgetPos.x() ),
+        static_cast< int >( widgetPos.y() ) );
+    const QRectF plotArea = m_chart->plotArea();
+
+    if ( !plotArea.contains( scenePos ) )
+    {
+        hideCrosshair();
+        return;
+    }
+
+    m_crosshairLine->setLine( scenePos.x(), plotArea.top(),
+                               scenePos.x(), plotArea.bottom() );
+    m_crosshairLine->show();
+
+    // Clean up old labels
+    for ( auto &cl : m_crosshairLabels )
+    {
+        delete cl.bg;
+        delete cl.text;
+    }
+    m_crosshairLabels.clear();
+
+    if ( !ctrlHeld )
+    {
+        m_crosshairVisible = true;
+        return;
+    }
+
+    const QPointF dataPos = m_chart->mapToValue( scenePos );
+    const qint64 cursorTs = static_cast< qint64 >( dataPos.x() );
+
+    // Count visible metrics with data + 1 for the timestamp label
+    int totalLabels = 1;
+    for ( const auto &[key, info] : m_seriesMap )
+    {
+        if ( info.series->isVisible() && !info.buffer.isEmpty() )
+            ++totalLabels;
+    }
+
+    int labelIndex = 0;
+
+    for ( const auto &[key, info] : m_seriesMap )
+    {
+        if ( !info.series->isVisible() || info.buffer.isEmpty() )
+            continue;
+
+        // Binary search for nearest point
+        const auto &buf = info.buffer;
+        int lo = 0, hi = buf.size() - 1;
+        while ( lo < hi )
+        {
+            const int mid = lo + ( hi - lo ) / 2;
+            if ( static_cast< qint64 >( buf[ mid ].x() ) < cursorTs )
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        int bestIdx = lo;
+        if ( lo > 0 )
+        {
+            const qint64 dLo = std::abs( static_cast< qint64 >( buf[ lo ].x() ) - cursorTs );
+            const qint64 dPrev = std::abs( static_cast< qint64 >( buf[ lo - 1 ].x() ) - cursorTs );
+            if ( dPrev < dLo )
+                bestIdx = lo - 1;
+        }
+
+        const double rawVal = buf[ bestIdx ].y();
+
+        const QString lbl = info.unit.isEmpty()
+            ? QStringLiteral( "%1: %2" ).arg( info.label ).arg( rawVal, 0, 'f', 1 )
+            : QStringLiteral( "%1: %2 %3" ).arg( info.label ).arg( rawVal, 0, 'f', 1 ).arg( info.unit );
+
+        auto *bg   = new QGraphicsRectItem( m_chart );
+        auto *text = new QGraphicsSimpleTextItem( m_chart );
+
+        bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
+        bg->setPen( QPen( info.color, 1 ) );
+        bg->setZValue( 95 );
+        text->setBrush( info.color );
+        text->setZValue( 96 );
+        text->setAcceptedMouseButtons( Qt::NoButton );
+        text->setText( lbl );
+
+        constexpr qreal pad = 3.0;
+        const QRectF textRect = text->boundingRect();
+        const qreal rowH   = textRect.height() + 2 * pad + 2;
+        const qreal startY = std::max( plotArea.top() + 2,
+                               std::min( scenePos.y() - totalLabels * rowH / 2.0,
+                                         plotArea.bottom() - totalLabels * rowH - 2 ) );
+        const qreal baseY  = startY + labelIndex * rowH;
+        qreal tx = scenePos.x() + 12;
+        if ( tx + textRect.width() + 2 * pad > plotArea.right() )
+            tx = scenePos.x() - textRect.width() - 2 * pad - 12;
+
+        text->setPos( tx, baseY );
+        bg->setRect( tx - pad, baseY - pad,
+                     textRect.width() + 2 * pad,
+                     textRect.height() + 2 * pad );
+        bg->show();
+        text->show();
+
+        m_crosshairLabels.push_back( { bg, text } );
+        ++labelIndex;
+    }
+
+    // Timestamp label at the bottom of the stack
+    {
+        constexpr qreal pad = 3.0;
+        auto *bg   = new QGraphicsRectItem( m_chart );
+        auto *text = new QGraphicsSimpleTextItem( m_chart );
+
+        bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
+        bg->setPen( QPen( QColor( 150, 150, 150 ), 1 ) );
+        bg->setZValue( 95 );
+        text->setBrush( Qt::white );
+        text->setZValue( 96 );
+        text->setAcceptedMouseButtons( Qt::NoButton );
+
+        const QDateTime dt = QDateTime::fromMSecsSinceEpoch( cursorTs );
+        text->setText( dt.toString( "HH:mm:ss" ) );
+
+        const QRectF textRect = text->boundingRect();
+        const qreal rowH   = textRect.height() + 2 * pad + 2;
+        const qreal startY = std::max( plotArea.top() + 2,
+                               std::min( scenePos.y() - totalLabels * rowH / 2.0,
+                                         plotArea.bottom() - totalLabels * rowH - 2 ) );
+        const qreal baseY  = startY + labelIndex * rowH;
+        qreal tx = scenePos.x() + 12;
+        if ( tx + textRect.width() + 2 * pad > plotArea.right() )
+            tx = scenePos.x() - textRect.width() - 2 * pad - 12;
+
+        text->setPos( tx, baseY );
+        bg->setRect( tx - pad, baseY - pad,
+                     textRect.width() + 2 * pad,
+                     textRect.height() + 2 * pad );
+        bg->show();
+        text->show();
+
+        m_crosshairLabels.push_back( { bg, text } );
+    }
+
+    m_crosshairVisible = true;
+}
+
+// ---------------------------------------------------------------------------
+// Zoom
+// ---------------------------------------------------------------------------
+
+void MonitorTab::applyZoomRect( const QRect &viewportRect )
+{
+    if ( !m_chart || !m_xAxis || !m_yAxis )
+        return;
+
+    const QPointF topLeft = m_chartView->mapToScene( viewportRect.topLeft() );
+    const QPointF bottomRight = m_chartView->mapToScene( viewportRect.bottomRight() );
+    const QRectF plotArea = m_chart->plotArea();
+
+    const QPointF clampedTL(
+        std::max( topLeft.x(), plotArea.left() ),
+        std::max( topLeft.y(), plotArea.top() ) );
+    const QPointF clampedBR(
+        std::min( bottomRight.x(), plotArea.right() ),
+        std::min( bottomRight.y(), plotArea.bottom() ) );
+
+    const QPointF dataMin = m_chart->mapToValue( clampedTL );
+    const QPointF dataMax = m_chart->mapToValue( clampedBR );
+
+    const qreal yLo = std::min( dataMin.y(), dataMax.y() );
+    const qreal yHi = std::max( dataMin.y(), dataMax.y() );
+    const qint64 tLo = static_cast< qint64 >( std::min( dataMin.x(), dataMax.x() ) );
+    const qint64 tHi = static_cast< qint64 >( std::max( dataMin.x(), dataMax.x() ) );
+
+    m_paused = true;
+    if ( m_pauseLabel )
+        m_pauseLabel->setVisible( true );
+
+    m_xAxis->setRange(
+        QDateTime::fromMSecsSinceEpoch( tLo ),
+        QDateTime::fromMSecsSinceEpoch( tHi ) );
+    m_yAxis->setRange( yLo, yHi );
+
+    m_zoomed = true;
+}
+
+void MonitorTab::resetZoom()
+{
+    m_zoomed = false;
+    updateYRange();
+}
+
+// ---------------------------------------------------------------------------
+// Settings persistence
+// ---------------------------------------------------------------------------
+
+void MonitorTab::saveSourceSelection()
+{
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    settings.beginGroup( "MonitorTab" );
+
+    // Save as a list of key|checked pairs
+    QStringList entries;
+    for ( const auto &row : m_sourceRows )
+    {
+        if ( !row.activeKey.empty() )
+        {
+            const QString entry = QStringLiteral( "%1|%2" )
+                .arg( QString::fromStdString( row.activeKey ) )
+                .arg( row.checkbox && row.checkbox->isChecked() ? "1" : "0" );
+            entries.append( entry );
+        }
+    }
+    settings.setValue( "SelectedSources", entries );
+    settings.setValue( "TimeWindowSeconds", m_windowSeconds );
+    settings.endGroup();
+    settings.sync();
+}
+
+void MonitorTab::loadSourceSelection()
+{
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    settings.beginGroup( "MonitorTab" );
+
+    m_windowSeconds = std::clamp( settings.value( "TimeWindowSeconds", 300 ).toInt(), 60, 1800 );
+
+    const QStringList entries = settings.value( "SelectedSources" ).toStringList();
+    for ( const QString &entry : entries )
+    {
+        const auto parts = entry.split( '|' );
+        if ( parts.size() >= 1 )
+        {
+            const std::string key = parts[0].toStdString();
+            const bool checked = ( parts.size() >= 2 ) ? ( parts[1] == "1" ) : true;
+            addSourceRow( key );
+            if ( !m_sourceRows.empty() && m_sourceRows.back().checkbox )
+                m_sourceRows.back().checkbox->setChecked( checked );
+        }
+    }
+
+    settings.endGroup();
 }
 
 } // namespace ucc

@@ -33,7 +33,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsLineItem>
 #include <QLabel>
-#include <QStackedWidget>
+#include <QScrollArea>
 #include <QSettings>
 #include <QStatusBar>
 #include <QKeyEvent>
@@ -50,23 +50,11 @@ namespace ucc
 class UccdClient;
 
 /**
- * @brief Metric group categories for normalisation and colouring
- */
-enum class MetricGroup
-{
-  Temp,   ///< Temperature (°C)
-  Duty,   ///< Fan duty cycle (%)
-  Power,  ///< Power consumption (W)
-  Freq,   ///< Clock frequency (MHz)
-  Volt,   ///< Core voltage (mV)
-  Fps     ///< Frames per second
-};
-
-/**
  * @brief Monitoring tab with real-time hardware graphs.
  *
- * Periodically fetches incremental metric data from the daemon via
- * UccdClient::getMonitorDataSince() and plots it on dual-Y-axis charts.
+ * Dynamically discovers available monitoring sources (sensors, thermal
+ * sources, fan/pump RPMs, legacy metrics) from the daemon and lets the
+ * user choose which ones to plot via combo-box + checkbox selectors.
  */
 class MonitorTab : public QWidget
 {
@@ -90,29 +78,29 @@ private slots:
 private:
   // --- Setup helpers ---
   void setupUI();
-  void setupTemperatureChart();
-  void setupDutyChart();
-  void setupPowerChart();
-  void setupFrequencyChart();
-  void setupVoltageChart();
-  void setupFpsChart();
+  void setupChart();
   void setupControls();
   void refreshFpsSourceControls();
-  void setupUnifiedChart();
 
   /** Apply a new time window (clears series, re-fetches, updates label). */
   void setTimeWindow( int seconds );
 
-  /** Toggle between per-group charts and a single unified chart. */
-  void setUnifiedMode( bool unified );
+  /** Fetch available sources from daemon and populate the combo box. */
+  void refreshAvailableSources();
 
-  /** Create shadow series for unified chart (lazy, on-demand). */
-  void createUnifiedSeries();
+  /** Add a new source row (combo + checkbox) to the selector panel. */
+  void addSourceRow( const std::string &key = {} );
 
-  /** Destroy shadow series for unified chart (reclaim memory). */
-  void destroyUnifiedSeries();
+  /** Remove a source row and its series from the chart. */
+  void removeSourceRow( int row );
 
-  /** Install hover callout on every series in the given chart view. */
+  /** Ensure a series exists for the given key; create if needed. */
+  void ensureSeries( const std::string &key );
+
+  /** Remove a series and its data for the given key. */
+  void removeSeries( const std::string &key );
+
+  /** Install hover callout on the chart. */
   void installHoverCallout( QChart *chart );
 
   /** Show/hide the hover callout for a data point on a series. */
@@ -125,79 +113,65 @@ private:
   /** Push in-memory buffers into QLineSeries via replace() (single repaint per series). */
   void commitSeries();
 
-  /** Hide per-group chart views when all metrics in that group are disabled. */
-  void updateGroupChartVisibility();
+  /** Save selected sources to ~/.config/uccrc. */
+  void saveSourceSelection();
 
-  /** Save metric visibility checkboxes to ~/.config/uccrc. */
-  void saveCheckboxStates();
-
-  /** Load metric visibility checkboxes from ~/.config/uccrc. */
-  void loadCheckboxStates();
-
-  /** Initialize m_maxPowerW from hardware TDP and GPU limits. */
-  void initializeMaxPowerFromHardware();
+  /** Load selected sources from ~/.config/uccrc. */
+  void loadSourceSelection();
 
   /** Trim series points that fall outside the visible time window. */
   void trimSeries();
 
-  /** Normalise a metric group value to [0, 100] for unified chart display. */
-  double metricToNormalisedScale( MetricGroup g );
-
-  /** Undo normalisation to restore real value (inverse operation). */
-  double metricFromNormalisedScale( double normalisedValue, MetricGroup g );
-
   /** Update the X-axis range to [now - window, now]. */
   void updateAxes();
 
-  // --- Data model ---
-  struct SeriesInfo
+  /** Update the Y-axis range based on visible data. */
+  void updateYRange();
+
+  /** Pick a colour for a new series (cycling palette). */
+  QColor nextColor();
+
+  // --- Source metadata (from daemon) ---
+  struct SourceDef
   {
-    QLineSeries    *series = nullptr;
-    QCheckBox      *toggle = nullptr;
-    QString         label;
-    QColor          color;
-    QList< QPointF > buffer;   ///< In-memory point buffer (source of truth)
+    std::string key;     ///< Metric store key (e.g. "sensor:hwmon3_temp1", "fan:hwmon3_fan1")
+    std::string label;   ///< Human-readable label
+    std::string group;   ///< Category: "sensor", "thermal", "fan", "legacy"
+    std::string unit;    ///< Display unit: "°C", "RPM", "%", "W", "MHz", "mV", "fps"
   };
 
-  // One entry per metric key string (e.g. "cpuTemp")
+  std::vector< SourceDef > m_availableSources;   ///< All sources from daemon
+
+  // --- Active series ---
+  struct SeriesInfo
+  {
+    QLineSeries        *series = nullptr;
+    QString             label;
+    QColor              color;
+    QString             unit;
+    QList< QPointF >    buffer;   ///< In-memory point buffer (source of truth)
+  };
+
   std::map< std::string, SeriesInfo > m_seriesMap;
 
-  // --- Charts ---
-  QChart *m_tempChart     = nullptr;
-  QChart *m_dutyChart     = nullptr;
-  QChart *m_powerChart    = nullptr;
-  QChart *m_freqChart     = nullptr;
-  QChart *m_voltChart     = nullptr;
-  QChart *m_fpsChart      = nullptr;
+  // --- Source selector rows ---
+  struct SourceRow
+  {
+    QComboBox  *combo    = nullptr;
+    QCheckBox  *checkbox = nullptr;
+    QPushButton *removeBtn = nullptr;
+    std::string  activeKey;   ///< Currently selected key (empty = none)
+  };
 
-  QChartView *m_tempChartView  = nullptr;
-  QChartView *m_dutyChartView  = nullptr;
-  QChartView *m_powerChartView = nullptr;
-  QChartView *m_freqChartView  = nullptr;
-  QChartView *m_voltChartView  = nullptr;
-  QChartView *m_fpsChartView   = nullptr;
+  std::vector< SourceRow > m_sourceRows;
+  QVBoxLayout *m_selectorLayout = nullptr;  ///< Layout holding source rows
+  QPushButton *m_addSourceBtn   = nullptr;  ///< "Add Source" button
 
-  QDateTimeAxis *m_tempXAxis  = nullptr;
-  QDateTimeAxis *m_dutyXAxis  = nullptr;
-  QDateTimeAxis *m_powerXAxis = nullptr;
-  QDateTimeAxis *m_freqXAxis  = nullptr;
-  QDateTimeAxis *m_voltXAxis  = nullptr;
-  QDateTimeAxis *m_fpsXAxis   = nullptr;
-
-  QValueAxis *m_tempYAxis  = nullptr;
-  QValueAxis *m_dutyYAxis  = nullptr;
-  QValueAxis *m_powerYAxis = nullptr;
-  QValueAxis *m_freqYAxis  = nullptr;
-  QValueAxis *m_voltYAxis  = nullptr;
-  QValueAxis *m_fpsYAxis   = nullptr;
-
-  // --- Unified "all-in-one" chart ---
-  QChart          *m_unifiedChart     = nullptr;
-  QChartView      *m_unifiedChartView = nullptr;
-  QDateTimeAxis   *m_unifiedXAxis     = nullptr;
-  QValueAxis      *m_unifiedYAxis     = nullptr;
-  QStackedWidget  *m_chartStack       = nullptr;  ///< index 0 = per-group, 1 = unified
-  QWidget         *m_perGroupPage     = nullptr;
+  // --- Chart ---
+  QChart        *m_chart     = nullptr;
+  QChartView    *m_chartView = nullptr;
+  QDateTimeAxis *m_xAxis     = nullptr;
+  QValueAxis    *m_yAxis     = nullptr;
 
   // FPS source controls (daemon-side source selection/policy)
   QComboBox       *m_fpsSourceCombo   = nullptr;
@@ -214,55 +188,7 @@ private:
   };
   std::map< QChart *, Callout > m_callouts;
 
-  // --- Sticky marks (click-to-pin) ---
-  static constexpr int MAX_STICKY_MARKS = 10;
-
-  struct MarkGfx
-  {
-    QGraphicsRectItem       *bg   = nullptr;
-    QGraphicsSimpleTextItem *text = nullptr;
-  };
-
-  /// One metric entry inside a grouped sticky mark
-  struct StickyMetricEntry
-  {
-    std::string metricKey;
-    double      rawValue;
-  };
-
-  /// A grouped sticky mark at a single timestamp, shown as one label box + vertical line
-  struct StickyMark
-  {
-    qint64                            timestamp  = 0;
-    double                            clickDataY = 0.5; ///< Fractional Y within plot area (0=top,1=bottom)
-    std::vector< StickyMetricEntry >  entries;
-
-    // Per-group chart: individual mark per metric (kept for per-group view)
-    std::vector< MarkGfx >            groupGfxList;
-
-    // Unified chart: single grouped label box + vertical line
-    QGraphicsRectItem               *uniBg     = nullptr;   ///< Outer background rect (ClickableRectItem)
-    std::vector< QGraphicsSimpleTextItem * > uniTexts;      ///< One text item per row
-    QGraphicsLineItem               *uniLine   = nullptr;   ///< Vertical line to X axis
-  };
-
-  std::vector< StickyMark > m_stickyMarks;
-
-  void handleSeriesClick( QLineSeries *ls, const QPointF &point );
-  MarkGfx createMarkGfx( QChart *chart, const QColor &borderColor,
-                         std::function< void() > onClick = nullptr );
-  void positionMarkGfx( MarkGfx &gfx, QChart *chart,
-                        const QPointF &dataPoint, const QString &label );
-  void addStickyMarkGroup( qint64 ts, double clickDataY,
-                           const std::vector< StickyMetricEntry > &entries );
-  void removeStickyMark( std::vector< StickyMark >::iterator it );
-  void updateStickyMarkPositions();
-  void createUnifiedMarkGfx();
-  void destroyUnifiedMarkGfx();
-  QChart *chartForGroup( MetricGroup g ) const;
-  static int metricIndexForKey( const std::string &key );
-
-  // --- Unified crosshair ---
+  // --- Crosshair ---
   struct CrosshairLabel
   {
     QGraphicsRectItem       *bg   = nullptr;
@@ -270,36 +196,32 @@ private:
   };
 
   QGraphicsLineItem *m_crosshairLine = nullptr;
-  std::vector< CrosshairLabel > m_crosshairLabels;   ///< One per visible metric
+  std::vector< CrosshairLabel > m_crosshairLabels;
   bool m_crosshairVisible = false;
-  QPointF m_lastCrosshairPos;   ///< Last known cursor pos in viewport coords
-  bool m_cursorInPlot = false;  ///< Is cursor currently inside the unified plot?
-  bool m_annotationsVisible = true; ///< Annotations (RMB toggle) currently shown?
+  QPointF m_lastCrosshairPos;
+  bool m_cursorInPlot = false;
 
   void updateCrosshair( const QPointF &widgetPos, bool ctrlHeld );
   void hideCrosshair();
-  void crosshairClick( const QPointF &widgetPos );
 
   // --- Ctrl+LMB rubber-band zoom ---
-  QRubberBand *m_zoomBand       = nullptr;  ///< Rubber-band selection rectangle
-  QPoint       m_zoomOrigin;                ///< Viewport origin of the drag
-  bool         m_zoomDragging   = false;    ///< Currently dragging a zoom rect?
-  bool         m_zoomed         = false;    ///< Is the view currently zoomed in?
+  QRubberBand *m_zoomBand       = nullptr;
+  QPoint       m_zoomOrigin;
+  bool         m_zoomDragging   = false;
+  bool         m_zoomed         = false;
   void applyZoomRect( const QRect &viewportRect );
   void resetZoom();
 
   // --- Controls ---
-  QCheckBox *m_unifiedCheckBox = nullptr;
-  QLabel    *m_pauseLabel      = nullptr;  ///< Status indicator for pause mode
+  QLabel    *m_pauseLabel      = nullptr;
 
   // --- State ---
   UccdClient *m_client = nullptr;
   QTimer      m_fetchTimer;
-  qint64      m_lastTimestamp = 0;    ///< Last fetched timestamp (ms since epoch)
-  int         m_windowSeconds = 300;  ///< Visible time window (default 5 min)
-  bool        m_unifiedSeriesActive = false;  ///< Shadow series created?
-  bool        m_paused = false;                ///< Pause mode active?
-  int         m_maxPowerW = 150;               ///< Platform max power (TDP); adjust for your hardware
+  qint64      m_lastTimestamp = 0;
+  int         m_windowSeconds = 300;
+  bool        m_paused = false;
+  int         m_colorIndex = 0;   ///< Cycling index into colour palette
 };
 
 } // namespace ucc

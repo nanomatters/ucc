@@ -80,9 +80,9 @@ public:
   }
 
   std::vector< FanProfile > getDefaultFanProfiles(
-    [[maybe_unused]] const std::vector< ucc::hal::FanZone > &zones ) const override
+    const std::vector< ucc::hal::FanZone > &zones ) const override
   {
-    return getUniwillDefaultFanProfiles();
+    return getUniwillDefaultFanProfiles( zones );
   }
 
   // --- Accessors for device-specific features ---

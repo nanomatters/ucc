@@ -864,30 +864,9 @@ static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
   QJsonObject src = doc.object();
   QJsonObject dst;
 
-  // New zone format: extract per-zone curves into the classic keys for ApplyFanProfiles
-  if ( src.contains( "zones" ) && src["zones"].isArray() )
-  {
-    QJsonArray zones = src["zones"].toArray();
-    for ( const QJsonValue &zv : zones )
-    {
-      QJsonObject zone = zv.toObject();
-      QString id = zone["id"].toString();
-      if ( id == "zone-cpu" )  dst["cpu"]            = zone["curve"];
-      else if ( id == "zone-gpu" )  dst["gpu"]            = zone["curve"];
-      else if ( id == "wc-pump" )   dst["pump"]           = zone["curve"];
-      else if ( id == "wc-fan" )    dst["waterCoolerFan"] = zone["curve"];
-    }
-  }
-
-  // Also pass through the zones array directly (new format)
+  // Pass through the zones array directly
   if ( src.contains( "zones" ) )
     dst["zones"] = src["zones"];
-
-  // Pass through if already in apply-format
-  if ( src.contains( "cpu" ) )            dst["cpu"]            = src["cpu"];
-  if ( src.contains( "gpu" ) )            dst["gpu"]            = src["gpu"];
-  if ( src.contains( "pump" ) )           dst["pump"]           = src["pump"];
-  if ( src.contains( "waterCoolerFan" ) ) dst["waterCoolerFan"] = src["waterCoolerFan"];
 
   std::string applyJson = QJsonDocument( dst ).toJson( QJsonDocument::Compact ).toStdString();
   ok( c.applyFanProfiles( applyJson ) );

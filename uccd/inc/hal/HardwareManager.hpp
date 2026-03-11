@@ -165,12 +165,11 @@ public:
     syslog( LOG_INFO, "[HardwareManager] %zu fans, %zu temperature sensors detected",
             m_fans.size(), m_tempSensors.size() );
 
-    // Auto-generate thermal sources and fan zones
+    // Auto-generate thermal sources
     buildDefaultThermalSources();
-    buildDefaultFanZones();
 
-    syslog( LOG_INFO, "[HardwareManager] %zu thermal sources, %zu fan zones generated",
-            m_thermalSources.size(), m_fanZones.size() );
+    syslog( LOG_INFO, "[HardwareManager] %zu thermal sources generated",
+            m_thermalSources.size() );
   }
 
   // ---------------------------------------------------------------
@@ -247,8 +246,24 @@ public:
   /// Auto-generated + custom thermal sources.
   const std::vector< ThermalSource > &thermalSources() const noexcept { return m_thermalSources; }
 
-  /// Auto-generated default fan zones.
+  /// Current fan zones (set externally by the daemon from profile data or defaults).
   const std::vector< FanZone > &defaultFanZones() const noexcept { return m_fanZones; }
+
+  /// Replace the fan zone topology.
+  /// Called by the daemon after loading profile zone data or building per-fan defaults.
+  void setFanZones( std::vector< FanZone > zones ) { m_fanZones = std::move( zones ); }
+
+  /// Register additional (custom) thermal sources from a profile.
+  /// Sources whose id already exists are skipped so built-in sources are not overwritten.
+  void addThermalSources( const std::vector< ThermalSource > &sources )
+  {
+    for ( const auto &src : sources )
+    {
+      if ( findThermalSource( src.id ) )
+        continue; // built-in or already registered
+      m_thermalSources.push_back( src );
+    }
+  }
 
   /// Find a thermal source by id.
   const ThermalSource *findThermalSource( const std::string &id ) const noexcept
@@ -620,185 +635,9 @@ private:
 
   void buildDefaultThermalSources()
   {
+    // No hardcoded thermal sources — all sources are user-created
+    // (stored in profiles and merged via addThermalSources).
     m_thermalSources.clear();
-
-    auto *cpuSensor = findCpuTempSensor();
-    auto *gpuSensor = findGpuTempSensor();
-
-    if ( cpuSensor )
-    {
-      m_thermalSources.push_back( ThermalSource{
-        .id = "cpu",
-        .label = "CPU Temperature",
-        .strategy = ThermalStrategy::Single,
-        .sensorIds = { cpuSensor->id },
-        .weights = {} } );
-    }
-
-    if ( gpuSensor )
-    {
-      m_thermalSources.push_back( ThermalSource{
-        .id = "gpu",
-        .label = "GPU Temperature",
-        .strategy = ThermalStrategy::Single,
-        .sensorIds = { gpuSensor->id },
-        .weights = {} } );
-    }
-
-    // Composite: hottest of CPU and GPU
-    if ( cpuSensor && gpuSensor )
-    {
-      m_thermalSources.push_back( ThermalSource{
-        .id = "hottest",
-        .label = "Hottest (CPU / GPU)",
-        .strategy = ThermalStrategy::Max,
-        .sensorIds = { cpuSensor->id, gpuSensor->id },
-        .weights = {} } );
-    }
-    else if ( cpuSensor )
-    {
-      // only cpu available; hottest == cpu but still create alias
-      m_thermalSources.push_back( ThermalSource{
-        .id = "hottest",
-        .label = "Hottest (CPU)",
-        .strategy = ThermalStrategy::Single,
-        .sensorIds = { cpuSensor->id },
-        .weights = {} } );
-    }
-
-    syslog( LOG_INFO, "[HardwareManager] Built %zu default thermal sources",
-            m_thermalSources.size() );
-  }
-
-  void buildDefaultFanZones()
-  {
-    m_fanZones.clear();
-
-    if ( m_fans.empty() )
-      return;
-
-    // Standard balanced curve used for most zones
-    static const std::vector< FanCurvePoint > balancedCurve = {
-      { 30, 25 }, { 45, 30 }, { 55, 40 }, { 65, 55 },
-      { 75, 70 }, { 80, 85 }, { 90, 100 }
-    };
-
-    // Quiet pump curve (pumps usually run at low speed unless hot)
-    static const std::vector< FanCurvePoint > pumpCurve = {
-      { 30, 30 }, { 50, 35 }, { 65, 45 }, { 75, 60 },
-      { 85, 80 }, { 90, 100 }
-    };
-
-    // ---- Staged laptop fans (tuxedo_io etc.) — one fan per zone, legacy-like ----
-
-    bool hasStaged = false;
-    int stagedIdx = 0;
-    for ( const auto &fan : m_fans )
-    {
-      if ( fan.deviceType == FanDeviceType::Staged )
-      {
-        hasStaged = true;
-        std::string zoneId = "zone-laptop-" + std::to_string( stagedIdx );
-        std::string thermalId = ( stagedIdx == 0 ) ? "cpu" : "gpu";
-        // Fall back to "hottest" if the preferred source doesn't exist
-        if ( !findThermalSource( thermalId ) )
-          thermalId = findThermalSource( "hottest" ) ? "hottest" : "";
-
-        m_fanZones.push_back( FanZone{
-          .id = zoneId,
-          .name = fan.label.empty() ? ( "Laptop Fan " + std::to_string( stagedIdx ) ) : fan.label,
-          .fanIds = { fan.id },
-          .thermalSourceId = thermalId,
-          .defaultType = FanDeviceType::Staged,
-          .curve = balancedCurve,
-          .hysteresisDeg = 3,
-          .enabled = true } );
-        ++stagedIdx;
-      }
-    }
-
-    if ( hasStaged )
-    {
-      syslog( LOG_INFO, "[HardwareManager] Built %zu laptop (Staged) fan zones",
-              m_fanZones.size() );
-      return; // Laptops with staged fans: all fans handled, no need for further grouping
-    }
-
-    // ---- Desktop / continuous-PWM fans — group by label classification ----
-
-    // Classification buckets: zoneId -> list of fan IDs
-    std::map< std::string, std::vector< std::string > > buckets;
-    size_t unclassifiedFanCount = 0;
-
-    for ( const auto &fan : m_fans )
-    {
-      if ( fan.deviceType == FanDeviceType::Pump )
-      {
-        buckets["zone-pump"].push_back( fan.id );
-        continue;
-      }
-
-      // Classify by common hwmon labels
-      std::string lbl = fan.label;
-      std::transform( lbl.begin(), lbl.end(), lbl.begin(), ::tolower );
-
-      if ( lbl.find( "cpu" ) != std::string::npos )
-        buckets["zone-cpu"].push_back( fan.id );
-      else if ( lbl.find( "gpu" ) != std::string::npos )
-        buckets["zone-gpu"].push_back( fan.id );
-      else if ( lbl.find( "chassis" ) != std::string::npos ||
-                lbl.find( "case" ) != std::string::npos ||
-                lbl.find( "system" ) != std::string::npos ||
-                lbl.find( "sys" ) == 0 )
-        buckets["zone-case"].push_back( fan.id );
-      else
-        ++unclassifiedFanCount;
-    }
-
-    // Zone metadata: { zoneId, name, thermalSourceId, defaultDeviceType, curve }
-    struct ZoneMeta
-    {
-      std::string name;
-      std::string thermalSourceId;
-      FanDeviceType deviceType;
-      const std::vector< FanCurvePoint > *curve;
-    };
-
-    const std::map< std::string, ZoneMeta > zoneMeta = {
-      { "zone-cpu",  { "CPU Fans",     "cpu",     FanDeviceType::Fan,  &balancedCurve } },
-      { "zone-gpu",  { "GPU Fans",     "gpu",     FanDeviceType::Fan,  &balancedCurve } },
-      { "zone-case", { "Case Fans",    "hottest", FanDeviceType::Fan,  &balancedCurve } },
-      { "zone-pump", { "Pump(s)",      "hottest", FanDeviceType::Pump, &pumpCurve     } },
-    };
-
-    for ( auto &[zoneId, fanIds] : buckets )
-    {
-      auto it = zoneMeta.find( zoneId );
-      if ( it == zoneMeta.end() )
-        continue;
-
-      const auto &meta = it->second;
-      std::string tsId = meta.thermalSourceId;
-      if ( !findThermalSource( tsId ) )
-        tsId = findThermalSource( "hottest" ) ? "hottest"
-             : findThermalSource( "cpu" )     ? "cpu"
-                                              : "";
-
-      m_fanZones.push_back( FanZone{
-        .id = zoneId,
-        .name = meta.name,
-        .fanIds = std::move( fanIds ),
-        .thermalSourceId = tsId,
-        .defaultType = meta.deviceType,
-        .curve = *meta.curve,
-        .hysteresisDeg = 3,
-        .enabled = true } );
-    }
-
-        syslog( LOG_INFO,
-          "[HardwareManager] Built %zu desktop fan zones (%zu unclassified fans left unmanaged)",
-          m_fanZones.size(),
-          unclassifiedFanCount );
   }
 
   // Registered providers (owned)

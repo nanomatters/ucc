@@ -27,6 +27,7 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <map>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -164,6 +165,10 @@ public:
   std::atomic< int32_t > cpuFrequencyMHz;
   std::string capabilitiesJSON{ "[]" };   // HAL capability flags as JSON array
 
+  // Per-zone fan telemetry: zoneId → (timestamp, temp, duty%)
+  struct ZoneTelemetry { int64_t timestamp = 0; int temp = -1; int duty = -1; };
+  std::map< std::string, ZoneTelemetry > zoneTelemetry;
+
   std::mutex dataMutex;
 
   explicit UccDBusData( int numberFans = 3 )
@@ -279,6 +284,7 @@ public slots:
   QVariantMap GetFanDataCPU();
   QVariantMap GetFanDataGPU1();
   QVariantMap GetFanDataGPU2();
+  QString GetFanZoneTelemetryJSON();
 
   // webcam and display methods
   bool WebcamSWAvailable();
@@ -316,6 +322,7 @@ public slots:
   QString GetHardwareFanDevicesJSON();              // Raw detected fan/pump devices from hardware
   QString GetHardwareSensorsJSON();                 // Raw detected temperature sensors from hardware
   QString GetThermalSourcesJSON();                  // Available thermal sources from hardware
+  QString GetSensorReadingsJSON();                  // Live sensor + thermal source readings
   QString GetFanZonesJSON();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
 
   // Sub-profile CRUD — all include built-in (editable=false) + custom (editable=true)
@@ -452,6 +459,7 @@ public slots:
   QByteArray GetMonitorDataSince( qlonglong sinceTimestampMs );
   void SetMonitorHistoryHorizon( int seconds );
   int GetMonitorHistoryHorizon();
+  QString GetMonitorSourcesJSON();
   int GetCpuFrequencyMHz();
   QString GetFpsSourcesJSON();
   QString GetAutoUvAutoApplyStatusJSON();
@@ -497,7 +505,7 @@ private:
 
   /// Shared FPS socket server — always active while adaptor exists.
   FpsServer  m_fpsServer;
-  /// Polls m_fpsServer every second and pushes MetricId::Fps to the metric store.
+  /// Polls m_fpsServer every second and pushes "fps" to the metric store.
   QTimer    *m_fpsPollTimer = nullptr;
   /// Seen FPS source app names (from SO_PEERCRED process name).
   std::unordered_set< std::string > m_seenFpsApps;
@@ -514,6 +522,7 @@ private:
 
   void resetDataCollectionTimeout();
   QVariantMap exportFanData( const FanData &fanData );
+  QVariantMap exportZoneTelemetry( const UccDBusData::ZoneTelemetry &zt );
   void onFpsPollTimeout();
   void autoApplyGpuProfileForApp( const std::string &appName, pid_t clientPid );
   void applyMappedGpuProfile( const std::string &appName, pid_t clientPid,
@@ -691,6 +700,8 @@ private:
   void rebuildBuiltinFanProfiles();
   void rebuildBuiltinGpuProfiles();
   void rebuildBuiltinKeyboardProfile();
+  void buildInitialFanZones();
+  void rebuildFanZonesFromProfile( const FanProfile &fp );
   int readCurrentCTGPOffset() const;
   void readHardwareCapabilities();
   void updateFanData();
@@ -751,6 +762,26 @@ private:
 
   // monitoring history ring buffer (daemon-side storage for graph tab)
   MetricsHistoryStore m_metricsStore;
+
+  // discovered hwmon voltage sensors (scanned once at startup)
+  struct VoltageSensorInfo
+  {
+    std::string id;         // e.g. "hwmon3_in0"
+    std::string label;      // e.g. "Vcore" (from inN_label, or inN)
+    std::string path;       // e.g. "/sys/class/hwmon/hwmon3/in0_input"
+  };
+  std::vector< VoltageSensorInfo > m_voltageSensors;
+
+  // per-core CPU frequency paths (scanned once at startup)
+  struct CpuFreqCore
+  {
+    int coreIndex = 0;
+    std::string path;       // e.g. "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
+  };
+  std::vector< CpuFreqCore > m_cpuFreqCores;
+
+  void discoverVoltageSensors();
+  void discoverCpuFreqCores();
 
   // controllers
   FnLockController m_fnLockController;

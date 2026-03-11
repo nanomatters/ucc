@@ -83,8 +83,6 @@ namespace ucc
     void onCopyProfileClicked();
     void onRemoveProfileClicked();
     void onRemoveFanProfileClicked();
-    void onCpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
-    void onGpuFanPointsChanged(const QVector<FanCurveEditorWidget::Point>& points);
     void onFanCurveChanged(const QString &zoneId, const QVector<FanCurveEditorWidget::Point>& points);
     void onPumpCurveChanged(const QString &zoneId, const QVector<PumpCurveEditorWidget::Point>& points);
     void onFanProfileChanged(const QString& fanProfileId);

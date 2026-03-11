@@ -28,6 +28,7 @@
 #include "platform/native/HwmonTempProvider.hpp"
 #include "platform/native/GenericProfileProvider.hpp"
 #include "platform/gpu/nvidia/NvidiaGpuPowerProvider.hpp"
+#include "platform/gpu/nvidia/NvmlTempProvider.hpp"
 #include "platform/cpu/amd/AmdCpuPlatformProvider.hpp"
 #include "platform/uniwill/TuxedoIOProviders.hpp"
 #include "platform/uniwill/UniwillProfileProvider.hpp"
@@ -55,6 +56,10 @@
 
 static std::string jsonEscape( const std::string &value );
 
+// Water cooler zone IDs — these are the zone IDs created by the BLE water cooler subsystem
+static constexpr const char *kWCFanZoneId  = "wc-fan";
+static constexpr const char *kWCPumpZoneId = "wc-pump";
+
 static std::string fanProfileToJSON( const FanProfile &fp,
                                      const std::unordered_map< std::string, std::string > &hwDeviceTypes,
                                      const std::unordered_map< std::string, std::string > &zoneNames )
@@ -62,21 +67,12 @@ static std::string fanProfileToJSON( const FanProfile &fp,
   auto zoneDisplayName = [&zoneNames]( const std::string &zid ) -> std::string {
     if ( auto it = zoneNames.find( zid ); it != zoneNames.end() && !it->second.empty() )
       return it->second;
-    if ( zid == WellKnownZoneIDs::CPU )    return "CPU Fans";
-    if ( zid == WellKnownZoneIDs::GPU )    return "GPU Fans";
-    if ( zid == WellKnownZoneIDs::Case )   return "Case Fans";
-    if ( zid == WellKnownZoneIDs::Pump )   return "Pump(s)";
-    if ( zid == WellKnownZoneIDs::Misc )   return "Other Fans";
-    if ( zid == WellKnownZoneIDs::WCFan )  return "Water Cooler Fan";
-    if ( zid == WellKnownZoneIDs::WCPump ) return "Water Cooler Pump";
     return zid;
   };
 
   auto zoneDeviceTypeStr = [&hwDeviceTypes]( const std::string &zid ) -> std::string {
     if ( auto it = hwDeviceTypes.find( zid ); it != hwDeviceTypes.end() )
       return it->second;
-    if ( zid == WellKnownZoneIDs::Pump )   return "pump";
-    if ( zid == WellKnownZoneIDs::WCPump ) return "stagedPump";
     return "fan";
   };
 
@@ -103,6 +99,18 @@ static std::string fanProfileToJSON( const FanProfile &fp,
     if ( !zc.thermalSourceId.empty() )
       json += ",\"thermalSourceId\":\"" + jsonEscape( zc.thermalSourceId ) + "\"";
 
+    // Serialize fan assignments if present (topology from user profile)
+    if ( !zc.fanIds.empty() )
+    {
+      json += ",\"fanIds\":[";
+      for ( size_t f = 0; f < zc.fanIds.size(); ++f )
+      {
+        if ( f > 0 ) json += ',';
+        json += "\"" + jsonEscape( zc.fanIds[f] ) + "\"";
+      }
+      json += "]";
+    }
+
     json += ",\"curve\":[";
     for ( size_t i = 0; i < zc.curve.size(); ++i )
     {
@@ -113,57 +121,39 @@ static std::string fanProfileToJSON( const FanProfile &fp,
     }
     json += "]}";
   }
-  json += "]}";
-  return json;
-}
+  json += "]";
 
-static std::string stripLegacyMiscZoneFromProfileJson( const std::string &json,
-                                                       bool keepMiscZone,
-                                                       bool *changed = nullptr )
-{
-  if ( changed )
-    *changed = false;
-
-  if ( keepMiscZone )
-    return json;
-
-  const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
-  if ( !doc.isObject() )
-    return json;
-
-  QJsonObject root = doc.object();
-  const QJsonArray zones = root.value( QStringLiteral( "zones" ) ).toArray();
-  if ( zones.isEmpty() )
-    return json;
-
-  QJsonArray filteredZones;
-  bool removedZone = false;
-
-  for ( const QJsonValue &zoneValue : zones )
+  // Serialize custom thermal sources
+  if ( !fp.thermalSources.empty() )
   {
-    if ( !zoneValue.isObject() )
+    json += ",\"thermalSources\":[";
+    bool firstTs = true;
+    for ( const auto &ts : fp.thermalSources )
     {
-      filteredZones.append( zoneValue );
-      continue;
+      if ( !firstTs ) json += ',';
+      firstTs = false;
+      json += "{\"id\":\"" + jsonEscape( ts.id ) + "\"";
+      json += ",\"label\":\"" + jsonEscape( ts.label ) + "\"";
+      json += ",\"strategy\":\"" + jsonEscape( ucc::hal::thermalStrategyToString( ts.strategy ) ) + "\"";
+      json += ",\"sensorIds\":[";
+      for ( size_t s = 0; s < ts.sensorIds.size(); ++s )
+      {
+        if ( s > 0 ) json += ',';
+        json += "\"" + jsonEscape( ts.sensorIds[s] ) + "\"";
+      }
+      json += "],\"weights\":[";
+      for ( size_t w = 0; w < ts.weights.size(); ++w )
+      {
+        if ( w > 0 ) json += ',';
+        json += std::to_string( ts.weights[w] );
+      }
+      json += "]}";
     }
-
-    const QJsonObject zone = zoneValue.toObject();
-    if ( zone.value( QStringLiteral( "id" ) ).toString().toStdString() == WellKnownZoneIDs::Misc )
-    {
-      removedZone = true;
-      continue;
-    }
-
-    filteredZones.append( zone );
+    json += "]";
   }
 
-  if ( !removedZone )
-    return json;
-
-  root[QStringLiteral( "zones" )] = filteredZones;
-  if ( changed )
-    *changed = true;
-  return QJsonDocument( root ).toJson( QJsonDocument::Compact ).toStdString();
+  json += "}";
+  return json;
 }
 
 // helper function to convert GPU info to JSON
@@ -503,7 +493,7 @@ void UccDBusInterfaceAdaptor::onFpsPollTimeout()
   }
 
   if ( allow )
-    m_service->m_metricsStore.push( MetricId::Fps, fps );
+    m_service->m_metricsStore.push( "fps", fps );
 }
 
 void UccDBusInterfaceAdaptor::autoApplyGpuProfileForApp(
@@ -647,6 +637,23 @@ UccDBusInterfaceAdaptor::exportFanData( const FanData &fanData )
   return result;
 }
 
+QVariantMap
+UccDBusInterfaceAdaptor::exportZoneTelemetry( const UccDBusData::ZoneTelemetry &zt )
+{
+  QVariantMap speedData;
+  speedData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( zt.timestamp ) );
+  speedData[ "data" ] = QVariant::fromValue( static_cast< int >( zt.duty ) );
+
+  QVariantMap tempData;
+  tempData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( zt.timestamp ) );
+  tempData[ "data" ] = QVariant::fromValue( static_cast< int >( zt.temp ) );
+
+  QVariantMap result;
+  result[ "speed" ] = QVariant::fromValue( speedData );
+  result[ "temp" ] = QVariant::fromValue( tempData );
+  return result;
+}
+
 // device and system information methods
 
 QString UccDBusInterfaceAdaptor::GetDeviceName()
@@ -705,30 +712,100 @@ QVariantMap
 UccDBusInterfaceAdaptor::GetFanDataCPU()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  if ( m_data.fans.size() > 0 )
-    return exportFanData( m_data.fans[ 0 ] );
 
-  return {};
+  const int64_t now = std::chrono::duration_cast< std::chrono::milliseconds >(
+    std::chrono::system_clock::now().time_since_epoch() ).count();
+
+  // Read CPU temperature directly from the hardware sensor
+  int cpuTemp = -1;
+  if ( m_service )
+  {
+    const auto *sensor = m_service->m_hw.findCpuTempSensor();
+    if ( sensor )
+    {
+      auto val = m_service->m_hw.readTemp( *sensor );
+      if ( val.has_value() )
+        cpuTemp = static_cast< int >( std::round( val.value() ) );
+    }
+  }
+
+  QVariantMap tempData;
+  tempData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( now ) );
+  tempData[ "data" ] = QVariant::fromValue( cpuTemp );
+
+  // Fan speed from the first fan (if available)
+  QVariantMap speedData;
+  if ( m_data.fans.size() > 0 )
+  {
+    speedData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( m_data.fans[0].speed.timestamp ) );
+    speedData[ "data" ] = QVariant::fromValue( static_cast< int >( m_data.fans[0].speed.data ) );
+  }
+  else
+  {
+    speedData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( now ) );
+    speedData[ "data" ] = QVariant::fromValue( -1 );
+  }
+
+  QVariantMap result;
+  result[ "speed" ] = QVariant::fromValue( speedData );
+  result[ "temp" ] = QVariant::fromValue( tempData );
+  return result;
 }
 
 QVariantMap
 UccDBusInterfaceAdaptor::GetFanDataGPU1()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  if ( m_data.fans.size() > 1 )
-    return exportFanData( m_data.fans[ 1 ] );
 
-  return {};
+  const int64_t now = std::chrono::duration_cast< std::chrono::milliseconds >(
+    std::chrono::system_clock::now().time_since_epoch() ).count();
+
+  // Read GPU temperature directly from NVML
+  int gpuTemp = -1;
+  if ( m_service && m_service->m_nvml && m_service->m_nvml->isAvailable() )
+  {
+    auto val = m_service->m_nvml->getTemperatureDegC( 0 );
+    if ( val.has_value() )
+      gpuTemp = static_cast< int >( *val );
+  }
+
+  if ( gpuTemp < 0 )
+    return {};
+
+  QVariantMap tempData;
+  tempData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( now ) );
+  tempData[ "data" ] = QVariant::fromValue( gpuTemp );
+
+  QVariantMap speedData;
+  speedData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( now ) );
+  speedData[ "data" ] = QVariant::fromValue( -1 );
+
+  QVariantMap result;
+  result[ "speed" ] = QVariant::fromValue( speedData );
+  result[ "temp" ] = QVariant::fromValue( tempData );
+  return result;
 }
 
 QVariantMap
 UccDBusInterfaceAdaptor::GetFanDataGPU2()
 {
-  std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  if ( m_data.fans.size() > 2 )
-    return exportFanData( m_data.fans[ 2 ] );
-
+  // Only populated if a second GPU zone exists; currently not mapped
   return {};
+}
+
+QString
+UccDBusInterfaceAdaptor::GetFanZoneTelemetryJSON()
+{
+  std::lock_guard< std::mutex > lock( m_data.dataMutex );
+  QJsonObject root;
+  for ( const auto &[zoneId, zt] : m_data.zoneTelemetry )
+  {
+    QJsonObject obj;
+    obj["temp"] = zt.temp;
+    obj["duty"] = zt.duty;
+    root[QString::fromStdString( zoneId )] = obj;
+  }
+  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
 }
 
 // webcam and display methods
@@ -896,39 +973,83 @@ bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq 
       return {};
     };
 
-    auto parseCurve = [&]( const std::string &key ) -> std::vector< ucc::hal::FanCurvePoint > {
-      std::string json = extractArray( key );
-      if ( json.empty() ) return {};
-      auto curve = ProfileManager::parseFanCurveFromJSON( json );
-      std::cerr << "[DBus] Parsed " << key << " curve size: " << curve.size() << std::endl;
-      return curve;
-    };
-
     // Build zone curves map from the JSON
     std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
 
-    // Support both legacy keys (cpu/gpu/waterCoolerFan/pump) and new zone keys
-    auto cpuCurve  = parseCurve( "cpu" );
-    auto gpuCurve  = parseCurve( "gpu" );
-    auto wcFanCurve = parseCurve( "waterCoolerFan" );
-    auto pumpCurve  = parseCurve( "pump" );
+    // Register custom thermal sources from the profile before zone processing
+    {
+      auto tsJson = extractArray( "thermalSources" );
+      if ( !tsJson.empty() )
+      {
+        auto tsProfile = ProfileManager::parseFanProfileJSON(
+          "{\"thermalSources\":" + tsJson + "}" );
+        if ( !tsProfile.thermalSources.empty() )
+        {
+          m_service->m_hw.addThermalSources( tsProfile.thermalSources );
+          std::cerr << "[DBus] Registered " << tsProfile.thermalSources.size()
+                    << " custom thermal sources" << std::endl;
+        }
+      }
+    }
 
-    if ( !cpuCurve.empty() )   zoneCurves[WellKnownZoneIDs::CPU]    = std::move( cpuCurve );
-    if ( !gpuCurve.empty() )   zoneCurves[WellKnownZoneIDs::GPU]    = std::move( gpuCurve );
-    if ( !wcFanCurve.empty() ) zoneCurves[WellKnownZoneIDs::WCFan]  = std::move( wcFanCurve );
-    if ( !pumpCurve.empty() )  zoneCurves[WellKnownZoneIDs::WCPump] = std::move( pumpCurve );
-
-    // Also support zone-based keys if present
-    // Parse "zones" array if provided (new format)
+    // Parse "zones" array
     auto zonesJson = extractArray( "zones" );
     if ( !zonesJson.empty() )
     {
       auto zoneProfile = ProfileManager::parseFanProfileJSON(
         "{\"zones\":" + zonesJson + "}" );
+
+      // If the zones carry topology (fanIds), rebuild the zone model
+      bool hasTopology = false;
+      for ( const auto &zc : zoneProfile.zoneCurves )
+      {
+        if ( zc.hasTopology() )
+        {
+          hasTopology = true;
+          break;
+        }
+      }
+
+      if ( hasTopology && m_service )
+      {
+        FanProfile topologyProfile;
+        topologyProfile.zoneCurves = zoneProfile.zoneCurves;
+        m_service->rebuildFanZonesFromProfile( topologyProfile );
+
+        // Restart worker to pick up new zone topology
+        if ( m_service->m_fanControlWorker )
+        {
+          m_service->m_fanControlWorker->stop();
+          m_service->m_fanControlWorker->start();
+          std::cerr << "[DBus] Restarted FanControlWorker with new zone topology" << std::endl;
+        }
+      }
+
       for ( const auto &zc : zoneProfile.zoneCurves )
       {
         if ( !zc.curve.empty() )
           zoneCurves[zc.zoneId] = zc.curve;
+      }
+
+      // Apply per-zone thermal source overrides
+      if ( m_service && m_service->m_fanControlWorker )
+      {
+        std::map< std::string, std::string > thermalSources;
+        for ( const auto &zc : zoneProfile.zoneCurves )
+        {
+          std::cerr << "[DBus] Zone '" << zc.zoneId << "' thermalSourceId='" << zc.thermalSourceId << "'" << std::endl;
+          if ( !zc.thermalSourceId.empty() )
+            thermalSources[zc.zoneId] = zc.thermalSourceId;
+        }
+        if ( !thermalSources.empty() )
+        {
+          m_service->m_fanControlWorker->applyZoneThermalSources( thermalSources );
+          std::cerr << "[DBus] Applied thermal sources for " << thermalSources.size() << " zones" << std::endl;
+        }
+        else
+        {
+          std::cerr << "[DBus] WARNING: No thermal source overrides found in zone data!" << std::endl;
+        }
       }
     }
 
@@ -1399,6 +1520,35 @@ QString UccDBusInterfaceAdaptor::GetThermalSourcesJSON()
   return QString::fromStdString( json );
 }
 
+QString UccDBusInterfaceAdaptor::GetSensorReadingsJSON()
+{
+  if ( !m_service )
+    return QStringLiteral( "{}" );
+
+  QJsonObject root;
+
+  // Individual sensor readings
+  for ( const auto &sensor : m_service->m_hw.tempSensors() )
+  {
+    auto val = m_service->m_hw.readTemp( sensor );
+    if ( val.has_value() )
+      root[QString::fromStdString( sensor.id )] = static_cast< int >( std::round( val.value() ) );
+  }
+
+  // Resolved thermal source readings (prefixed with "_source:")
+  for ( const auto &ts : m_service->m_hw.thermalSources() )
+  {
+    auto val = m_service->m_hw.readThermalSource( ts );
+    if ( val.has_value() )
+    {
+      root[QStringLiteral( "_source:" ) + QString::fromStdString( ts.id )] =
+        static_cast< int >( std::round( val.value() ) );
+    }
+  }
+
+  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+}
+
 QString UccDBusInterfaceAdaptor::GetHardwareFanDevicesJSON()
 {
   if ( !m_service )
@@ -1848,31 +1998,12 @@ QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
     appendObj( obj );
   }
 
-  // Add abstracted GPU sensors so UI can present board/cpu/gpu in one unified list.
-  // These are virtual sensor entries keyed by detected GPU model names.
+  // Add iGPU virtual sensor for systems where hwmon doesn't cover integrated GPU.
+  // dGPU temp is provided by NvmlTempProvider as sensor \"gpu-dgpu-temp\".
   {
     std::lock_guard< std::mutex > lock( m_data.dataMutex );
 
-    const QString dGpuModel = QString::fromStdString( m_service->m_systemInfo.dGpuModel ).trimmed();
     const QString iGpuModel = QString::fromStdString( m_service->m_systemInfo.iGpuModel ).trimmed();
-
-    auto dgpuDoc = QJsonDocument::fromJson( QByteArray::fromStdString( m_data.dGpuInfoValuesJSON ) );
-    if ( !dGpuModel.isEmpty() )
-    {
-      const QJsonObject o = dgpuDoc.isObject() ? dgpuDoc.object() : QJsonObject();
-      const double temp = o.value( QStringLiteral( "temp" ) ).toDouble( -1.0 );
-
-      std::string obj = "{\"id\":\"gpu-dgpu-temp\"";
-      obj += ",\"label\":\"Temperature\"";
-      obj += ",\"source\":\"" + jsonEscape( dGpuModel.toStdString() ) + "\"";
-      obj += ",\"category\":\"gpu\"";
-      obj += ",\"hwmonPath\":\"\"";
-      obj += ",\"index\":0";
-      if ( temp >= 0.0 )
-        obj += ",\"currentTempC\":" + std::to_string( static_cast< int >( std::lround( temp ) ) );
-      obj += "}";
-      appendObj( obj );
-    }
 
     auto igpuDoc = QJsonDocument::fromJson( QByteArray::fromStdString( m_data.iGpuInfoValuesJSON ) );
     if ( !iGpuModel.isEmpty() )
@@ -1955,15 +2086,7 @@ bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &
 
   const std::string sid = id.toStdString();
   const std::string sname = name.toStdString();
-  const bool keepMiscZone = std::any_of( m_service->m_hw.defaultFanZones().begin(),
-                                         m_service->m_hw.defaultFanZones().end(),
-                                         []( const auto &zone ) {
-                                           return zone.id == WellKnownZoneIDs::Misc;
-                                         } );
-  bool sanitized = false;
-  const std::string sjson = stripLegacyMiscZoneFromProfileJson( json.toStdString(),
-                                                                keepMiscZone,
-                                                                &sanitized );
+  const std::string sjson = json.toStdString();
 
   // Check this doesn't collide with a built-in fan profile
   for ( const auto &fp : m_service->m_builtinFanProfiles )
@@ -1998,12 +2121,6 @@ bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &
   try { wrapper = nlohmann::json::parse( sjson ); } catch ( ... ) { wrapper = nlohmann::json::object(); }
   wrapper["name"] = sname;
   m_service->m_settings.fanProfiles[sid] = wrapper.dump();
-
-  if ( sanitized )
-  {
-    std::cout << "[FanProfile] Removed legacy '" << WellKnownZoneIDs::Misc
-              << "' zone while saving profile '" << sname << "'" << std::endl;
-  }
 
   if ( m_service->m_settingsManager.writeSettings( m_service->m_settings ) )
     std::cout << "[FanProfile] Saved fan profile '" << sname << "' (ID: " << sid << ")" << std::endl;
@@ -2308,10 +2425,11 @@ QString UccDBusInterfaceAdaptor::GetGpuProfileNames()
   return GetGpuProfilesJSON();
 }
 
-bool UccDBusInterfaceAdaptor::SetFanProfile( const QString &name, const QString &json )
+bool UccDBusInterfaceAdaptor::SetFanProfile( const QString & /*name*/, const QString & /*json*/ )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  return setFanProfileJson( name.toStdString(), json.toStdString() );
+  // Legacy D-Bus method — fan profiles are now managed through ApplyFanProfiles
+  return false;
 }
 
 // settings methods
@@ -3099,6 +3217,73 @@ int UccDBusInterfaceAdaptor::GetMonitorHistoryHorizon()
   return m_service ? m_service->m_metricsStore.horizonSeconds() : 0;
 }
 
+QString UccDBusInterfaceAdaptor::GetMonitorSourcesJSON()
+{
+  if ( !m_service )
+    return QStringLiteral( "[]" );
+
+  // Build a JSON array of all available monitoring sources.
+  // Each entry: { "key": "<store-key>", "label": "<human>", "group": "<type>", "unit": "<unit>" }
+  std::string json = "[";
+  bool first = true;
+
+  auto append = [&]( const std::string &key, const std::string &label,
+                     const char *group, const char *unit )
+  {
+    if ( !first ) json += ',';
+    first = false;
+    json += "{\"key\":\"" + key + "\""
+          + ",\"label\":\"" + label + "\""
+          + ",\"group\":\"" + group + "\""
+          + ",\"unit\":\"" + unit + "\"}";
+  };
+
+  // Temperature sensors
+  for ( const auto &s : m_service->m_hw.tempSensors() )
+    append( "sensor:" + s.id, s.label.empty() ? s.id : s.label, "sensor", "°C" );
+
+  // Thermal sources
+  for ( const auto &ts : m_service->m_hw.thermalSources() )
+    append( "tsrc:" + ts.id, ts.label.empty() ? ts.id : ts.label, "thermal", "°C" );
+
+  // Fan / pump RPMs
+  for ( const auto &f : m_service->m_hw.fans() )
+  {
+    if ( f.canRead )
+      append( "fan:" + f.id, f.label.empty() ? f.id : f.label, "fan", "RPM" );
+  }
+
+  // Hwmon voltage sensors
+  for ( const auto &vs : m_service->m_voltageSensors )
+    append( "voltage:" + vs.id, vs.label, "voltage", "mV" );
+
+  // Per-core CPU frequency
+  if ( !m_service->m_cpuFreqCores.empty() )
+  {
+    append( "cpufreq:avg", "CPU Frequency (avg)", "cpufreq", "MHz" );
+    for ( const auto &core : m_service->m_cpuFreqCores )
+      append( "cpufreq:" + std::to_string( core.coreIndex ),
+              "CPU Core " + std::to_string( core.coreIndex ) + " Freq",
+              "cpufreq", "MHz" );
+  }
+
+  // Legacy aggregate metrics (GPU info, CPU power/freq, FPS)
+  append( "cpuTemp",          "CPU Temp",          "legacy", "°C" );
+  append( "cpuFanDuty",       "CPU Fan Duty",      "legacy", "%" );
+  append( "cpuPower",         "CPU Power",         "legacy", "W" );
+  append( "cpuFrequency",     "CPU Frequency",     "legacy", "MHz" );
+  append( "gpuTemp",          "dGPU Temp",         "legacy", "°C" );
+  append( "gpuFanDuty",       "dGPU Fan Duty",     "legacy", "%" );
+  append( "gpuPower",         "dGPU Power",        "legacy", "W" );
+  append( "gpuFrequency",     "dGPU Frequency",    "legacy", "MHz" );
+  append( "gpuVramFrequency", "dGPU VRAM Freq",    "legacy", "MHz" );
+  append( "gpuCoreVoltage",   "dGPU Core Voltage", "legacy", "mV" );
+  append( "fps",              "FPS",               "legacy", "fps" );
+
+  json += "]";
+  return QString::fromStdString( json );
+}
+
 int UccDBusInterfaceAdaptor::GetCpuFrequencyMHz()
 {
   return m_data.cpuFrequencyMHz.load();
@@ -3583,6 +3768,8 @@ UccDBusService::UccDBusService()
   // Generic hwmon providers (work on any Linux machine)
   m_hw.addFanProvider( std::make_unique< ucc::hal::HwmonFanProvider >() );
   m_hw.addTempProvider( std::make_unique< ucc::hal::HwmonTempProvider >() );
+  // NVML-based GPU temperature (covers systems without nvidia hwmon, e.g. RTX 5090)
+  m_hw.addTempProvider( std::make_unique< ucc::hal::NvmlTempProvider >( m_nvml.get() ) );
   // CPU-specific platform providers (AMD via RyzenAdj/SMU, Intel TBD)
   m_hw.addPlatformProvider( std::make_unique< ucc::hal::AmdCpuPlatformProvider >() );
   // Profile providers — Uniwill-specific (high priority) and generic fallback
@@ -3590,6 +3777,9 @@ UccDBusService::UccDBusService()
   m_hw.addProfileProvider( std::make_unique< ucc::hal::GenericProfileProvider >() );
   // Probe all providers and select the best for each subsystem
   m_hw.detect();
+
+  // Build initial one-zone-per-fan defaults (profile zones override this later)
+  buildInitialFanZones();
 
   // Wire the HAL profile provider into the ProfileManager
   m_profileManager.setProfileProvider( m_hw.profileProvider() );
@@ -3623,6 +3813,10 @@ UccDBusService::UccDBusService()
     }
     m_dbusData.fanHwmonAvailable = m_hw.hasFanControl();
   }
+
+  // Discover additional monitoring sources (voltage sensors, per-core CPU freq)
+  discoverVoltageSensors();
+  discoverCpuFreqCores();
 
   // Build built-in fan profiles based on platform.
   rebuildBuiltinFanProfiles();
@@ -3703,7 +3897,7 @@ UccDBusService::UccDBusService()
       }
       // Push CPU power to history store
       if ( cpuPowerWatts > -1.0 )
-        m_metricsStore.push( MetricId::CpuPower, cpuPowerWatts );
+        m_metricsStore.push( "cpuPower", cpuPowerWatts );
     },
     [this]() { return m_dbusData.sensorDataCollectionStatus.load(); },
     [this]( const std::string &primeState ) {
@@ -3736,7 +3930,7 @@ UccDBusService::UccDBusService()
     [this]( int frequencyMHz ) {
       m_dbusData.cpuFrequencyMHz = frequencyMHz;
       if ( frequencyMHz > 0 )
-        m_metricsStore.push( MetricId::CpuFrequency, static_cast< double >( frequencyMHz ) );
+        m_metricsStore.push( "cpuFrequency", static_cast< double >( frequencyMHz ) );
     }
   );
 
@@ -3754,15 +3948,24 @@ UccDBusService::UccDBusService()
           m_dbusData.fans[fanIndex].speed.set( timestamp, speed );
       }
 
-      // Push fan duty to history store
+      // Push fan duty to history store for legacy compatibility
       if ( fanIndex == 0 )
-        m_metricsStore.push( MetricId::CpuFanDuty, timestamp, speed );
+        m_metricsStore.push( "cpuFanDuty", timestamp, speed );
       else if ( fanIndex == 1 )
-        m_metricsStore.push( MetricId::GpuFanDuty, timestamp, speed );
+        m_metricsStore.push( "gpuFanDuty", timestamp, speed );
     },
     [this]( size_t fanIndex, int64_t timestamp, int temp )
     {
       onFanTemperatureUpdate( fanIndex, timestamp, temp );
+    },
+    [this]( const std::string &fpId ) -> FanProfile
+    {
+      return resolveFanProfile( fpId );
+    },
+    [this]( const std::string &zoneId, int64_t timestamp, int temp, int duty )
+    {
+      std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+      m_dbusData.zoneTelemetry[zoneId] = { timestamp, temp, duty };
     }
   );
 
@@ -3947,6 +4150,99 @@ void UccDBusService::rebuildBuiltinFanProfiles()
     m_builtinFanProfiles.push_back( { fp.id,
                                       fp.name,
                                       fanProfileToJSON( fp, hwTypes, zoneNames ) } );
+  }
+}
+
+void UccDBusService::buildInitialFanZones()
+{
+  // Build one zone per detected fan — the simplest neutral default.
+  // No grouping or classification.  Profile zones override this when loaded.
+  static const std::vector< ucc::hal::FanCurvePoint > defaultCurve = {
+    { 30, 25 }, { 45, 30 }, { 55, 40 }, { 65, 55 },
+    { 75, 70 }, { 80, 85 }, { 90, 100 }
+  };
+
+  static const std::vector< ucc::hal::FanCurvePoint > defaultPumpCurve = {
+    { 30, 30 }, { 50, 35 }, { 65, 45 }, { 75, 60 },
+    { 85, 80 }, { 90, 100 }
+  };
+
+  const auto &fans = m_hw.fans();
+  std::vector< ucc::hal::FanZone > zones;
+  zones.reserve( fans.size() );
+
+  // No hardcoded thermal source assignment — zones start without a source.
+  // The user assigns sources through the Zone Setup UI.
+  const std::string fallbackTs;
+
+  for ( size_t i = 0; i < fans.size(); ++i )
+  {
+    const auto &fan = fans[i];
+    bool isPump = ( fan.deviceType == ucc::hal::FanDeviceType::Pump
+                 || fan.deviceType == ucc::hal::FanDeviceType::StagedPump );
+
+    zones.push_back( ucc::hal::FanZone{
+      .id = "zone-" + std::to_string( i ),
+      .name = fan.label.empty() ? ( "Fan " + std::to_string( i + 1 ) ) : fan.label,
+      .fanIds = { fan.id },
+      .thermalSourceId = fallbackTs,
+      .defaultType = fan.deviceType,
+      .curve = isPump ? defaultPumpCurve : defaultCurve,
+      .hysteresisDeg = 3,
+      .enabled = true } );
+  }
+
+  m_hw.setFanZones( std::move( zones ) );
+  syslog( LOG_INFO, "[uccd] Built %zu initial per-fan zones", m_hw.defaultFanZones().size() );
+}
+
+void UccDBusService::rebuildFanZonesFromProfile( const FanProfile &fp )
+{
+  // Check if the profile carries zone topology (fanIds)
+  bool hasTopology = false;
+  for ( const auto &zc : fp.zoneCurves )
+  {
+    if ( zc.hasTopology() )
+    {
+      hasTopology = true;
+      break;
+    }
+  }
+
+  if ( !hasTopology )
+    return; // Profile only has curves — keep existing zones
+
+  // Build FanZone objects from the profile's zone topology
+  std::vector< ucc::hal::FanZone > zones;
+  zones.reserve( fp.zoneCurves.size() );
+
+  for ( const auto &zc : fp.zoneCurves )
+  {
+    if ( zc.zoneId.empty() )
+      continue;
+
+    std::string tsId = zc.thermalSourceId;
+    // If the referenced source no longer exists, clear it rather than
+    // silently substituting a different source.
+    if ( !tsId.empty() && !m_hw.findThermalSource( tsId ) )
+      tsId.clear();
+
+    zones.push_back( ucc::hal::FanZone{
+      .id = zc.zoneId,
+      .name = zc.name.empty() ? zc.zoneId : zc.name,
+      .fanIds = zc.fanIds,
+      .thermalSourceId = tsId,
+      .defaultType = zc.deviceType,
+      .curve = zc.curve,
+      .hysteresisDeg = zc.hysteresisDeg,
+      .enabled = zc.enabled } );
+  }
+
+  if ( !zones.empty() )
+  {
+    m_hw.setFanZones( std::move( zones ) );
+    syslog( LOG_INFO, "[uccd] Rebuilt %zu fan zones from profile '%s'",
+            m_hw.defaultFanZones().size(), fp.name.c_str() );
   }
 }
 
@@ -4256,15 +4552,15 @@ void UccDBusService::setupGpuDataCallback()
         std::chrono::system_clock::now().time_since_epoch() ).count();
 
       if ( dGpuInfo.m_temp > -1.0 )
-        m_metricsStore.push( MetricId::GpuTemp, now, dGpuInfo.m_temp );
+        m_metricsStore.push( "gpuTemp", now, dGpuInfo.m_temp );
       if ( dGpuInfo.m_coreFrequency > -1.0 )
-        m_metricsStore.push( MetricId::GpuFrequency, now, dGpuInfo.m_coreFrequency );
+        m_metricsStore.push( "gpuFrequency", now, dGpuInfo.m_coreFrequency );
       if ( dGpuInfo.m_powerDraw > -1.0 )
-        m_metricsStore.push( MetricId::GpuPower, now, dGpuInfo.m_powerDraw );
+        m_metricsStore.push( "gpuPower", now, dGpuInfo.m_powerDraw );
       if ( dGpuInfo.m_vramFrequency > -1.0 )
-        m_metricsStore.push( MetricId::GpuVramFrequency, now, dGpuInfo.m_vramFrequency );
+        m_metricsStore.push( "gpuVramFrequency", now, dGpuInfo.m_vramFrequency );
       if ( dGpuInfo.m_coreVoltageMv > -1 )
-        m_metricsStore.push( MetricId::GpuCoreVoltage, now,
+        m_metricsStore.push( "gpuCoreVoltage", now,
                              static_cast< double >( dGpuInfo.m_coreVoltageMv ) );
 
       // Expose dGPU temperature through fan data for UI compatibility
@@ -4686,6 +4982,66 @@ void UccDBusService::onWork()
   // On unsupported devices, skip all hardware polling
   if ( !m_dbusData.deviceSupported.load() )
     return;
+
+  // ── Collect all sensor readings / fan RPMs into the metrics store ────
+  {
+    const auto now = std::chrono::duration_cast< std::chrono::milliseconds >(
+      std::chrono::system_clock::now().time_since_epoch() ).count();
+
+    // Temperature sensors
+    for ( const auto &sensor : m_hw.tempSensors() )
+    {
+      if ( auto val = m_hw.readTemp( sensor ); val.has_value() )
+        m_metricsStore.push( "sensor:" + sensor.id, now, *val );
+    }
+
+    // Thermal sources (aggregated)
+    for ( const auto &ts : m_hw.thermalSources() )
+    {
+      if ( auto val = m_hw.readThermalSource( ts ); val.has_value() )
+        m_metricsStore.push( "tsrc:" + ts.id, now, *val );
+    }
+
+    // Fan / pump RPMs
+    if ( auto *fp = m_hw.fanProvider() )
+    {
+      for ( const auto &fan : m_hw.fans() )
+      {
+        if ( fan.canRead )
+        {
+          if ( auto rpm = fp->getFanRPM( fan ); rpm.has_value() )
+            m_metricsStore.push( "fan:" + fan.id, now, static_cast< double >( *rpm ) );
+        }
+      }
+    }
+
+    // Hwmon voltage sensors
+    for ( const auto &vs : m_voltageSensors )
+    {
+      std::ifstream ifs( vs.path );
+      int millivolts = 0;
+      if ( ifs >> millivolts )
+        m_metricsStore.push( "voltage:" + vs.id, now, static_cast< double >( millivolts ) );
+    }
+
+    // Per-core CPU frequency
+    double freqSum = 0;
+    int freqCount = 0;
+    for ( const auto &core : m_cpuFreqCores )
+    {
+      std::ifstream ifs( core.path );
+      long khz = 0;
+      if ( ifs >> khz )
+      {
+        const double mhz = static_cast< double >( khz ) / 1000.0;
+        m_metricsStore.push( "cpufreq:" + std::to_string( core.coreIndex ), now, mhz );
+        freqSum += mhz;
+        ++freqCount;
+      }
+    }
+    if ( freqCount > 0 )
+      m_metricsStore.push( "cpufreq:avg", now, freqSum / freqCount );
+  }
 
   // update tuxedo wmi availability (derived from HAL platform provider)
   m_dbusData.tuxedoWmiAvailable = ( m_hw.platformProvider() != nullptr );
@@ -5259,7 +5615,7 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         }
 
         // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-        const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+        const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
         if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
              && pumpZone && !pumpZone->curve.empty() )
         {
@@ -5822,39 +6178,6 @@ void UccDBusService::loadSettings()
   loadSubProfiles( m_settings.keyboardProfiles, m_customKeyboardProfiles, "keyboard" );
   loadSubProfiles( m_settings.gpuProfiles, m_customGpuProfiles, "GPU" );
 
-  const bool keepMiscZone = std::any_of( m_hw.defaultFanZones().begin(),
-                                         m_hw.defaultFanZones().end(),
-                                         []( const auto &zone ) {
-                                           return zone.id == WellKnownZoneIDs::Misc;
-                                         } );
-  for ( auto &profile : m_customFanProfiles )
-  {
-    bool sanitized = false;
-    const std::string filteredJson = stripLegacyMiscZoneFromProfileJson( profile.json,
-                                                                         keepMiscZone,
-                                                                         &sanitized );
-    if ( !sanitized )
-      continue;
-
-    profile.json = filteredJson;
-
-    try
-    {
-      auto wrapper = nlohmann::json::parse( filteredJson );
-      wrapper["name"] = profile.name;
-      m_settings.fanProfiles[profile.id] = wrapper.dump();
-      settingsChanged = true;
-      std::cout << "[Settings] Removed legacy '" << WellKnownZoneIDs::Misc
-                << "' zone from fan profile '" << profile.name
-                << "' (ID: " << profile.id << ")" << std::endl;
-    }
-    catch ( const std::exception &e )
-    {
-      std::cerr << "[Settings] Failed to sanitize fan profile '" << profile.id
-                << "': " << e.what() << std::endl;
-    }
-  }
-
   // IMPORTANT: Do NOT resync/clear m_settings.profiles!
   // Reason: m_settings.profiles is the authoritative source from the file.
   // Resyncing can change keys or representation, breaking stateMap lookups.
@@ -6015,6 +6338,40 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
     FanProfile fp = resolveFanProfile( profile.fan.fanProfile );
     if ( fp.isValid() )
     {
+      // Register custom thermal sources before zone rebuild
+      if ( !fp.thermalSources.empty() )
+      {
+        m_hw.addThermalSources( fp.thermalSources );
+        std::cout << "[FanPump] Registered " << fp.thermalSources.size()
+                  << " custom thermal sources from profile" << std::endl;
+      }
+
+      // If the profile carries zone topology (fanIds), rebuild the zone model
+      // and restart the worker so it picks up the new fan-to-zone mapping.
+      bool zonesChanged = false;
+      for ( const auto &zc : fp.zoneCurves )
+      {
+        if ( zc.hasTopology() )
+        {
+          zonesChanged = true;
+          break;
+        }
+      }
+
+      if ( zonesChanged )
+      {
+        rebuildFanZonesFromProfile( fp );
+
+        // Restart the worker so onStart() reads the new zones
+        if ( m_fanControlWorker )
+        {
+          m_fanControlWorker->stop();
+          m_fanControlWorker->start();
+          std::cout << "[FanPump] Restarted FanControlWorker with profile zones" << std::endl;
+        }
+      }
+
+      // Apply curves as temporary overrides (works on both fresh and restarted worker)
       std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
       for ( const auto &zc : fp.zoneCurves )
         if ( !zc.curve.empty() )
@@ -6028,8 +6385,18 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
         std::cout << "[FanPump] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
       }
 
+      // Apply per-zone thermal source overrides from the profile
+      {
+        std::map< std::string, std::string > thermalSources;
+        for ( const auto &zc : fp.zoneCurves )
+          if ( !zc.thermalSourceId.empty() )
+            thermalSources[zc.zoneId] = zc.thermalSourceId;
+        if ( m_fanControlWorker && !thermalSources.empty() )
+          m_fanControlWorker->applyZoneThermalSources( thermalSources );
+      }
+
       // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+      const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
       if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
            && pumpZone && !pumpZone->curve.empty() )
       {
@@ -6219,9 +6586,9 @@ void UccDBusService::onFanTemperatureUpdate( size_t fanIndex, int64_t timestamp,
 
   // Push temperature to history store
   if ( fanIndex == 0 )
-    m_metricsStore.push( MetricId::CpuTemp, timestamp, temp );
+    m_metricsStore.push( "cpuTemp", timestamp, temp );
   else if ( fanIndex == 1 )
-    m_metricsStore.push( MetricId::GpuTemp, timestamp, temp );
+    m_metricsStore.push( "gpuTemp", timestamp, temp );
 
   // Auto-control water cooler fan and pump voltage based on CPU temperature
   if ( !m_dbusData.waterCoolerConnected.load() || !m_activeProfile.fan.autoControlWC || fanIndex != 0 )
@@ -6256,10 +6623,10 @@ void UccDBusService::updateWaterCoolerAutoControl( int temp )
   if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
   {
     const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
-    auto wcFanIt = tempCurves.find( WellKnownZoneIDs::WCFan );
+    auto wcFanIt = tempCurves.find( kWCFanZoneId );
     if ( wcFanIt != tempCurves.end() && !wcFanIt->second.empty() )
     {
-      auto *wcFanZone = fp.findZoneCurve( WellKnownZoneIDs::WCFan );
+      auto *wcFanZone = fp.findZoneCurve( kWCFanZoneId );
       if ( wcFanZone )
         wcFanZone->curve = wcFanIt->second;
     }
@@ -6269,17 +6636,17 @@ void UccDBusService::updateWaterCoolerAutoControl( int temp )
   if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
   {
     const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
-    auto wcPumpIt = tempCurves.find( WellKnownZoneIDs::WCPump );
+    auto wcPumpIt = tempCurves.find( kWCPumpZoneId );
     if ( wcPumpIt != tempCurves.end() && !wcPumpIt->second.empty() )
     {
-      auto *wcPumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+      auto *wcPumpZone = fp.findZoneCurve( kWCPumpZoneId );
       if ( wcPumpZone )
         wcPumpZone->curve = wcPumpIt->second;
     }
   }
 
   const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
-  const int wcFanSpeed = fp.getSpeedForZone( snappedTemp, WellKnownZoneIDs::WCFan );
+  const int wcFanSpeed = fp.getSpeedForZone( snappedTemp, kWCFanZoneId );
   if ( m_waterCoolerWorker )
     m_waterCoolerWorker->setFanSpeed( std::max( wcFanSpeed, 0 ) );
 
@@ -6304,7 +6671,7 @@ void UccDBusService::updateWaterCoolerAutoControl( int temp )
       ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
 
   // Read pump curve from the wc-pump zone
-  const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+  const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
   int rawIdx = 0;
   if ( pumpZone )
   {
@@ -6378,7 +6745,7 @@ void UccDBusService::applyFullProfile( const UccProfile &profile )
       }
 
       // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      const auto *pumpZone = fp.findZoneCurve( WellKnownZoneIDs::WCPump );
+      const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
       if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
            && pumpZone && !pumpZone->curve.empty() )
       {
@@ -6873,4 +7240,78 @@ bool UccDBusService::syncOutputPortsSetting()
   }
 
   return settingsChanged;
+}
+
+void UccDBusService::discoverVoltageSensors()
+{
+  namespace fs = std::filesystem;
+  const fs::path hwmonBase = "/sys/class/hwmon";
+  if ( !fs::exists( hwmonBase ) )
+    return;
+
+  for ( auto const& hwEntry : fs::directory_iterator( hwmonBase ) )
+  {
+    auto hwPath = hwEntry.path();
+    // Read chip name for labeling
+    std::string chipName;
+    {
+      std::ifstream f( hwPath / "name" );
+      if ( f )
+        std::getline( f, chipName );
+    }
+
+    // Scan for inN_input files
+    for ( int i = 0; i < 32; ++i )
+    {
+      auto inputFile = hwPath / ( "in" + std::to_string( i ) + "_input" );
+      if ( !fs::exists( inputFile ) )
+        continue;
+
+      std::string label;
+      auto labelFile = hwPath / ( "in" + std::to_string( i ) + "_label" );
+      {
+        std::ifstream f( labelFile );
+        if ( f )
+          std::getline( f, label );
+      }
+
+      VoltageSensorInfo vs;
+      vs.path = inputFile.string();
+      vs.id = hwPath.filename().string() + "_in" + std::to_string( i );
+      if ( !label.empty() )
+        vs.label = label;
+      else if ( !chipName.empty() )
+        vs.label = chipName + " in" + std::to_string( i );
+      else
+        vs.label = hwPath.filename().string() + " in" + std::to_string( i );
+
+      m_voltageSensors.push_back( std::move( vs ) );
+    }
+  }
+
+  syslog( LOG_INFO, "Discovered %zu voltage sensors", m_voltageSensors.size() );
+}
+
+void UccDBusService::discoverCpuFreqCores()
+{
+  namespace fs = std::filesystem;
+  const fs::path cpuBase = "/sys/devices/system/cpu";
+
+  for ( int i = 0; i < 1024; ++i )
+  {
+    auto freqPath = cpuBase / ( "cpu" + std::to_string( i ) ) / "cpufreq" / "scaling_cur_freq";
+    if ( !fs::exists( freqPath ) )
+    {
+      if ( i > 0 )
+        break;
+      continue;
+    }
+
+    CpuFreqCore core;
+    core.coreIndex = i;
+    core.path = freqPath.string();
+    m_cpuFreqCores.push_back( std::move( core ) );
+  }
+
+  syslog( LOG_INFO, "Discovered %zu CPU frequency cores", m_cpuFreqCores.size() );
 }

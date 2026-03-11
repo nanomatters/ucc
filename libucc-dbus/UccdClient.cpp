@@ -412,6 +412,13 @@ std::optional< std::string > UccdClient::getThermalSourcesJSON()
   return std::nullopt;
 }
 
+std::optional< std::string > UccdClient::getSensorReadingsJSON()
+{
+  if ( auto result = callMethod< QString >( "GetSensorReadingsJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
+}
+
 std::optional< std::string > UccdClient::getHardwareFanDevicesJSON()
 {
   if ( auto result = callMethod< QString >( "GetHardwareFanDevicesJSON" ) )
@@ -690,6 +697,14 @@ bool UccdClient::applyFanProfiles( const std::string &fanProfilesJSON )
 bool UccdClient::revertFanProfiles()
 {
   return callMethod< bool >( "RevertFanProfiles" ).value_or( false );
+}
+
+std::optional< std::string > UccdClient::getFanZoneTelemetryJSON()
+{
+  auto result = callMethod< QString >( "GetFanZoneTelemetryJSON" );
+  if ( result )
+    return result->toStdString();
+  return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getCurrentFanSpeed()
@@ -1455,6 +1470,13 @@ bool UccdClient::setMonitorHistoryHorizon( int seconds )
 std::optional< int > UccdClient::getMonitorHistoryHorizon()
 {
   return callMethod< int >( "GetMonitorHistoryHorizon" );
+}
+
+std::optional< std::string > UccdClient::getMonitorSourcesJSON()
+{
+  if ( auto result = callMethod< QString >( "GetMonitorSourcesJSON" ) )
+    return result->toStdString();
+  return std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getFpsSourcesJSON()
