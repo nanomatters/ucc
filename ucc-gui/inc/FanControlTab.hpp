@@ -184,13 +184,24 @@ private:
   void refreshZoneRow( int row );
   void onZoneItemChanged( QTableWidgetItem *item );
   void installZoneSourceComboForRow( int row );
+  void installZoneTypeComboForRow( int row );
   void onZoneSourceComboChanged( int row );
+  void onCurveTabSourceComboChanged( const QString &zoneId, const QString &tsId );
+  void onSensorTreeItemChanged( QTreeWidget *tree, QTreeWidgetItem *item );
+  void onDeviceTreeItemChanged( QTreeWidget *tree, QTreeWidgetItem *item );
+  void onTemplateComboChanged( const QString &zoneId, const QString &templateId, QComboBox *combo );
+  void onFanEditorPointsChanged( const QString &zoneId, const QVector< FanCurveEditorWidget::Point > &pts );
+  void rebuildZoneEditorsWithState( const QJsonArray &zones,
+                                    const QMap< QString, QVector< FanCurveEditorWidget::Point > > &fanPoints,
+                                    const QMap< QString, QVector< PumpCurveEditorWidget::Point > > &pumpPoints,
+                                    const QMap< QString, QString > &sourceByZone );
   void onZoneContextMenu( const QPoint &pos );
   void onDeviceDroppedOnZone( int row, const QString &deviceId );
   void addDeviceToZone( int row, const QString &deviceId );
   void handleRemoveDevice( int row, const QString &deviceId );
   QString devicesSummaryText( const QJsonObject &zone ) const;
   static QString normalizedDeviceGroup( const QJsonObject &device );
+  static void selectComboByData( QComboBox *combo, const QString &data );
 
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;
@@ -258,12 +269,14 @@ private:
   // ── Live sensor readings polling ──
   QTimer *m_sensorPollTimer = nullptr;
   QTreeWidget *m_sensorTree = nullptr;
-  QJsonObject m_sensorReadings;      // sensorId → value, _source:id → value
+  QTreeWidget *m_deviceTree = nullptr;
+  QJsonObject m_sensorReadings;      // sensorId → value, _source:id → value, fan:id → RPM
   QJsonObject m_zoneTelemetry;       // zoneId → {temp, duty}
   void pollSensorReadings();
   void updateSensorTreeValues();
   void updateSourceTableValues();
   void updateZoneTableValues();
+  void updateDeviceTreeValues();
 };
 
 } // namespace ucc

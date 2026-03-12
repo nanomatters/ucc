@@ -74,7 +74,6 @@ public:
 
     profile.fan.useControl = true;
     profile.fan.fanProfile = "fan-platform-default";
-    profile.fan.sameSpeed = true;
     profile.fan.autoControlWC = false;
     profile.fan.enableWaterCooler = false;
 
@@ -145,7 +144,6 @@ private:
 
     p.fan.useControl = true;
     p.fan.fanProfile = fanProfileId;
-    p.fan.sameSpeed = true;
     p.fan.autoControlWC = false;
     p.fan.enableWaterCooler = false;
 

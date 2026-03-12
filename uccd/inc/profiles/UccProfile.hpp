@@ -129,14 +129,12 @@ struct UccProfileFanControl
 {
   bool useControl;
   std::string fanProfile;  ///< ID reference to a fan profile (e.g. "fan-balanced")
-  bool sameSpeed; // when true, all fans are driven at the same percent (highest)
   bool autoControlWC; // when true, automatically control water cooler based on system temperature
   bool enableWaterCooler; // when true, water cooler BLE scanning/connection is enabled
 
   UccProfileFanControl()
     : useControl( true ),
       fanProfile( "fan-balanced" ),
-      sameSpeed( true ),
       autoControlWC( true ),
       enableWaterCooler( ucc::WATER_COOLER_INITIAL_STATE )
   {

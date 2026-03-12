@@ -37,6 +37,7 @@
 #include <QDir>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QUuid>
 #include "CommonTypes.hpp"
 
 namespace ucc
@@ -751,6 +752,7 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
   m_zoneProgrammaticUpdate.clear();
   m_zoneTable = nullptr;
   m_sourceTable = nullptr;
+  m_deviceTree = nullptr;
 
   while ( m_subTabs->count() > 0 )
   {
@@ -862,33 +864,9 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
     connect( sensorTree, &QTreeWidget::itemChanged, this,
              [this, sensorTree]( QTreeWidgetItem *item, int column ) {
-      Q_UNUSED( column )
-      if ( !item )
-        return;
-
-      const QString sid = item->data( 0, Qt::UserRole ).toString();
-      if ( sid.isEmpty() )
-        return; // group row
-
-      const QString defaultLabel = item->data( 0, Qt::UserRole + 1 ).toString();
-      const QString alias = item->text( 0 ).trimmed();
-
-      if ( alias.isEmpty() )
-      {
-        m_sensorAliasById.remove( sid );
-        QSignalBlocker blocker( sensorTree );
-        item->setText( 0, defaultLabel );
-        m_sensorLabelById[sid] = defaultLabel;
-      }
-      else
-      {
-        m_sensorAliasById[sid] = alias;
-        m_sensorLabelById[sid] = alias;
-      }
-
-      for ( int row = 0; row < m_sourceEditorModel.size(); ++row )
-        refreshSourceRow( row );
-    } );
+               if ( column == 0 )
+                 onSensorTreeItemChanged( sensorTree, item );
+             } );
 
     sensorPaneLayout->addWidget( sensorTree );
 
@@ -897,10 +875,12 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
     auto *devicePaneLayout = new QVBoxLayout( devicePane );
     devicePaneLayout->setContentsMargins( 6, 6, 6, 6 );
     auto *deviceTree = new QTreeWidget();
-    deviceTree->setColumnCount( 1 );
-    deviceTree->setHeaderLabels( { QStringLiteral( "Hardware Devices" ) } );
-    deviceTree->header()->setStretchLastSection( true );
+    m_deviceTree = deviceTree;
+    deviceTree->setColumnCount( 2 );
+    deviceTree->setHeaderLabels( { QStringLiteral( "Hardware Devices" ), QStringLiteral( "RPM" ) } );
+    deviceTree->header()->setStretchLastSection( false );
     deviceTree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+    deviceTree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
     deviceTree->setDragEnabled( true );
     deviceTree->setDragDropMode( QAbstractItemView::DragOnly );
 
@@ -943,33 +923,9 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
     connect( deviceTree, &QTreeWidget::itemChanged, this,
              [this, deviceTree]( QTreeWidgetItem *item, int column ) {
-      Q_UNUSED( column )
-      if ( !item )
-        return;
-
-      const QString did = item->data( 0, Qt::UserRole ).toString();
-      if ( did.isEmpty() )
-        return; // group row
-
-      const QString defaultLabel = item->data( 0, Qt::UserRole + 1 ).toString();
-      const QString alias = item->text( 0 ).trimmed();
-
-      if ( alias.isEmpty() )
-      {
-        m_deviceAliasById.remove( did );
-        QSignalBlocker blocker( deviceTree );
-        item->setText( 0, defaultLabel );
-        m_fanLabelById[did] = defaultLabel;
-      }
-      else
-      {
-        m_deviceAliasById[did] = alias;
-        m_fanLabelById[did] = alias;
-      }
-
-      for ( int row = 0; row < m_zoneCache.size(); ++row )
-        refreshZoneRow( row );
-    } );
+               if ( column == 0 )
+                 onDeviceTreeItemChanged( deviceTree, item );
+             } );
 
     devicePaneLayout->addWidget( deviceTree );
     leftPaneLayout->addWidget( sensorPane, 1 );
@@ -1030,14 +986,11 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
     auto *zoneTable = new ZoneTableWidget();
     m_zoneTable = zoneTable;
-    m_zoneTable->setColumnCount( 3 );
-    m_zoneTable->setHorizontalHeaderLabels( { QStringLiteral( "Name" ),
-                                              QStringLiteral( "Temp Source" ),
-                                              QStringLiteral( "Devices" ) } );
-    m_zoneTable->setColumnCount( 5 );
+    m_zoneTable->setColumnCount( 6 );
     m_zoneTable->setHorizontalHeaderLabels( { QStringLiteral( "Name" ),
                                  QStringLiteral( "Temp Source" ),
                                  QStringLiteral( "Devices" ),
+                                 QStringLiteral( "Type" ),
                                  QStringLiteral( "°C" ),
                                  QStringLiteral( "Fan %" ) } );
     m_zoneTable->horizontalHeader()->setStretchLastSection( false );
@@ -1046,6 +999,7 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
     m_zoneTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
     m_zoneTable->horizontalHeader()->setSectionResizeMode( 3, QHeaderView::ResizeToContents );
     m_zoneTable->horizontalHeader()->setSectionResizeMode( 4, QHeaderView::ResizeToContents );
+    m_zoneTable->horizontalHeader()->setSectionResizeMode( 5, QHeaderView::ResizeToContents );
     m_zoneTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     m_zoneTable->setSelectionMode( QAbstractItemView::SingleSelection );
     m_zoneTable->setEditTriggers( QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed );
@@ -1153,29 +1107,7 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
     connect( tsCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
              [this, zoneId = id, tsCombo]( int ) {
-               const QString tsId = tsCombo->currentData().toString();
-
-               // Sync zone-table combo to match
-               for ( int r = 0; r < m_zoneCache.size(); ++r )
-               {
-                 if ( m_zoneCache[r][QStringLiteral( "id" )].toString() != zoneId )
-                   continue;
-                 if ( r < m_zoneSourceCombos.size() && m_zoneSourceCombos[r] )
-                 {
-                   QSignalBlocker blocker( m_zoneSourceCombos[r] );
-                   for ( int i = 0; i < m_zoneSourceCombos[r]->count(); ++i )
-                   {
-                     if ( m_zoneSourceCombos[r]->itemData( i ).toString() == tsId )
-                     {
-                       m_zoneSourceCombos[r]->setCurrentIndex( i );
-                       break;
-                     }
-                   }
-                 }
-                 break;
-               }
-
-               emit thermalSourceChanged( zoneId, tsId );
+               onCurveTabSourceComboChanged( zoneId, tsCombo->currentData().toString() );
              } );
 
     if ( devType == QStringLiteral( "stagedPump" ) )
@@ -1199,43 +1131,14 @@ void FanControlTab::buildZoneEditors( const QJsonArray &zones,
 
       connect( templateCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
                [this, zoneId = id, templateCombo]( int ) {
-                 const QString templateId = templateCombo->currentData().toString();
-                 if ( templateId.isEmpty() )
-                   return;
-
-                 const QString previousTemplate = m_selectedTemplateByZone.value( zoneId );
-                 if ( templateId == previousTemplate )
-                   return;
-
-                 if ( m_zoneGraphModifiedByUser.value( zoneId, false ) )
-                 {
-                   const int answer = QMessageBox::question(
-                       this,
-                       QStringLiteral( "Replace Curve" ),
-                       QStringLiteral( "Applying a new template will erase your graph changes. Continue?" ),
-                       QMessageBox::Yes | QMessageBox::No,
-                       QMessageBox::No );
-                   if ( answer != QMessageBox::Yes )
-                   {
-                     QSignalBlocker blocker( templateCombo );
-                     const int prevIdx = previousTemplate.isEmpty() ? -1 : templateCombo->findData( previousTemplate );
-                     templateCombo->setCurrentIndex( prevIdx );
-                     return;
-                   }
-                 }
-
-                 applyCurveTemplateToZone( zoneId, templateId );
-                 m_selectedTemplateByZone[zoneId] = templateId;
-                 m_zoneGraphModifiedByUser[zoneId] = false;
+                 onTemplateComboChanged( zoneId, templateCombo->currentData().toString(), templateCombo );
                } );
 
       auto *editor = new FanCurveEditorWidget();
       m_fanEditors[id] = editor;
       connect( editor, &FanCurveEditorWidget::pointsChanged, this,
                [this, zoneId = id]( const QVector< FanCurveEditorWidget::Point > &pts ) {
-                 if ( !m_zoneProgrammaticUpdate.value( zoneId, false ) )
-                   m_zoneGraphModifiedByUser[zoneId] = true;
-                 emit fanCurveChanged( zoneId, pts );
+                 onFanEditorPointsChanged( zoneId, pts );
                } );
       pageLayout->addWidget( editor, 1 );
     }
@@ -1630,21 +1533,7 @@ void FanControlTab::createSourceWithSensor( const QString &sensorId )
   if ( sensorId.isEmpty() )
     return;
 
-  QString newId;
-  for ( int n = 1; ; ++n )
-  {
-    newId = QStringLiteral( "custom-source-%1" ).arg( n );
-    bool exists = false;
-    for ( const QJsonObject &src : m_sourceEditorModel )
-    {
-      if ( src[QStringLiteral( "id" )].toString() == newId )
-      {
-        exists = true;
-        break;
-      }
-    }
-    if ( !exists ) break;
-  }
+  const QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 
   QJsonObject src;
   src[QStringLiteral( "id" )] = newId;
@@ -1851,6 +1740,37 @@ void FanControlTab::installZoneSourceComboForRow( int row )
            [this, row]( int ) { onZoneSourceComboChanged( row ); } );
 }
 
+void FanControlTab::installZoneTypeComboForRow( int row )
+{
+  if ( row < 0 || row >= m_zoneCache.size() )
+    return;
+
+  auto *combo = new QComboBox( m_zoneTable );
+  combo->addItem( QStringLiteral( "Fan" ),   QStringLiteral( "fan" ) );
+  combo->addItem( QStringLiteral( "Pump" ),  QStringLiteral( "pump" ) );
+
+  const QString dt = m_zoneCache[row][QStringLiteral( "deviceType" )].toString().toLower();
+  for ( int i = 0; i < combo->count(); ++i )
+  {
+    if ( combo->itemData( i ).toString() == dt )
+    {
+      combo->setCurrentIndex( i );
+      break;
+    }
+  }
+
+  m_zoneTable->setCellWidget( row, 3, combo );
+
+  connect( combo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
+           [this, row, combo]( int ) {
+             if ( row < 0 || row >= m_zoneCache.size() )
+               return;
+             QJsonObject zone = m_zoneCache[row];
+             zone[QStringLiteral( "deviceType" )] = combo->currentData().toString();
+             m_zoneCache[row] = zone;
+           } );
+}
+
 void FanControlTab::onZoneSourceComboChanged( int row )
 {
   if ( row < 0 || row >= m_zoneCache.size() )
@@ -1861,22 +1781,145 @@ void FanControlTab::onZoneSourceComboChanged( int row )
   const QString zoneId = m_zoneCache[row][QStringLiteral( "id" )].toString();
   const QString tsId = combo->currentData().toString();
 
-  // Sync per-curve-tab combo to match
   auto it = m_thermalSourceCombos.find( zoneId );
   if ( it != m_thermalSourceCombos.end() && it.value() )
   {
     QSignalBlocker blocker( it.value() );
-    for ( int i = 0; i < it.value()->count(); ++i )
-    {
-      if ( it.value()->itemData( i ).toString() == tsId )
-      {
-        it.value()->setCurrentIndex( i );
-        break;
-      }
-    }
+    selectComboByData( it.value(), tsId );
   }
 
   emit thermalSourceChanged( zoneId, tsId );
+}
+
+void FanControlTab::onCurveTabSourceComboChanged( const QString &zoneId, const QString &tsId )
+{
+  for ( int r = 0; r < m_zoneCache.size(); ++r )
+  {
+    if ( m_zoneCache[r][QStringLiteral( "id" )].toString() != zoneId )
+      continue;
+    if ( r < m_zoneSourceCombos.size() && m_zoneSourceCombos[r] )
+    {
+      QSignalBlocker blocker( m_zoneSourceCombos[r] );
+      selectComboByData( m_zoneSourceCombos[r], tsId );
+    }
+    break;
+  }
+  emit thermalSourceChanged( zoneId, tsId );
+}
+
+void FanControlTab::selectComboByData( QComboBox *combo, const QString &data )
+{
+  for ( int i = 0; i < combo->count(); ++i )
+  {
+    if ( combo->itemData( i ).toString() == data )
+    {
+      combo->setCurrentIndex( i );
+      return;
+    }
+  }
+}
+
+void FanControlTab::onSensorTreeItemChanged( QTreeWidget *tree, QTreeWidgetItem *item )
+{
+  if ( !item )
+    return;
+  const QString sid = item->data( 0, Qt::UserRole ).toString();
+  if ( sid.isEmpty() )
+    return; // group row
+  const QString defaultLabel = item->data( 0, Qt::UserRole + 1 ).toString();
+  const QString alias = item->text( 0 ).trimmed();
+  if ( alias.isEmpty() )
+  {
+    m_sensorAliasById.remove( sid );
+    QSignalBlocker blocker( tree );
+    item->setText( 0, defaultLabel );
+    m_sensorLabelById[sid] = defaultLabel;
+  }
+  else
+  {
+    m_sensorAliasById[sid] = alias;
+    m_sensorLabelById[sid] = alias;
+  }
+  for ( int row = 0; row < m_sourceEditorModel.size(); ++row )
+    refreshSourceRow( row );
+}
+
+void FanControlTab::onDeviceTreeItemChanged( QTreeWidget *tree, QTreeWidgetItem *item )
+{
+  if ( !item )
+    return;
+  const QString did = item->data( 0, Qt::UserRole ).toString();
+  if ( did.isEmpty() )
+    return; // group row
+  const QString defaultLabel = item->data( 0, Qt::UserRole + 1 ).toString();
+  const QString alias = item->text( 0 ).trimmed();
+  if ( alias.isEmpty() )
+  {
+    m_deviceAliasById.remove( did );
+    QSignalBlocker blocker( tree );
+    item->setText( 0, defaultLabel );
+    m_fanLabelById[did] = defaultLabel;
+  }
+  else
+  {
+    m_deviceAliasById[did] = alias;
+    m_fanLabelById[did] = alias;
+  }
+  for ( int row = 0; row < m_zoneCache.size(); ++row )
+    refreshZoneRow( row );
+}
+
+void FanControlTab::onTemplateComboChanged( const QString &zoneId, const QString &templateId, QComboBox *combo )
+{
+  if ( templateId.isEmpty() )
+    return;
+  const QString previousTemplate = m_selectedTemplateByZone.value( zoneId );
+  if ( templateId == previousTemplate )
+    return;
+  if ( m_zoneGraphModifiedByUser.value( zoneId, false ) )
+  {
+    const int answer = QMessageBox::question(
+        this,
+        QStringLiteral( "Replace Curve" ),
+        QStringLiteral( "Applying a new template will erase your graph changes. Continue?" ),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No );
+    if ( answer != QMessageBox::Yes )
+    {
+      QSignalBlocker blocker( combo );
+      const int prevIdx = previousTemplate.isEmpty() ? -1 : combo->findData( previousTemplate );
+      combo->setCurrentIndex( prevIdx );
+      return;
+    }
+  }
+  applyCurveTemplateToZone( zoneId, templateId );
+  m_selectedTemplateByZone[zoneId] = templateId;
+  m_zoneGraphModifiedByUser[zoneId] = false;
+}
+
+void FanControlTab::onFanEditorPointsChanged( const QString &zoneId,
+                                              const QVector< FanCurveEditorWidget::Point > &pts )
+{
+  if ( !m_zoneProgrammaticUpdate.value( zoneId, false ) )
+    m_zoneGraphModifiedByUser[zoneId] = true;
+  emit fanCurveChanged( zoneId, pts );
+}
+
+void FanControlTab::rebuildZoneEditorsWithState(
+    const QJsonArray &zones,
+    const QMap< QString, QVector< FanCurveEditorWidget::Point > > &fanPoints,
+    const QMap< QString, QVector< PumpCurveEditorWidget::Point > > &pumpPoints,
+    const QMap< QString, QString > &sourceByZone )
+{
+  buildZoneEditors( zones, thermalSourcesData(), m_lastFanDevices, m_lastSensors );
+  for ( auto it = fanPoints.cbegin(); it != fanPoints.cend(); ++it )
+    if ( auto *ed = fanEditor( it.key() ) )
+      ed->setPoints( it.value() );
+  for ( auto it = pumpPoints.cbegin(); it != pumpPoints.cend(); ++it )
+    if ( auto *ed = pumpEditor( it.key() ) )
+      ed->setPoints( it.value() );
+  for ( auto it = sourceByZone.cbegin(); it != sourceByZone.cend(); ++it )
+    setThermalSourceForZone( it.key(), it.value() );
 }
 
 void FanControlTab::onZoneItemChanged( QTableWidgetItem *item )
@@ -1903,6 +1946,11 @@ void FanControlTab::onZoneItemChanged( QTableWidgetItem *item )
     QSignalBlocker blocker( m_zoneTable );
     item->setText( name );
   }
+
+  // Tab 0 is "Zone Setup"; zone rows map to tabs starting at index 1
+  const int tabIndex = row + 1;
+  if ( m_subTabs && tabIndex < m_subTabs->count() )
+    m_subTabs->setTabText( tabIndex, name );
 }
 
 QString FanControlTab::devicesSummaryText( const QJsonObject &zone ) const
@@ -1932,7 +1980,6 @@ void FanControlTab::refreshZoneRow( int row )
   // Column 0: Name
   auto *nameItem = new QTableWidgetItem( zone[QStringLiteral( "name" )].toString() );
   nameItem->setFlags( nameItem->flags() | Qt::ItemIsEditable );
-  nameItem->setToolTip( QStringLiteral( "Device Type: %1" ).arg( zone[QStringLiteral( "deviceType" )].toString() ) );
   m_zoneTable->setItem( row, 0, nameItem );
 
   // Column 1: Temp Source (combo widget — installed elsewhere)
@@ -1941,6 +1988,9 @@ void FanControlTab::refreshZoneRow( int row )
   auto *devicesItem = new QTableWidgetItem( devicesSummaryText( zone ) );
   devicesItem->setFlags( devicesItem->flags() & ~Qt::ItemIsEditable );
   m_zoneTable->setItem( row, 2, devicesItem );
+
+  // Column 3: Type combo (fan / pump)
+  installZoneTypeComboForRow( row );
 }
 
 void FanControlTab::onDeviceDroppedOnZone( int row, const QString &deviceId )
@@ -2098,45 +2148,11 @@ void FanControlTab::onZoneContextMenu( const QPoint &pos )
       sourceByZone[zoneId] = tsId;
   }
 
-  auto rebuildWithZones = [this, &fanPointsByZone, &pumpPointsByZone, &sourceByZone]( const QJsonArray &zones ) {
-    buildZoneEditors( zones, thermalSourcesData(), m_lastFanDevices, m_lastSensors );
-
-    for ( auto it = fanPointsByZone.cbegin(); it != fanPointsByZone.cend(); ++it )
-    {
-      if ( auto *ed = fanEditor( it.key() ) )
-        ed->setPoints( it.value() );
-    }
-    for ( auto it = pumpPointsByZone.cbegin(); it != pumpPointsByZone.cend(); ++it )
-    {
-      if ( auto *ed = pumpEditor( it.key() ) )
-        ed->setPoints( it.value() );
-    }
-    for ( auto it = sourceByZone.cbegin(); it != sourceByZone.cend(); ++it )
-      setThermalSourceForZone( it.key(), it.value() );
-  };
-
   if ( chosen == addZoneAction )
   {
-    int suffix = 1;
-    QString newId;
-    while ( true )
-    {
-      newId = QStringLiteral( "zone-custom-%1" ).arg( suffix );
-      bool exists = false;
-      for ( const QJsonObject &z : m_zoneCache )
-      {
-        if ( z[QStringLiteral( "id" )].toString() == newId )
-        {
-          exists = true;
-          break;
-        }
-      }
-      if ( !exists )
-        break;
-      ++suffix;
-    }
+    const QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 
-    const QString suggestedName = QStringLiteral( "Custom Zone %1" ).arg( suffix );
+    const QString suggestedName = QStringLiteral( "Custom Zone" );
     bool ok = false;
     const QString enteredName = QInputDialog::getText(
         m_zoneTable,
@@ -2175,7 +2191,7 @@ void FanControlTab::onZoneContextMenu( const QPoint &pos )
     if ( !defaultSourceId.isEmpty() )
       sourceByZone[newId] = defaultSourceId;
 
-    rebuildWithZones( newZones );
+    rebuildZoneEditorsWithState( newZones, fanPointsByZone, pumpPointsByZone, sourceByZone );
     showStatusMessage( QStringLiteral( "Zone added." ) );
     return;
   }
@@ -2206,7 +2222,7 @@ void FanControlTab::onZoneContextMenu( const QPoint &pos )
       newZones.append( z );
     }
 
-    rebuildWithZones( newZones );
+    rebuildZoneEditorsWithState( newZones, fanPointsByZone, pumpPointsByZone, sourceByZone );
 
     showStatusMessage( QStringLiteral( "Zone removed." ) );
   }
@@ -2300,6 +2316,7 @@ void FanControlTab::pollSensorReadings()
 
   m_sensorReadings = doc.object();
   updateSensorTreeValues();
+  updateDeviceTreeValues();
   updateSourceTableValues();
   updateZoneTableValues();
 
@@ -2331,6 +2348,29 @@ void FanControlTab::updateSensorTreeValues()
       auto val = m_sensorReadings.value( sid );
       if ( val.isDouble() )
         item->setText( 1, QString::number( val.toInt() ) );
+      else
+        item->setText( 1, QStringLiteral( "--" ) );
+    }
+    ++it;
+  }
+}
+
+void FanControlTab::updateDeviceTreeValues()
+{
+  if ( !m_deviceTree )
+    return;
+
+  QTreeWidgetItemIterator it( m_deviceTree );
+  while ( *it )
+  {
+    QTreeWidgetItem *item = *it;
+    const QString did = item->data( 0, Qt::UserRole ).toString();
+    if ( !did.isEmpty() )
+    {
+      const QString key = QStringLiteral( "fan:" ) + did;
+      auto val = m_sensorReadings.value( key );
+      if ( val.isDouble() )
+        item->setText( 1, QString::number( val.toInt() ) + QStringLiteral( " RPM" ) );
       else
         item->setText( 1, QStringLiteral( "--" ) );
     }
@@ -2376,14 +2416,14 @@ void FanControlTab::updateSourceTableValues()
       const QJsonObject &zone = m_zoneCache[row];
       const QString zoneId = zone[QStringLiteral( "id" )].toString();
 
-      // Temp column (col 3)
-      auto *tempItem = m_zoneTable->item( row, 3 );
+      // Temp column (col 4)
+      auto *tempItem = m_zoneTable->item( row, 4 );
       if ( !tempItem )
       {
         tempItem = new QTableWidgetItem();
         tempItem->setFlags( tempItem->flags() & ~Qt::ItemIsEditable );
         tempItem->setTextAlignment( Qt::AlignCenter );
-        m_zoneTable->setItem( row, 3, tempItem );
+        m_zoneTable->setItem( row, 4, tempItem );
       }
 
       auto telemetry = m_zoneTelemetry.value( zoneId );
@@ -2400,21 +2440,22 @@ void FanControlTab::updateSourceTableValues()
         tempItem->setText( QStringLiteral( "--" ) );
       }
 
-      // Fan duty column (col 4)
-      auto *dutyItem = m_zoneTable->item( row, 4 );
+      // Fan duty column (col 5)
+      auto *dutyItem = m_zoneTable->item( row, 5 );
       if ( !dutyItem )
       {
         dutyItem = new QTableWidgetItem();
         dutyItem->setFlags( dutyItem->flags() & ~Qt::ItemIsEditable );
         dutyItem->setTextAlignment( Qt::AlignCenter );
-        m_zoneTable->setItem( row, 4, dutyItem );
+        m_zoneTable->setItem( row, 5, dutyItem );
       }
 
       if ( telemetry.isObject() )
       {
-        int duty = telemetry.toObject()[QStringLiteral( "duty" )].toInt( -1 );
+        const QJsonObject tobj = telemetry.toObject();
+        int duty = tobj[QStringLiteral( "duty" )].toInt( -1 );
         if ( duty >= 0 )
-          dutyItem->setText( QString::number( duty ) );
+          dutyItem->setText( QString::number( duty ) + QStringLiteral( "%" ) );
         else
           dutyItem->setText( QStringLiteral( "--" ) );
       }

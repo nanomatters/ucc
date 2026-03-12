@@ -82,7 +82,8 @@ class FanControlLogic
 {
 public:
   explicit FanControlLogic( std::vector< ucc::hal::FanCurvePoint > curve,
-                            int hysteresisDeg = 3 )
+                            int hysteresisDeg = 3,
+                            ucc::hal::FanDeviceType deviceType = ucc::hal::FanDeviceType::Fan )
     : m_curve( std::move( curve ) )
     , m_hysteresisDeg( hysteresisDeg )
     , m_latestSpeedPercent( 0 )
@@ -90,6 +91,7 @@ public:
     , m_lastEffectiveTemp( -1 )
     , m_fansMinSpeedHWLimit( 0 )
     , m_fansOffAvailable( true )
+    , m_deviceType( deviceType )
   {
   }
 
@@ -173,6 +175,12 @@ private:
 
   int manageCriticalTemperature( int temp, int speed ) const
   {
+    // Pumps follow their curve unconditionally — the user sets pump curves
+    // deliberately and overriding them at high temps is counter-productive.
+    if ( m_deviceType == ucc::hal::FanDeviceType::Pump
+      || m_deviceType == ucc::hal::FanDeviceType::StagedPump )
+      return speed;
+
     constexpr int CRITICAL_TEMPERATURE = 85;
     constexpr int OVERHEAT_TEMPERATURE = 90;
 
@@ -209,6 +217,7 @@ private:
 
   int m_fansMinSpeedHWLimit;
   bool m_fansOffAvailable;
+  ucc::hal::FanDeviceType m_deviceType;
 };
 
 /**
@@ -228,7 +237,7 @@ public:
     std::function< void( size_t, int64_t, int ) > updateFanSpeed,
     std::function< void( size_t, int64_t, int ) > updateFanTemp,
     std::function< FanProfile( const std::string & ) > resolveFanProfile,
-    std::function< void( const std::string &, int64_t, int, int ) > updateZoneTelemetry = nullptr
+    std::function< void( const std::string &, int64_t, int, int, int ) > updateZoneTelemetry = nullptr
   )
     : DaemonWorker( std::chrono::milliseconds( 1000 ) )
     , m_hw( hw )
@@ -237,22 +246,13 @@ public:
     , m_updateFanSpeed( updateFanSpeed )
     , m_updateFanTemp( updateFanTemp )
     , m_resolveFanProfile( resolveFanProfile )
-    , m_updateZoneTelemetry( updateZoneTelemetry )
-    , m_modeSameSpeed( true )
+    , m_updateZoneTelemetry( std::move( updateZoneTelemetry ) )
     , m_controlAvailableMessageShown( false )
     , m_hasTemporaryCurves( false )
   {
   }
 
   ~FanControlWorker() override = default;
-
-  void setSameSpeed( bool same )
-  {
-    m_modeSameSpeed = same;
-    syslog( LOG_INFO, "FanControlWorker: setSameSpeed = %d", m_modeSameSpeed ? 1 : 0 );
-  }
-
-  [[nodiscard]] bool getSameSpeed() const noexcept { return m_modeSameSpeed; }
 
   /**
    * @brief Apply temporary per-zone curves (overrides profile curves until cleared).
@@ -353,7 +353,7 @@ protected:
       if ( profileCurve && !profileCurve->curve.empty() )
         curve = profileCurve->curve;
 
-      FanControlLogic logic( curve, hwZone.hysteresisDeg );
+      FanControlLogic logic( curve, hwZone.hysteresisDeg, hwZone.defaultType );
       logic.setFansMinSpeedHWLimit( m_fansMinSpeedHWLimit );
       logic.setFansOffAvailable( m_fansOffAvailable );
 
@@ -399,11 +399,15 @@ protected:
     // Per-fan tracking for publishing
     std::vector< int > fanTemps( m_providerFans.size(), -1 );
     std::vector< int > fanSpeeds( m_providerFans.size(), 0 );
+    // Tracks whether each fan slot was claimed by a zone.
+    // A fan claimed by a zone but with no thermal source should run at 0,
+    // not inherit highestSpeed.  Only truly unzoned fans fall back.
+    std::vector< bool > fanHasZone( m_providerFans.size(), false );
 
     int highestSpeed = 0;
 
     // Process each zone — collect per-zone telemetry alongside per-fan data
-    struct ZoneTelemetryData { int temp; int speed; };
+    struct ZoneTelemetryData { int temp; int speed; int rpm = -1; };
     std::vector< std::pair< std::string, ZoneTelemetryData > > zoneTelemetry;
 
     for ( const auto &zone : m_zoneInfos )
@@ -448,6 +452,7 @@ protected:
         size_t fanIndex = indexIt->second;
         fanTemps[fanIndex] = tempCelsius;
         fanSpeeds[fanIndex] = zoneSpeed;
+        fanHasZone[fanIndex] = true;
       }
     }
 
@@ -458,14 +463,45 @@ protected:
       {
         int speedToSet = fanSpeeds[i];
 
-        // Same-speed mode or no temp → use highest across all zones
-        if ( m_modeSameSpeed || fanTemps[i] == -1 )
+        // Fan has no zone at all → safety fallback to highest active zone speed.
+        // Fans that belong to a zone but whose zone has no thermal source keep
+        // their computed speed (0) — the user's curve must not be overridden.
+        if ( !fanHasZone[i] )
         {
           speedToSet = highestSpeed;
           fanSpeeds[i] = highestSpeed;
         }
 
         fanProvider->setFanSpeedPercent( m_providerFans[i], speedToSet );
+      }
+    }
+
+    // Read back actual RPMs from hardware (always, regardless of control mode)
+    std::vector< int > fanRpms( m_providerFans.size(), -1 );
+    for ( size_t i = 0; i < m_providerFans.size(); ++i )
+    {
+      auto rpm = fanProvider->getFanRPM( m_providerFans[i] );
+      if ( rpm.has_value() )
+        fanRpms[i] = rpm.value();
+    }
+
+    // Backfill per-zone average RPM into zoneTelemetry
+    for ( auto &[zoneId, zt] : zoneTelemetry )
+    {
+      for ( const auto &zone : m_zoneInfos )
+      {
+        if ( zone.id != zoneId )
+          continue;
+        int rpmSum = 0, rpmCount = 0;
+        for ( const auto &fanId : zone.fanIds )
+        {
+          auto indexIt = m_fanIndexMap.find( fanId );
+          if ( indexIt == m_fanIndexMap.end() ) continue;
+          int r = fanRpms[indexIt->second];
+          if ( r >= 0 ) { rpmSum += r; ++rpmCount; }
+        }
+        zt.rpm = rpmCount > 0 ? rpmSum / rpmCount : -1;
+        break;
       }
     }
 
@@ -499,7 +535,7 @@ protected:
     if ( m_updateZoneTelemetry )
     {
       for ( const auto &[zoneId, zt] : zoneTelemetry )
-        m_updateZoneTelemetry( zoneId, timestamp, zt.temp, zt.speed );
+        m_updateZoneTelemetry( zoneId, timestamp, zt.temp, zt.speed, zt.rpm );
     }
   }
 
@@ -508,11 +544,6 @@ protected:
 private:
   void updateZoneLogicsFromProfile( const UccProfile &profile )
   {
-    bool prevSameSpeed = m_modeSameSpeed;
-    m_modeSameSpeed = profile.fan.sameSpeed;
-    if ( m_modeSameSpeed != prevSameSpeed )
-      syslog( LOG_INFO, "FanControlWorker: sameSpeed mode changed to %d", m_modeSameSpeed ? 1 : 0 );
-
     // Resolve the fan profile
     FanProfile fanProfile = m_resolveFanProfile( profile.fan.fanProfile );
 
@@ -543,7 +574,7 @@ private:
   std::function< void( size_t, int64_t, int ) > m_updateFanSpeed;
   std::function< void( size_t, int64_t, int ) > m_updateFanTemp;
   std::function< FanProfile( const std::string & ) > m_resolveFanProfile;
-  std::function< void( const std::string &, int64_t, int, int ) > m_updateZoneTelemetry;
+  std::function< void( const std::string &, int64_t, int, int, int ) > m_updateZoneTelemetry;
 
   // Zone-based control
   std::map< std::string, FanControlLogic > m_zoneLogics;
@@ -553,7 +584,6 @@ private:
   std::vector< ucc::hal::FanInfo > m_providerFans;
   std::map< std::string, size_t > m_fanIndexMap;  // fanId → index in m_providerFans
 
-  bool m_modeSameSpeed;
   bool m_controlAvailableMessageShown;
   int m_fansMinSpeedHWLimit = 0;
   bool m_fansOffAvailable = true;

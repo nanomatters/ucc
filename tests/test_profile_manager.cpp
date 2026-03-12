@@ -39,7 +39,6 @@ private:
       "fan": {
         "useControl": true,
         "fanProfile": "fan-balanced",
-        "sameSpeed": false,
         "autoControlWC": true,
         "enableWaterCooler": false
       },
@@ -98,7 +97,6 @@ private slots:
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
     QVERIFY( p.fan.useControl );
     QCOMPARE( p.fan.fanProfile, std::string( "fan-balanced" ) );
-    QVERIFY( !p.fan.sameSpeed );
     QVERIFY( p.fan.autoControlWC );
     QVERIFY( !p.fan.enableWaterCooler );
   }
@@ -152,7 +150,6 @@ private slots:
     QCOMPARE( reparsed.display.useBrightness, original.display.useBrightness );
     QCOMPARE( reparsed.cpu.governor,          original.cpu.governor );
     QCOMPARE( reparsed.fan.fanProfile,        original.fan.fanProfile );
-    QCOMPARE( reparsed.fan.sameSpeed,         original.fan.sameSpeed );
     QCOMPARE( reparsed.chargingProfile,       original.chargingProfile );
     QCOMPARE( reparsed.chargeStartThreshold,  original.chargeStartThreshold );
     QCOMPARE( reparsed.chargeEndThreshold,    original.chargeEndThreshold );

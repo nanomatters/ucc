@@ -2962,51 +2962,56 @@ void MainWindow::onApplyFanProfilesClicked()
     return;
   }
 
-  // Build a zones array from all current editors
+  // Build a zones array — start from zone cache (carries topology + deviceType)
+  // and overlay current editor curves.
   QJsonObject root;
   QJsonArray zonesArr;
 
-  for ( auto it = m_fanControlTab->fanEditors().constBegin();
-        it != m_fanControlTab->fanEditors().constEnd(); ++it )
+  const QJsonArray zoneModel = m_fanControlTab->fanZonesData();
+  for ( const QJsonValue &zv : zoneModel )
   {
-    const QString &zoneId = it.key();
-    const auto &pts = it.value()->points();
-    QJsonArray curveArr;
-    for ( const auto &p : pts )
-    {
-      QJsonObject o;
-      o["temp"]  = p.temp;
-      o["speed"] = p.duty;
-      curveArr.append( o );
-    }
-    QJsonObject zone;
-    zone["id"]    = zoneId;
-    zone["curve"] = curveArr;
-    QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
-    if ( !tsId.isEmpty() )
-      zone["thermalSourceId"] = tsId;
-    zonesArr.append( zone );
-  }
+    QJsonObject zone = zv.toObject();
+    const QString zoneId = zone[QStringLiteral( "id" )].toString();
+    if ( zoneId.isEmpty() )
+      continue;
 
-  for ( auto it = m_fanControlTab->pumpEditors().constBegin();
-        it != m_fanControlTab->pumpEditors().constEnd(); ++it )
-  {
-    const QString &zoneId = it.key();
-    const auto &pts = it.value()->points();
-    QJsonArray curveArr;
-    for ( const auto &p : pts )
+    // Overlay curve from fan editor
+    auto fanIt = m_fanControlTab->fanEditors().find( zoneId );
+    if ( fanIt != m_fanControlTab->fanEditors().end() )
     {
-      QJsonObject o;
-      o["temp"]  = p.temp;
-      o["speed"] = p.level;
-      curveArr.append( o );
+      const auto &pts = fanIt.value()->points();
+      QJsonArray curveArr;
+      for ( const auto &p : pts )
+      {
+        QJsonObject o;
+        o["temp"]  = p.temp;
+        o["speed"] = p.duty;
+        curveArr.append( o );
+      }
+      zone["curve"] = curveArr;
     }
-    QJsonObject zone;
-    zone["id"]    = zoneId;
-    zone["curve"] = curveArr;
+
+    // Overlay curve from pump editor
+    auto pumpIt = m_fanControlTab->pumpEditors().find( zoneId );
+    if ( pumpIt != m_fanControlTab->pumpEditors().end() )
+    {
+      const auto &pts = pumpIt.value()->points();
+      QJsonArray curveArr;
+      for ( const auto &p : pts )
+      {
+        QJsonObject o;
+        o["temp"]  = p.temp;
+        o["speed"] = p.level;
+        curveArr.append( o );
+      }
+      zone["curve"] = curveArr;
+    }
+
+    // Thermal source from combo
     QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
     if ( !tsId.isEmpty() )
       zone["thermalSourceId"] = tsId;
+
     zonesArr.append( zone );
   }
 

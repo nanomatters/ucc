@@ -318,13 +318,11 @@ public:
     {
       profile.fan.useControl = extractBool( fanJson, "useControl", true );
       profile.fan.fanProfile = extractString( fanJson, "fanProfile", "fan-balanced" );
-      profile.fan.sameSpeed = extractBool( fanJson, "sameSpeed", true );
       profile.fan.autoControlWC = extractBool( fanJson, "autoControlWC", true );
       profile.fan.enableWaterCooler = extractBool( fanJson, "enableWaterCooler", ucc::WATER_COOLER_INITIAL_STATE );
 
       // Debug: log the parsed fan settings
-      std::cout << "[ProfileManager] Parsed profile '" << profile.name
-                << "' sameSpeed: " << ( profile.fan.sameSpeed ? "true" : "false" ) << std::endl;
+      std::cout << "[ProfileManager] Parsed profile '" << profile.name << "'" << std::endl;
     }
 
     // Parse ODM profile
@@ -675,7 +673,6 @@ public:
         << "\"fan\":{"
         << "\"useControl\":" << ( profile.fan.useControl ? "true" : "false" ) << ","
         << "\"fanProfile\":\"" << jsonEscape( profile.fan.fanProfile ) << "\","
-        << "\"sameSpeed\":" << ( profile.fan.sameSpeed ? "true" : "false" ) << ","
         << "\"autoControlWC\":" << ( profile.fan.autoControlWC ? "true" : "false" ) << ","
         << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" )
         << "},"

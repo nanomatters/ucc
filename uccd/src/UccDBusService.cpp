@@ -49,6 +49,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QUuid>
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QTimer>
@@ -292,7 +293,6 @@ static std::string profileToJSON( const UccProfile &profile,
       << "\"fan\":{"
       << "\"useControl\":" << ( profile.fan.useControl ? "true" : "false" ) << ","
       << "\"fanProfile\":\"" << jsonEscape( profile.fan.fanProfile ) << "\" ,"
-      << "\"sameSpeed\":" << ( profile.fan.sameSpeed ? "true" : "false" ) << ","
       << "\"autoControlWC\":" << ( profile.fan.autoControlWC ? "true" : "false" ) << ","
       << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" )
       << "},"
@@ -803,6 +803,8 @@ UccDBusInterfaceAdaptor::GetFanZoneTelemetryJSON()
     QJsonObject obj;
     obj["temp"] = zt.temp;
     obj["duty"] = zt.duty;
+    if ( zt.rpm >= 0 )
+      obj["rpm"] = zt.rpm;
     root[QString::fromStdString( zoneId )] = obj;
   }
   return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
@@ -1543,6 +1545,21 @@ QString UccDBusInterfaceAdaptor::GetSensorReadingsJSON()
     {
       root[QStringLiteral( "_source:" ) + QString::fromStdString( ts.id )] =
         static_cast< int >( std::round( val.value() ) );
+    }
+  }
+
+  // Fan RPM readings (prefixed with "fan:")
+  if ( auto *fp = m_service->m_hw.fanProvider() )
+  {
+    for ( const auto &fan : m_service->m_hw.fans() )
+    {
+      if ( fan.canRead )
+      {
+        auto rpm = fp->getFanRPM( fan );
+        if ( rpm.has_value() )
+          root[QStringLiteral( "fan:" ) + QString::fromStdString( fan.id )] =
+            static_cast< int >( *rpm );
+      }
     }
   }
 
@@ -3962,10 +3979,10 @@ UccDBusService::UccDBusService()
     {
       return resolveFanProfile( fpId );
     },
-    [this]( const std::string &zoneId, int64_t timestamp, int temp, int duty )
+    [this]( const std::string &zoneId, int64_t timestamp, int temp, int duty, int rpm )
     {
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-      m_dbusData.zoneTelemetry[zoneId] = { timestamp, temp, duty };
+      m_dbusData.zoneTelemetry[zoneId] = { timestamp, temp, duty, rpm };
     }
   );
 
@@ -4182,7 +4199,7 @@ void UccDBusService::buildInitialFanZones()
                  || fan.deviceType == ucc::hal::FanDeviceType::StagedPump );
 
     zones.push_back( ucc::hal::FanZone{
-      .id = "zone-" + std::to_string( i ),
+      .id = QUuid::createUuid().toString( QUuid::WithoutBraces ).toStdString(),
       .name = fan.label.empty() ? ( "Fan " + std::to_string( i + 1 ) ) : fan.label,
       .fanIds = { fan.id },
       .thermalSourceId = fallbackTs,
@@ -5583,18 +5600,6 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
     snapProfileFrequencies( m_activeProfile );
     updateDBusActiveProfileData();
 
-    // If the profile explicitly sets sameSpeed, apply it to fan worker immediately
-    try
-    {
-      if ( m_fanControlWorker )
-      {
-        bool same = m_activeProfile.fan.sameSpeed;
-        m_fanControlWorker->setSameSpeed( same );
-        syslog( LOG_INFO, "UccDBusService: applied sameSpeed=%d from profile", same ? 1 : 0 );
-      }
-    }
-    catch ( ... ) { /* ignore */ }
-
     // Try to resolve and apply fan curves from named fan profile
     try
     {
@@ -6328,10 +6333,6 @@ void UccDBusService::applyStartupProfile()
 
 void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
 {
-  // Apply sameSpeed setting to fan worker
-  if ( m_fanControlWorker )
-    m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
-
   // Resolve and apply fan curves from named profile
   try
   {
@@ -6720,10 +6721,6 @@ void UccDBusService::applyFullProfile( const UccProfile &profile )
   m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
   snapProfileFrequencies( m_activeProfile );
   updateDBusActiveProfileData();
-
-  // Apply sameSpeed setting to fan worker
-  if ( m_fanControlWorker )
-    m_fanControlWorker->setSameSpeed( profile.fan.sameSpeed );
 
   // Resolve and apply fan curves from named profile
   try

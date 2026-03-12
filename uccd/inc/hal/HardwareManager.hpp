@@ -253,15 +253,19 @@ public:
   /// Called by the daemon after loading profile zone data or building per-fan defaults.
   void setFanZones( std::vector< FanZone > zones ) { m_fanZones = std::move( zones ); }
 
-  /// Register additional (custom) thermal sources from a profile.
-  /// Sources whose id already exists are skipped so built-in sources are not overwritten.
+  /// Register or update (custom) thermal sources from a profile.
+  /// Existing sources with matching IDs are replaced so that strategy/sensor
+  /// changes in a saved profile take effect without restarting the daemon.
   void addThermalSources( const std::vector< ThermalSource > &sources )
   {
     for ( const auto &src : sources )
     {
-      if ( findThermalSource( src.id ) )
-        continue; // built-in or already registered
-      m_thermalSources.push_back( src );
+      auto it = std::find_if( m_thermalSources.begin(), m_thermalSources.end(),
+                              [&]( const ThermalSource &ts ) { return ts.id == src.id; } );
+      if ( it != m_thermalSources.end() )
+        *it = src; // replace — strategy / sensorIds may have changed
+      else
+        m_thermalSources.push_back( src );
     }
   }
 

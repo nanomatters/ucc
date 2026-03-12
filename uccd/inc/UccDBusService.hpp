@@ -165,8 +165,8 @@ public:
   std::atomic< int32_t > cpuFrequencyMHz;
   std::string capabilitiesJSON{ "[]" };   // HAL capability flags as JSON array
 
-  // Per-zone fan telemetry: zoneId → (timestamp, temp, duty%)
-  struct ZoneTelemetry { int64_t timestamp = 0; int temp = -1; int duty = -1; };
+  // Per-zone fan telemetry: zoneId → (timestamp, temp, duty%, actual_rpm)
+  struct ZoneTelemetry { int64_t timestamp = 0; int temp = -1; int duty = -1; int rpm = -1; };
   std::map< std::string, ZoneTelemetry > zoneTelemetry;
 
   std::mutex dataMutex;
