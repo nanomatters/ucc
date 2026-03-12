@@ -203,7 +203,7 @@ private:
 
     curveSpeed = applyHwFanLimitations( curveSpeed );
     int speed = smoothSpeed( curveSpeed );
-    speed = manageCriticalTemperature( filteredTemp, speed );
+    // speed = manageCriticalTemperature( filteredTemp, speed );
 
     return speed;
   }

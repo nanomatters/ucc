@@ -25,6 +25,7 @@
 #include <QMainWindow>
 #include <QStatusBar>
 #include <QApplication>
+#include <QSplitter>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -34,6 +35,34 @@
 
 namespace ucc
 {
+
+// ---------------------------------------------------------------------------
+// Clickable graphics rect — calls a callback on mouse press
+// ---------------------------------------------------------------------------
+
+class ClickableRectItem : public QGraphicsRectItem
+{
+public:
+    explicit ClickableRectItem( QGraphicsItem *parent = nullptr )
+        : QGraphicsRectItem( parent )
+    {
+        setAcceptedMouseButtons( Qt::LeftButton );
+        setCursor( Qt::PointingHandCursor );
+    }
+
+    void setClickCallback( std::function< void() > cb ) { m_onClick = std::move( cb ); }
+
+protected:
+    void mousePressEvent( QGraphicsSceneMouseEvent *event ) override
+    {
+        if ( m_onClick )
+            m_onClick();
+        event->accept();
+    }
+
+private:
+    std::function< void() > m_onClick;
+};
 
 // ---------------------------------------------------------------------------
 // Colour palette — cycling, high-contrast on dark background
@@ -58,6 +87,99 @@ static const QColor kPalette[] = {
     QColor( 255, 241, 118 ),  // yellow
 };
 static constexpr int kPaletteSize = static_cast< int >( sizeof( kPalette ) / sizeof( kPalette[0] ) );
+
+// ---------------------------------------------------------------------------
+// Normalisation — map metric groups to 0–100 % unified scale
+// ---------------------------------------------------------------------------
+
+MetricGroup MonitorTab::groupForUnit( const std::string &unit )
+{
+    const QString u = QString::fromStdString( unit ).trimmed();
+    const QString ul = u.toLower();
+
+    if ( ul == QStringLiteral( "\xC2\xB0c" ) || ul == QStringLiteral( "°c" )
+         || ul == QStringLiteral( "c" ) )
+        return MetricGroup::Temp;
+    if ( u == QStringLiteral( "%" ) )
+        return MetricGroup::Duty;
+    if ( ul == QStringLiteral( "w" ) )
+        return MetricGroup::Power;
+    if ( ul == QStringLiteral( "mhz" ) )
+        return MetricGroup::Freq;
+    if ( ul == QStringLiteral( "mv" ) )
+        return MetricGroup::Volt;
+    if ( ul == QStringLiteral( "fps" ) )
+        return MetricGroup::Fps;
+    if ( ul == QStringLiteral( "rpm" ) )
+        return MetricGroup::Rpm;
+    return MetricGroup::Unknown;
+}
+
+double MonitorTab::metricToNormalisedScale( MetricGroup g ) const
+{
+    switch ( g )
+    {
+        case MetricGroup::Temp:    return 100.0 / 105.0;
+        case MetricGroup::Duty:    return 1.0;
+        case MetricGroup::Power:   return 100.0 / m_maxPowerW;
+        case MetricGroup::Freq:    return 100.0 / 6000.0;
+        case MetricGroup::Volt:    return 100.0 / 1500.0;
+        case MetricGroup::Fps:     return 100.0 / 300.0;
+        case MetricGroup::Rpm:     return 100.0 / 5000.0;
+        case MetricGroup::Unknown: return 1.0;
+    }
+    return 1.0;
+}
+
+double MonitorTab::metricFromNormalisedScale( double normalisedValue, MetricGroup g ) const
+{
+    switch ( g )
+    {
+        case MetricGroup::Temp:    return normalisedValue / ( 100.0 / 105.0 );
+        case MetricGroup::Duty:    return normalisedValue;
+        case MetricGroup::Power:   return normalisedValue / ( 100.0 / m_maxPowerW );
+        case MetricGroup::Freq:    return normalisedValue / ( 100.0 / 6000.0 );
+        case MetricGroup::Volt:    return normalisedValue / ( 100.0 / 1500.0 );
+        case MetricGroup::Fps:     return normalisedValue / ( 100.0 / 300.0 );
+        case MetricGroup::Rpm:     return normalisedValue / ( 100.0 / 5000.0 );
+        case MetricGroup::Unknown: return normalisedValue;
+    }
+    return normalisedValue;
+}
+
+const char *MonitorTab::metricGroupUnit( MetricGroup g )
+{
+    switch ( g )
+    {
+        case MetricGroup::Temp:    return "°C";
+        case MetricGroup::Duty:    return "%";
+        case MetricGroup::Power:   return "W";
+        case MetricGroup::Freq:    return "MHz";
+        case MetricGroup::Volt:    return "mV";
+        case MetricGroup::Fps:     return "fps";
+        case MetricGroup::Rpm:     return "RPM";
+        case MetricGroup::Unknown: return "";
+    }
+    return "";
+}
+
+void MonitorTab::initializeMaxPowerFromHardware()
+{
+    int maxGpuTgp = 0;
+    int maxBoostTdp = 0;
+
+    if ( auto gpuMax = m_client->getNVIDIAPowerCTRLMaxPowerLimit() )
+        maxGpuTgp = *gpuMax;
+
+    if ( auto tdpLimits = m_client->getODMPowerLimits() )
+    {
+        if ( tdpLimits->size() > 1 )
+            maxBoostTdp = ( *tdpLimits )[1];
+    }
+
+    if ( m_maxPowerW = std::max( maxGpuTgp, maxBoostTdp ); m_maxPowerW <= 0 )
+        m_maxPowerW = 200;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -120,8 +242,13 @@ MonitorTab::MonitorTab( UccdClient *client, QWidget *parent )
     : QWidget( parent )
     , m_client( client )
 {
+    initializeMaxPowerFromHardware();
     setupUI();
     setFocusPolicy( Qt::StrongFocus );
+
+    // Populate the source tree immediately if client is available
+    if ( m_client )
+        refreshAvailableSources();
 
     m_fetchTimer.setInterval( 1000 );
     connect( &m_fetchTimer, &QTimer::timeout, this, &MonitorTab::fetchData );
@@ -144,7 +271,10 @@ void MonitorTab::setMonitoringActive( bool active )
         m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
         fetchData();
         m_fetchTimer.start();
-        m_chartView->setFocus();
+        if ( m_graphTabs && m_graphTabs->currentWidget() )
+            m_graphTabs->currentWidget()->setFocus();
+        else
+            m_chartView->setFocus();
     }
     else
     {
@@ -164,37 +294,70 @@ void MonitorTab::setupUI()
     setupControls();
 
     // ── Source selector panel (left) + Chart (right) ──
-    auto *hSplit = new QHBoxLayout();
+    m_monitorSplitter = new QSplitter( Qt::Horizontal, this );
+    m_monitorSplitter->setChildrenCollapsible( true );
 
-    // Source selector
+    // Source selector tree
     auto *selectorBox = new QGroupBox( "Sources" );
-    selectorBox->setMinimumWidth( 280 );
-    selectorBox->setMaximumWidth( 360 );
+    selectorBox->setMinimumWidth( 0 );
     auto *selectorOuterLayout = new QVBoxLayout( selectorBox );
 
-    auto *selectorScroll = new QScrollArea();
-    selectorScroll->setWidgetResizable( true );
-    selectorScroll->setFrameShape( QFrame::NoFrame );
+    m_sourceTree = new QTreeWidget();
+    m_sourceTree->setMinimumWidth( 0 );
+    m_sourceTree->setColumnCount( 1 );
+    m_sourceTree->setHeaderHidden( true );
+    m_sourceTree->setUniformRowHeights( true );
+    m_sourceTree->setContextMenuPolicy( Qt::CustomContextMenu );
+    m_sourceTree->setSelectionMode( QAbstractItemView::NoSelection );
+    m_sourceTree->setAllColumnsShowFocus( false );
 
-    auto *selectorInner = new QWidget();
-    m_selectorLayout = new QVBoxLayout( selectorInner );
-    m_selectorLayout->setContentsMargins( 0, 0, 0, 0 );
-    m_selectorLayout->addStretch();
+    connect( m_sourceTree, &QTreeWidget::itemChanged, this, &MonitorTab::onSourceTreeItemChanged );
+    connect( m_sourceTree, &QTreeWidget::itemDoubleClicked, this, &MonitorTab::onSourceTreeDoubleClicked );
+    connect( m_sourceTree, &QTreeWidget::customContextMenuRequested, this, &MonitorTab::onSourceTreeContextMenu );
 
-    selectorScroll->setWidget( selectorInner );
-    selectorOuterLayout->addWidget( selectorScroll, 1 );
+    selectorOuterLayout->addWidget( m_sourceTree, 1 );
 
-    m_addSourceBtn = new QPushButton( "+ Add Source" );
-    connect( m_addSourceBtn, &QPushButton::clicked, this, [this]() { addSourceRow(); } );
-    selectorOuterLayout->addWidget( m_addSourceBtn );
+    auto *favoritesLabel = new QLabel( QStringLiteral( "Favorites" ), selectorBox );
+    selectorOuterLayout->addWidget( favoritesLabel );
 
-    hSplit->addWidget( selectorBox );
+    m_favoritesList = new QListWidget( selectorBox );
+    m_favoritesList->setMinimumWidth( 0 );
+    m_favoritesList->setUniformItemSizes( true );
+    m_favoritesList->setSelectionMode( QAbstractItemView::NoSelection );
+    m_favoritesList->setAlternatingRowColors( false );
+    m_favoritesList->setMinimumHeight( 180 );
+    connect( m_favoritesList, &QListWidget::itemChanged,
+             this, &MonitorTab::onFavoriteItemChanged );
+    selectorOuterLayout->addWidget( m_favoritesList );
 
-    // Chart
+    m_monitorSplitter->addWidget( selectorBox );
+
+    // Charts (subtabs)
     setupChart();
-    hSplit->addWidget( m_chartView, 1 );
+    setupGroupCharts();
 
-    mainLayout->addLayout( hSplit, 1 );
+    m_graphTabs = new QTabWidget();
+    m_graphTabs->addTab( m_chartView, QStringLiteral( "Unified" ) );
+    m_graphTabs->addTab( m_tempChartView, QStringLiteral( "Temperature" ) );
+    m_graphTabs->addTab( m_fanChartView, QStringLiteral( "Fan" ) );
+    m_graphTabs->addTab( m_powerChartView, QStringLiteral( "Power" ) );
+    m_graphTabs->addTab( m_voltChartView, QStringLiteral( "Voltage" ) );
+    m_graphTabs->addTab( m_freqChartView, QStringLiteral( "Frequency" ) );
+    connect( m_graphTabs, &QTabWidget::currentChanged, this, [this]( int ) {
+        m_cursorInPlot = false;
+        hideCrosshair();
+    } );
+
+    m_monitorSplitter->addWidget( m_graphTabs );
+    m_monitorSplitter->setCollapsible( 0, true );
+    m_monitorSplitter->setCollapsible( 1, false );
+    m_monitorSplitter->setStretchFactor( 0, 0 );
+    m_monitorSplitter->setStretchFactor( 1, 1 );
+    m_monitorSplitter->setSizes( { 260, 1020 } );
+    connect( m_monitorSplitter, &QSplitter::splitterMoved,
+             this, [this]( int, int ) { saveSourceSelection(); } );
+
+    mainLayout->addWidget( m_monitorSplitter, 1 );
 
     // Pause label
     m_pauseLabel = new QLabel( "PAUSED" );
@@ -210,21 +373,65 @@ void MonitorTab::setupChart()
 {
     m_chart = createChart();
     m_xAxis = createXAxis();
-    m_yAxis = createYAxis( "", 0, 100 );
+    m_yAxis = createYAxis( "%", 0, 100 );
     m_chart->addAxis( m_xAxis, Qt::AlignBottom );
     m_chart->addAxis( m_yAxis, Qt::AlignLeft );
 
-    m_chartView = createChartView( m_chart );
-    m_chartView->viewport()->installEventFilter( this );
+    // Invisible anchor series so axes render labels even with no real series
+    auto *anchor = new QLineSeries();
+    anchor->setVisible( false );
+    anchor->setPen( QPen( Qt::transparent ) );
+    m_chart->addSeries( anchor );
+    anchor->attachAxis( m_xAxis );
+    anchor->attachAxis( m_yAxis );
 
-    // Crosshair line
-    m_crosshairLine = new QGraphicsLineItem( m_chart );
-    m_crosshairLine->setPen( QPen( QColor( 200, 200, 200, 100 ), 1, Qt::DashLine ) );
-    m_crosshairLine->setZValue( 80 );
-    m_crosshairLine->hide();
+    m_chartView = createChartView( m_chart );
+    m_chartView->setMouseTracking( true );
+    m_chartView->viewport()->setMouseTracking( true );
+    m_chartView->viewport()->installEventFilter( this );
+    m_chartView->setFocusPolicy( Qt::StrongFocus );
 
     // Hover callout
     installHoverCallout( m_chart );
+}
+
+void MonitorTab::setupGroupChart( QChart *&chart, QChartView *&view,
+                                  QDateTimeAxis *&xAxis, QValueAxis *&yAxis,
+                                  const QString &yTitle, double yMin, double yMax )
+{
+    chart = createChart();
+    xAxis = createXAxis();
+    yAxis = createYAxis( yTitle, yMin, yMax );
+    chart->addAxis( xAxis, Qt::AlignBottom );
+    chart->addAxis( yAxis, Qt::AlignLeft );
+
+    auto *anchor = new QLineSeries();
+    anchor->setVisible( false );
+    anchor->setPen( QPen( Qt::transparent ) );
+    chart->addSeries( anchor );
+    anchor->attachAxis( xAxis );
+    anchor->attachAxis( yAxis );
+
+    view = createChartView( chart );
+    view->setMouseTracking( true );
+    view->viewport()->setMouseTracking( true );
+    view->viewport()->installEventFilter( this );
+    view->setFocusPolicy( Qt::StrongFocus );
+    installHoverCallout( chart );
+}
+
+void MonitorTab::setupGroupCharts()
+{
+    setupGroupChart( m_tempChart, m_tempChartView, m_tempXAxis, m_tempYAxis,
+                     QStringLiteral( "\xC2\xB0C" ), 0.0, 105.0 );
+    setupGroupChart( m_fanChart, m_fanChartView, m_fanXAxis, m_fanYAxis,
+                     QStringLiteral( "%" ), 0.0, 100.0 );
+    setupGroupChart( m_powerChart, m_powerChartView, m_powerXAxis, m_powerYAxis,
+                     QStringLiteral( "W" ), 0.0, static_cast< double >( m_maxPowerW ) );
+    setupGroupChart( m_voltChart, m_voltChartView, m_voltXAxis, m_voltYAxis,
+                     QStringLiteral( "mV" ), 0.0, 1500.0 );
+    setupGroupChart( m_freqChart, m_freqChartView, m_freqXAxis, m_freqYAxis,
+                     QStringLiteral( "MHz" ), 0.0, 6000.0 );
 }
 
 void MonitorTab::setupControls()
@@ -333,6 +540,8 @@ void MonitorTab::refreshAvailableSources()
     if ( !m_client )
         return;
 
+    loadSourceAliasesFromSettings();
+
     auto jsonOpt = m_client->getMonitorSourcesJSON();
     if ( !jsonOpt.has_value() )
         return;
@@ -347,180 +556,412 @@ void MonitorTab::refreshAvailableSources()
         const QJsonObject obj = v.toObject();
         SourceDef sd;
         sd.key   = obj.value( "key" ).toString().toStdString();
-        sd.label = obj.value( "label" ).toString().toStdString();
+        const std::string rawLabel = obj.value( "label" ).toString().toStdString();
+        sd.label = displayLabelForSource( sd.key, rawLabel ).toStdString();
         sd.group = obj.value( "group" ).toString().toStdString();
         sd.unit  = obj.value( "unit" ).toString().toStdString();
         if ( !sd.key.empty() )
             m_availableSources.push_back( std::move( sd ) );
     }
 
-    // Re-populate existing combo boxes with the updated source list
-    for ( auto &row : m_sourceRows )
+    // Refresh labels of already-active series so callouts/marks use current aliases.
+    for ( auto &[key, info] : m_seriesMap )
     {
-        if ( !row.combo )
-            continue;
-
-        const std::string savedKey = row.activeKey;
-        row.combo->blockSignals( true );
-        row.combo->clear();
-        row.combo->addItem( QString::fromUtf8( "\xe2\x80\x94 Select source \xe2\x80\x94" ), QString() );
-
-        // Group sources in the combo
-        QString lastGroup;
         for ( const auto &sd : m_availableSources )
         {
-            const QString group = QString::fromStdString( sd.group );
-            if ( group != lastGroup )
-            {
-                row.combo->insertSeparator( row.combo->count() );
-                lastGroup = group;
-            }
-            const QString display = QStringLiteral( "%1 (%2)" )
-                .arg( QString::fromStdString( sd.label ) )
-                .arg( QString::fromStdString( sd.unit ) );
-            row.combo->addItem( display, QString::fromStdString( sd.key ) );
-        }
+            if ( sd.key != key )
+                continue;
 
-        // Restore previous selection
-        if ( !savedKey.empty() )
-        {
-            int idx = row.combo->findData( QString::fromStdString( savedKey ) );
-            if ( idx >= 0 )
-                row.combo->setCurrentIndex( idx );
+            info.label = QString::fromStdString( sd.label );
+            if ( info.series )
+                info.series->setName( info.label );
+            if ( info.tempSeries )
+                info.tempSeries->setName( info.label );
+            if ( info.fanSeries )
+                info.fanSeries->setName( info.label );
+            if ( info.powerSeries )
+                info.powerSeries->setName( info.label );
+            if ( info.voltSeries )
+                info.voltSeries->setName( info.label );
+            if ( info.freqSeries )
+                info.freqSeries->setName( info.label );
+            break;
         }
-        row.combo->blockSignals( false );
     }
+
+    // Keep only active keys that are still available.
+    std::set< std::string > availableKeys;
+    for ( const auto &sd : m_availableSources )
+        availableKeys.insert( sd.key );
+
+    for ( auto it = m_activeSources.begin(); it != m_activeSources.end(); )
+    {
+        if ( availableKeys.count( *it ) == 0 )
+            it = m_activeSources.erase( it );
+        else
+            ++it;
+    }
+
+    for ( auto it = m_favoriteSources.begin(); it != m_favoriteSources.end(); )
+    {
+        if ( availableKeys.count( *it ) == 0 )
+            it = m_favoriteSources.erase( it );
+        else
+            ++it;
+    }
+
+    // Ensure all active keys have a series.
+    for ( const auto &key : m_activeSources )
+        ensureSeries( key );
+
+    // Drop any series that are no longer active.
+    std::vector< std::string > staleSeries;
+    for ( const auto &[key, _] : m_seriesMap )
+    {
+        if ( m_activeSources.count( key ) == 0 )
+            staleSeries.push_back( key );
+    }
+    for ( const auto &key : staleSeries )
+        removeSeries( key );
+
+    // Rebuild the source selector tree
+    rebuildSourceTree();
+    rebuildFavoritesList();
+}
+
+void MonitorTab::loadSourceAliasesFromSettings()
+{
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+
+    m_sensorAliasById.clear();
+    settings.beginGroup( QStringLiteral( "sensorAliases" ) );
+    for ( const QString &id : settings.childKeys() )
+    {
+        const QString alias = settings.value( id ).toString().trimmed();
+        if ( !alias.isEmpty() )
+            m_sensorAliasById[id.toStdString()] = alias;
+    }
+    settings.endGroup();
+
+    m_deviceAliasById.clear();
+    settings.beginGroup( QStringLiteral( "deviceAliases" ) );
+    for ( const QString &id : settings.childKeys() )
+    {
+        const QString alias = settings.value( id ).toString().trimmed();
+        if ( !alias.isEmpty() )
+            m_deviceAliasById[id.toStdString()] = alias;
+    }
+    settings.endGroup();
+}
+
+QString MonitorTab::displayLabelForSource( const std::string &key, const std::string &defaultLabel ) const
+{
+    const std::string::size_type sep = key.find( ':' );
+    if ( sep == std::string::npos || sep + 1 >= key.size() )
+        return QString::fromStdString( defaultLabel );
+
+    const std::string prefix = key.substr( 0, sep );
+    const std::string id = key.substr( sep + 1 );
+
+    if ( prefix == "sensor" || prefix == "tsrc" )
+    {
+        auto it = m_sensorAliasById.find( id );
+        if ( it != m_sensorAliasById.end() && !it->second.trimmed().isEmpty() )
+            return it->second;
+    }
+    else if ( prefix == "fan" )
+    {
+        auto it = m_deviceAliasById.find( id );
+        if ( it != m_deviceAliasById.end() && !it->second.trimmed().isEmpty() )
+            return it->second;
+    }
+
+    return QString::fromStdString( defaultLabel );
 }
 
 // ---------------------------------------------------------------------------
-// Source rows — combo + checkbox + remove
+// Source tree selector
 // ---------------------------------------------------------------------------
 
-void MonitorTab::addSourceRow( const std::string &key )
+QString MonitorTab::sourceDisplayText( const std::string &key ) const
 {
-    auto *rowWidget = new QWidget();
-    auto *rowLayout = new QHBoxLayout( rowWidget );
-    rowLayout->setContentsMargins( 0, 2, 0, 2 );
-
-    auto *cb = new QCheckBox();
-    cb->setChecked( true );
-
-    auto *combo = new QComboBox();
-    combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-    combo->addItem( QString::fromUtf8( "\xe2\x80\x94 Select source \xe2\x80\x94" ), QString() );
-
-    // Populate from available sources
-    QString lastGroup;
     for ( const auto &sd : m_availableSources )
     {
-        const QString group = QString::fromStdString( sd.group );
-        if ( group != lastGroup )
-        {
-            combo->insertSeparator( combo->count() );
-            lastGroup = group;
-        }
-        const QString display = QStringLiteral( "%1 (%2)" )
+        if ( sd.key != key )
+            continue;
+
+        if ( sd.unit.empty() )
+            return QString::fromStdString( sd.label );
+
+        return QStringLiteral( "%1 (%2)" )
             .arg( QString::fromStdString( sd.label ) )
             .arg( QString::fromStdString( sd.unit ) );
-        combo->addItem( display, QString::fromStdString( sd.key ) );
     }
 
-    auto *removeBtn = new QPushButton( QString::fromUtf8( "\xe2\x9c\x95" ) );
-    removeBtn->setFixedWidth( 24 );
-    removeBtn->setFixedHeight( 24 );
-
-    rowLayout->addWidget( cb );
-    rowLayout->addWidget( combo, 1 );
-    rowLayout->addWidget( removeBtn );
-
-    // Insert before the stretch at the end
-    const int insertIdx = m_selectorLayout->count() - 1;
-    m_selectorLayout->insertWidget( insertIdx, rowWidget );
-
-    SourceRow row;
-    row.combo = combo;
-    row.checkbox = cb;
-    row.removeBtn = removeBtn;
-    row.activeKey = key;
-
-    const int rowIndex = static_cast< int >( m_sourceRows.size() );
-    m_sourceRows.push_back( row );
-
-    // Select the key if provided
-    if ( !key.empty() )
-    {
-        int idx = combo->findData( QString::fromStdString( key ) );
-        if ( idx >= 0 )
-            combo->setCurrentIndex( idx );
-        ensureSeries( key );
-    }
-
-    // Connect combo change -> create/remove series
-    connect( combo, &QComboBox::currentIndexChanged, this, [this, rowIndex]( int ) {
-        if ( rowIndex >= static_cast< int >( m_sourceRows.size() ) )
-            return;
-
-        auto &r = m_sourceRows[static_cast< size_t >( rowIndex )];
-        const std::string newKey = r.combo->currentData().toString().toStdString();
-
-        // Remove old series if key changed
-        if ( !r.activeKey.empty() && r.activeKey != newKey )
-            removeSeries( r.activeKey );
-
-        r.activeKey = newKey;
-
-        if ( !newKey.empty() )
-        {
-            ensureSeries( newKey );
-            // Apply checkbox state
-            auto it = m_seriesMap.find( newKey );
-            if ( it != m_seriesMap.end() )
-                it->second.series->setVisible( r.checkbox->isChecked() );
-        }
-        saveSourceSelection();
-    } );
-
-    // Connect checkbox toggle -> show/hide series
-    connect( cb, &QCheckBox::toggled, this, [this, rowIndex]( bool checked ) {
-        if ( rowIndex >= static_cast< int >( m_sourceRows.size() ) )
-            return;
-        const auto &r = m_sourceRows[static_cast< size_t >( rowIndex )];
-        if ( !r.activeKey.empty() )
-        {
-            auto it = m_seriesMap.find( r.activeKey );
-            if ( it != m_seriesMap.end() )
-                it->second.series->setVisible( checked );
-        }
-        saveSourceSelection();
-    } );
-
-    // Connect remove button
-    connect( removeBtn, &QPushButton::clicked, this, [this, rowIndex]() {
-        removeSourceRow( rowIndex );
-    } );
+    return QString::fromStdString( key );
 }
 
-void MonitorTab::removeSourceRow( int row )
+void MonitorTab::rebuildSourceTree()
 {
-    if ( row < 0 || row >= static_cast< int >( m_sourceRows.size() ) )
+    if ( !m_sourceTree )
         return;
 
-    auto &r = m_sourceRows[static_cast< size_t >( row )];
+    // Remember which sources are currently checked
+    std::set< std::string > checkedKeys = m_activeSources;
 
-    // Remove the series
-    if ( !r.activeKey.empty() )
-        removeSeries( r.activeKey );
+    m_sourceTree->blockSignals( true );
+    m_sourceTree->clear();
 
-    // Remove the widget from the layout
-    if ( r.combo )
+    // Group sources by category
+    std::map< std::string, std::vector< SourceDef > > groupedSources;
+    for ( const auto &sd : m_availableSources )
     {
-        QWidget *rowWidget = r.combo->parentWidget();
-        m_selectorLayout->removeWidget( rowWidget );
-        delete rowWidget;
+        groupedSources[sd.group].push_back( sd );
     }
 
-    m_sourceRows.erase( m_sourceRows.begin() + row );
+    // Create tree structure: group (parent) -> sources (children)
+    for ( const auto &[groupName, sources] : groupedSources )
+    {
+        // Create parent group item
+        auto *groupItem = new QTreeWidgetItem();
+        groupItem->setText( 0, QString::fromStdString( groupName ) );
+        groupItem->setFlags( groupItem->flags() & ~Qt::ItemIsSelectable );
+        m_sourceTree->addTopLevelItem( groupItem );
+
+        // Add source children with checkboxes
+        for ( const auto &sd : sources )
+        {
+            auto *sourceItem = new QTreeWidgetItem( groupItem );
+            sourceItem->setText( 0, QString::fromStdString( sd.label ) );
+            sourceItem->setData( 0, Qt::UserRole, QString::fromStdString( sd.key ) );
+            sourceItem->setData( 0, Qt::UserRole + 1, QString::fromStdString( sd.unit ) );
+            sourceItem->setFlags( sourceItem->flags() | Qt::ItemIsUserCheckable );
+            sourceItem->setCheckState( 0, checkedKeys.count( sd.key ) ? Qt::Checked : Qt::Unchecked );
+
+            // Tooltip with unit
+            sourceItem->setToolTip( 0, QString::fromStdString( sd.unit ) );
+        }
+
+        groupItem->setExpanded( false );
+    }
+
+    m_sourceTree->blockSignals( false );
+}
+
+void MonitorTab::rebuildFavoritesList()
+{
+    if ( !m_favoritesList )
+        return;
+
+    m_syncingFavorites = true;
+    m_favoritesList->blockSignals( true );
+    m_favoritesList->clear();
+
+    for ( const auto &key : m_favoriteSources )
+    {
+        auto *item = new QListWidgetItem( sourceDisplayText( key ), m_favoritesList );
+        item->setData( Qt::UserRole, QString::fromStdString( key ) );
+        item->setFlags( item->flags() | Qt::ItemIsUserCheckable | Qt::ItemNeverHasChildren );
+        item->setCheckState( m_activeSources.count( key ) ? Qt::Checked : Qt::Unchecked );
+        item->setToolTip( sourceDisplayText( key ) );
+    }
+
+    m_favoritesList->blockSignals( false );
+    m_syncingFavorites = false;
+}
+
+void MonitorTab::recordSourceUsage( const std::string &key )
+{
+    if ( key.empty() )
+        return;
+
+    m_favoriteSources.erase(
+        std::remove( m_favoriteSources.begin(), m_favoriteSources.end(), key ),
+        m_favoriteSources.end() );
+    m_favoriteSources.insert( m_favoriteSources.begin(), key );
+    if ( m_favoriteSources.size() > 10 )
+        m_favoriteSources.resize( 10 );
+}
+
+void MonitorTab::onSourceTreeItemChanged( QTreeWidgetItem *item, int column )
+{
+    if ( !item )
+        return;
+
+    Q_UNUSED( column );
+
+    // Only process source items (children), not group items (parents)
+    if ( !item->parent() )
+        return;
+
+    const QString key = item->data( 0, Qt::UserRole ).toString();
+    if ( key.isEmpty() )
+        return;
+
+    const bool isChecked = item->checkState( 0 ) == Qt::Checked;
+    const std::string stdKey = key.toStdString();
+
+    if ( isChecked )
+    {
+        // Add this source
+        if ( !m_activeSources.count( stdKey ) )
+        {
+            m_activeSources.insert( stdKey );
+            recordSourceUsage( stdKey );
+            ensureSeries( stdKey );
+            backfillSeriesHistory( stdKey );
+        }
+    }
+    else
+    {
+        // Remove this source
+        if ( m_activeSources.count( stdKey ) )
+        {
+            m_activeSources.erase( stdKey );
+            removeSeries( stdKey );
+        }
+    }
+
+    rebuildFavoritesList();
     saveSourceSelection();
+}
+
+void MonitorTab::onFavoriteItemChanged( QListWidgetItem *item )
+{
+    if ( m_syncingFavorites || !item )
+        return;
+
+    const QString key = item->data( Qt::UserRole ).toString();
+    if ( key.isEmpty() )
+        return;
+
+    const std::string stdKey = key.toStdString();
+    const bool isChecked = item->checkState() == Qt::Checked;
+
+    if ( isChecked )
+    {
+        if ( !m_activeSources.count( stdKey ) )
+        {
+            m_activeSources.insert( stdKey );
+            recordSourceUsage( stdKey );
+            ensureSeries( stdKey );
+            backfillSeriesHistory( stdKey );
+        }
+    }
+    else if ( m_activeSources.count( stdKey ) )
+    {
+        m_activeSources.erase( stdKey );
+        removeSeries( stdKey );
+    }
+
+    rebuildSourceTree();
+    rebuildFavoritesList();
+    saveSourceSelection();
+}
+
+void MonitorTab::backfillSeriesHistory( const std::string &key )
+{
+    if ( !m_client || key.empty() )
+        return;
+
+    auto itSeries = m_seriesMap.find( key );
+    if ( itSeries == m_seriesMap.end() )
+        return;
+
+    const qint64 since = QDateTime::currentMSecsSinceEpoch()
+        - static_cast< qint64 >( m_windowSeconds ) * 1000;
+
+    auto result = m_client->getMonitorDataSince( since );
+    if ( !result.has_value() || result->isEmpty() )
+        return;
+
+    static constexpr size_t kPointSize = sizeof( int64_t ) + sizeof( double );
+
+    const auto *p   = reinterpret_cast< const uint8_t * >( result->constData() );
+    const auto *end = p + result->size();
+
+    // Replace only this series buffer with fresh historical window data.
+    itSeries->second.buffer.clear();
+
+    while ( p < end )
+    {
+        if ( p + sizeof( uint16_t ) > end )
+            break;
+        uint16_t keyLen = 0;
+        std::memcpy( &keyLen, p, sizeof( keyLen ) );
+        p += sizeof( keyLen );
+
+        if ( p + keyLen > end )
+            break;
+        std::string metricKey( reinterpret_cast< const char * >( p ), keyLen );
+        p += keyLen;
+
+        if ( p + sizeof( uint32_t ) > end )
+            break;
+        uint32_t count = 0;
+        std::memcpy( &count, p, sizeof( count ) );
+        p += sizeof( count );
+
+        if ( p + static_cast< size_t >( count ) * kPointSize > end )
+            break;
+
+        if ( metricKey == key )
+        {
+            auto seriesIt = m_seriesMap.find( key );
+            if ( seriesIt == m_seriesMap.end() )
+                return;
+
+            auto &buf = seriesIt->second.buffer;
+            buf.reserve( buf.size() + static_cast< int >( count ) );
+
+            for ( uint32_t j = 0; j < count; ++j )
+            {
+                int64_t ts = 0;
+                double val = 0.0;
+                std::memcpy( &ts, p, sizeof( ts ) );
+                std::memcpy( &val, p + sizeof( ts ), sizeof( val ) );
+                p += kPointSize;
+                buf.append( QPointF( static_cast< qreal >( ts ), val ) );
+            }
+        }
+        else
+        {
+            p += static_cast< size_t >( count ) * kPointSize;
+        }
+    }
+
+    trimSeries();
+    commitSeries();
+    updateAxes();
+    updateStickyMarkPositions();
+    if ( m_chartView )
+        m_chartView->viewport()->update();
+}
+
+void MonitorTab::onSourceTreeDoubleClicked( QTreeWidgetItem *item, int column )
+{
+    if ( !item || !item->parent() )
+        return;
+
+    Q_UNUSED( column );
+
+    // Toggle checkbox on double-click
+    const Qt::CheckState newState = item->checkState( 0 ) == Qt::Checked ? Qt::Unchecked : Qt::Checked;
+    item->setCheckState( 0, newState );
+}
+
+void MonitorTab::onSourceTreeContextMenu( const QPoint &pos )
+{
+    QTreeWidgetItem *item = m_sourceTree->itemAt( pos );
+    if ( !item || !item->parent() )
+        return;
+
+    QMenu menu;
+    menu.addAction( "Remove from Monitor", [item]() {
+        item->setCheckState( 0, Qt::Unchecked );
+    } );
+
+    menu.exec( m_sourceTree->mapToGlobal( pos ) );
 }
 
 // ---------------------------------------------------------------------------
@@ -542,13 +983,50 @@ void MonitorTab::ensureSeries( const std::string &key )
     // Find the SourceDef for label and unit
     QString label = QString::fromStdString( key );
     QString unit;
+    MetricGroup mg = MetricGroup::Unknown;
     for ( const auto &sd : m_availableSources )
     {
         if ( sd.key == key )
         {
             label = QString::fromStdString( sd.label );
             unit = QString::fromStdString( sd.unit );
+            mg = groupForUnit( sd.unit );
             break;
+        }
+    }
+
+    // Fallback classification for sources with non-standard/empty unit strings.
+    if ( mg == MetricGroup::Unknown )
+    {
+        if ( key.rfind( "sensor:", 0 ) == 0 || key.rfind( "tsrc:", 0 ) == 0
+             || key == "cpuTemp" || key == "gpuTemp" )
+        {
+            mg = MetricGroup::Temp;
+        }
+        else if ( key.rfind( "fan:", 0 ) == 0 )
+        {
+            mg = MetricGroup::Rpm;
+        }
+        else if ( key == "cpuFanDuty" || key == "gpuFanDuty" )
+        {
+            mg = MetricGroup::Duty;
+        }
+        else if ( key == "cpuPower" || key == "gpuPower" )
+        {
+            mg = MetricGroup::Power;
+        }
+        else if ( key.rfind( "cpufreq:", 0 ) == 0
+                  || key == "cpuFrequency" || key == "gpuFrequency" || key == "gpuVramFrequency" )
+        {
+            mg = MetricGroup::Freq;
+        }
+        else if ( key == "gpuCoreVoltage" || key.rfind( "voltage:", 0 ) == 0 )
+        {
+            mg = MetricGroup::Volt;
+        }
+        else if ( key == "fps" )
+        {
+            mg = MetricGroup::Fps;
         }
     }
 
@@ -560,6 +1038,7 @@ void MonitorTab::ensureSeries( const std::string &key )
     series->setPen( pen );
     series->setProperty( "_unit", unit );
     series->setProperty( "_metricKey", QString::fromStdString( key ) );
+    series->setProperty( "_normalised", true );
 
     m_chart->addSeries( series );
     series->attachAxis( m_xAxis );
@@ -571,7 +1050,58 @@ void MonitorTab::ensureSeries( const std::string &key )
         showHoverCallout( series, m_chart, point, state );
     } );
 
-    m_seriesMap[ key ] = { series, label, color, unit, {} };
+    // Sticky mark — click to pin a data-point label
+    connect( series, &QLineSeries::clicked,
+             this, [this, series]( const QPointF &point ) {
+        handleSeriesClick( series, point );
+    } );
+
+    SeriesInfo info;
+    info.series = series;
+    info.label = label;
+    info.color = color;
+    info.unit = unit;
+    info.metricGroup = mg;
+
+    auto createShadowSeries = [&]( QChart *chart, QDateTimeAxis *xAxis,
+                                   QValueAxis *yAxis, bool normalised = false ) -> QLineSeries * {
+        if ( !chart || !xAxis || !yAxis )
+            return nullptr;
+
+        auto *shadow = new QLineSeries();
+        shadow->setName( label );
+        QPen shadowPen( color );
+        shadowPen.setWidth( 1 );
+        shadow->setPen( shadowPen );
+        shadow->setProperty( "_unit", unit );
+        shadow->setProperty( "_metricKey", QString::fromStdString( key ) );
+        shadow->setProperty( "_normalised", normalised );
+
+        chart->addSeries( shadow );
+        shadow->attachAxis( xAxis );
+        shadow->attachAxis( yAxis );
+
+        connect( shadow, &QLineSeries::hovered,
+                 this, [this, shadow, chart]( const QPointF &point, bool state ) {
+            showHoverCallout( shadow, chart, point, state );
+        } );
+
+        return shadow;
+    };
+
+    if ( mg == MetricGroup::Temp )
+        info.tempSeries = createShadowSeries( m_tempChart, m_tempXAxis, m_tempYAxis );
+    else if ( mg == MetricGroup::Duty || mg == MetricGroup::Rpm )
+        info.fanSeries = createShadowSeries( m_fanChart, m_fanXAxis, m_fanYAxis,
+                                             mg == MetricGroup::Rpm );
+    else if ( mg == MetricGroup::Power )
+        info.powerSeries = createShadowSeries( m_powerChart, m_powerXAxis, m_powerYAxis );
+    else if ( mg == MetricGroup::Volt )
+        info.voltSeries = createShadowSeries( m_voltChart, m_voltXAxis, m_voltYAxis );
+    else if ( mg == MetricGroup::Freq )
+        info.freqSeries = createShadowSeries( m_freqChart, m_freqXAxis, m_freqYAxis );
+
+    m_seriesMap.emplace( key, std::move( info ) );
 }
 
 void MonitorTab::removeSeries( const std::string &key )
@@ -582,11 +1112,38 @@ void MonitorTab::removeSeries( const std::string &key )
 
     m_chart->removeSeries( it->second.series );
     delete it->second.series;
+
+    if ( it->second.tempSeries )
+    {
+        m_tempChart->removeSeries( it->second.tempSeries );
+        delete it->second.tempSeries;
+    }
+    if ( it->second.fanSeries )
+    {
+        m_fanChart->removeSeries( it->second.fanSeries );
+        delete it->second.fanSeries;
+    }
+    if ( it->second.powerSeries )
+    {
+        m_powerChart->removeSeries( it->second.powerSeries );
+        delete it->second.powerSeries;
+    }
+    if ( it->second.voltSeries )
+    {
+        m_voltChart->removeSeries( it->second.voltSeries );
+        delete it->second.voltSeries;
+    }
+    if ( it->second.freqSeries )
+    {
+        m_freqChart->removeSeries( it->second.freqSeries );
+        delete it->second.freqSeries;
+    }
+
     m_seriesMap.erase( it );
 }
 
 // ---------------------------------------------------------------------------
-// Hover callout
+// Hover callout — shows denormalised real value under the pointer
 // ---------------------------------------------------------------------------
 
 void MonitorTab::installHoverCallout( QChart *chart )
@@ -627,17 +1184,27 @@ void MonitorTab::showHoverCallout( QLineSeries *ls, QChart *chart,
         return;
     }
 
+    // Convert to real value only for normalised series.
+    const QString metricKey = ls->property( "_metricKey" ).toString();
+    const std::string keyStd = metricKey.toStdString();
+    double realVal = point.y();
+    QString unit = ls->property( "_unit" ).toString();
+    const bool isNormalised = ls->property( "_normalised" ).toBool();
+
+    auto seriesIt = m_seriesMap.find( keyStd );
+    if ( isNormalised && seriesIt != m_seriesMap.end() )
+        realVal = metricFromNormalisedScale( point.y(), seriesIt->second.metricGroup );
+
     const QDateTime dt = QDateTime::fromMSecsSinceEpoch(
                             static_cast< qint64 >( point.x() ) );
-    const QString unit = ls->property( "_unit" ).toString();
 
     const QString label = unit.isEmpty()
         ? QStringLiteral( "%1\n%2: %3" )
             .arg( dt.toString( "HH:mm:ss" ), ls->name() )
-            .arg( point.y(), 0, 'f', 1 )
+            .arg( realVal, 0, 'f', 1 )
         : QStringLiteral( "%1\n%2: %3 %4" )
             .arg( dt.toString( "HH:mm:ss" ), ls->name() )
-            .arg( point.y(), 0, 'f', 1 )
+            .arg( realVal, 0, 'f', 1 )
             .arg( unit );
 
     co.text->setText( label );
@@ -653,6 +1220,252 @@ void MonitorTab::showHoverCallout( QLineSeries *ls, QChart *chart,
 
     co.bg->show();
     co.text->show();
+}
+
+// ---------------------------------------------------------------------------
+// Sticky marks — click to pin/unpin a data-point callout
+// ---------------------------------------------------------------------------
+
+void MonitorTab::handleSeriesClick( QLineSeries *ls, const QPointF &point )
+{
+    const QString keyStr = ls->property( "_metricKey" ).toString();
+    if ( keyStr.isEmpty() )
+        return;
+
+    const std::string key = keyStr.toStdString();
+    auto seriesIt = m_seriesMap.find( key );
+    if ( seriesIt == m_seriesMap.end() )
+        return;
+
+    // Denormalise the plotted value back to raw
+    const double rawValue = metricFromNormalisedScale( point.y(), seriesIt->second.metricGroup );
+    const qint64 clickTs = static_cast< qint64 >( point.x() );
+
+    if ( static_cast< int >( m_stickyMarks.size() ) >= MAX_STICKY_MARKS )
+        return;
+
+    // Snap to the nearest actual data point in the raw buffer
+    auto &buf = seriesIt->second.buffer;
+    if ( buf.isEmpty() )
+        return;
+
+    qint64 snapTs  = clickTs;
+    double snapVal = rawValue;
+    qint64 bestDist = static_cast< qint64 >( m_windowSeconds ) * 1000LL + 1;
+
+    for ( const auto &pt : buf )
+    {
+        const qint64 d = std::abs( static_cast< qint64 >( pt.x() ) - clickTs );
+        if ( d < bestDist )
+        {
+            bestDist = d;
+            snapTs  = static_cast< qint64 >( pt.x() );
+            snapVal = pt.y();
+        }
+    }
+
+    addStickyMarkGroup( m_chart, snapTs, 0.5, { { key, snapVal } } );
+}
+
+void MonitorTab::addStickyMarkGroup( QChart *chart, qint64 ts, double clickDataY,
+                                     const std::vector< StickyMetricEntry > &entries )
+{
+    if ( !chart )
+        return;
+
+    StickyMark mark;
+    mark.timestamp  = ts;
+    mark.clickDataY = clickDataY;
+    mark.chart      = chart;
+    mark.entries    = entries;
+
+    const qint64 capturedTs = ts;
+    QChart *capturedChart = chart;
+    auto removeCb = [this, capturedTs, capturedChart]() {
+        for ( auto it = m_stickyMarks.begin(); it != m_stickyMarks.end(); ++it )
+        {
+            if ( it->timestamp == capturedTs && it->chart == capturedChart )
+            {
+                removeStickyMark( it );
+                return;
+            }
+        }
+    };
+
+    // Background rect (clickable)
+    auto *bg = new ClickableRectItem( chart );
+    bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
+    bg->setPen( QPen( QColor( 200, 200, 200 ), 1 ) );
+    bg->setZValue( 90 );
+    bg->setClickCallback( removeCb );
+    mark.bg = bg;
+
+    // Timestamp header text
+    auto *tsText = new QGraphicsSimpleTextItem( chart );
+    tsText->setBrush( Qt::white );
+    tsText->setZValue( 91 );
+    tsText->setAcceptedMouseButtons( Qt::NoButton );
+    mark.texts.push_back( tsText );
+
+    // Per-metric texts
+    for ( const auto &entry : entries )
+    {
+        auto seriesIt = m_seriesMap.find( entry.metricKey );
+        const QColor col = ( seriesIt != m_seriesMap.end() ) ? seriesIt->second.color : Qt::white;
+        auto *txt = new QGraphicsSimpleTextItem( chart );
+        txt->setBrush( col );
+        txt->setZValue( 91 );
+        txt->setAcceptedMouseButtons( Qt::NoButton );
+        mark.texts.push_back( txt );
+    }
+
+    // Vertical marker line
+    auto *line = new QGraphicsLineItem( chart );
+    line->setPen( QPen( QColor( 200, 200, 200, 150 ), 1, Qt::DashLine ) );
+    line->setZValue( 89 );
+    mark.line = line;
+
+    m_stickyMarks.push_back( std::move( mark ) );
+    updateStickyMarkPositions();
+}
+
+void MonitorTab::removeStickyMark( std::vector< StickyMark >::iterator it )
+{
+    for ( auto *txt : it->texts )
+        delete txt;
+    delete it->bg;
+    delete it->line;
+
+    m_stickyMarks.erase( it );
+}
+
+void MonitorTab::updateStickyMarkPositions()
+{
+    for ( auto &mark : m_stickyMarks )
+    {
+        if ( !mark.bg || !mark.chart )
+            continue;
+
+        // Check if any entry's series is visible
+        bool anyVisible = false;
+        for ( const auto &entry : mark.entries )
+        {
+            auto it = m_seriesMap.find( entry.metricKey );
+            if ( it != m_seriesMap.end() )
+            {
+                QLineSeries *chartSeries = seriesForChart( it->second, mark.chart );
+                if ( chartSeries && chartSeries->isVisible() )
+                {
+                    anyVisible = true;
+                    break;
+                }
+            }
+        }
+
+        const QRectF plotArea = mark.chart->plotArea();
+        const QPointF sceneX = mark.chart->mapToPosition(
+            QPointF( static_cast< qreal >( mark.timestamp ), 0 ) );
+
+        if ( !anyVisible || sceneX.x() < plotArea.left() || sceneX.x() > plotArea.right() )
+        {
+            mark.bg->hide();
+            for ( auto *txt : mark.texts )
+                txt->hide();
+            if ( mark.line )
+                mark.line->hide();
+            continue;
+        }
+
+        // Set timestamp header text
+        const QDateTime dt = QDateTime::fromMSecsSinceEpoch( mark.timestamp );
+        mark.texts[0]->setText( dt.toString( "HH:mm:ss" ) );
+
+        constexpr qreal pad = 4.0;
+        constexpr qreal rowGap = 1.0;
+        qreal totalH = 0;
+        qreal maxW   = 0;
+
+        // Measure timestamp row
+        {
+            const QRectF r = mark.texts[0]->boundingRect();
+            totalH += r.height() + rowGap;
+            maxW = std::max( maxW, r.width() );
+        }
+
+        // Measure + set metric rows
+        size_t txtIdx = 1;
+        for ( const auto &entry : mark.entries )
+        {
+            if ( txtIdx >= mark.texts.size() )
+                break;
+
+            auto seriesIt = m_seriesMap.find( entry.metricKey );
+            bool vis = false;
+            if ( seriesIt != m_seriesMap.end() )
+            {
+                QLineSeries *chartSeries = seriesForChart( seriesIt->second, mark.chart );
+                vis = ( chartSeries && chartSeries->isVisible() );
+            }
+
+            if ( !vis )
+            {
+                mark.texts[ txtIdx ]->hide();
+                ++txtIdx;
+                continue;
+            }
+
+            const QString unit = seriesIt->second.unit;
+            const QString rowText = QStringLiteral( "%1: %2 %3" )
+                .arg( seriesIt->second.label )
+                .arg( entry.rawValue, 0, 'f', 1 )
+                .arg( unit );
+
+            mark.texts[ txtIdx ]->setText( rowText );
+            mark.texts[ txtIdx ]->show();
+
+            const QRectF r = mark.texts[ txtIdx ]->boundingRect();
+            totalH += r.height() + rowGap;
+            maxW = std::max( maxW, r.width() );
+            ++txtIdx;
+        }
+
+        // Position the label box
+        const qreal boxW = maxW + 2 * pad;
+        const qreal boxH = totalH + 2 * pad - rowGap;
+
+        qreal bx = sceneX.x() + 8;
+        if ( bx + boxW > plotArea.right() )
+            bx = sceneX.x() - boxW - 8;
+
+        qreal by = plotArea.top() + mark.clickDataY * plotArea.height() - boxH / 2.0;
+        by = std::max( plotArea.top() + 2.0, by );
+        by = std::min( plotArea.bottom() - boxH - 2.0, by );
+
+        mark.bg->setRect( bx, by, boxW, boxH );
+        mark.bg->show();
+
+        // Position text rows inside the box
+        qreal rowY = by + pad;
+        for ( size_t t = 0; t < mark.texts.size(); ++t )
+        {
+            auto *txt = mark.texts[t];
+            if ( !txt->isVisible() && t != 0 )
+                continue;
+
+            if ( t == 0 )
+                txt->show();
+
+            txt->setPos( bx + pad, rowY );
+            rowY += txt->boundingRect().height() + rowGap;
+        }
+
+        // Vertical line from top to bottom of plot
+        if ( mark.line )
+        {
+            mark.line->setLine( sceneX.x(), plotArea.top(), sceneX.x(), plotArea.bottom() );
+            mark.line->show();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -678,12 +1491,12 @@ void MonitorTab::fetchData()
     trimSeries();
     commitSeries();
     updateAxes();
-    updateYRange();
+    updateStickyMarkPositions();
 
     m_chartView->setUpdatesEnabled( true );
 
-    if ( m_cursorInPlot )
-        updateCrosshair( m_lastCrosshairPos, true );
+    if ( m_cursorInPlot && m_crosshairView )
+        updateCrosshair( m_crosshairView, m_lastCrosshairPos, m_annotationsVisible );
 }
 
 void MonitorTab::applyBinaryData( const QByteArray &data )
@@ -767,53 +1580,79 @@ void MonitorTab::trimSeries()
 
 void MonitorTab::commitSeries()
 {
+    // Push in-memory buffers into QLineSeries, normalised to 0–100 % scale
     for ( auto &[key, info] : m_seriesMap )
-        info.series->replace( info.buffer );
+    {
+        const double scale = metricToNormalisedScale( info.metricGroup );
+        if ( std::abs( scale - 1.0 ) < 1e-9 )
+        {
+            // No normalisation needed (Duty / Unknown) — direct replace
+            info.series->replace( info.buffer );
+        }
+        else
+        {
+            QList< QPointF > scaled;
+            scaled.reserve( info.buffer.size() );
+            for ( const auto &pt : info.buffer )
+                scaled.append( QPointF( pt.x(), pt.y() * scale ) );
+            info.series->replace( scaled );
+        }
+    }
+
+    commitGroupSeries();
+}
+
+void MonitorTab::commitGroupSeries()
+{
+    for ( auto &[key, info] : m_seriesMap )
+    {
+        if ( info.tempSeries )
+            info.tempSeries->replace( info.buffer );
+
+        if ( info.powerSeries )
+            info.powerSeries->replace( info.buffer );
+
+        if ( info.voltSeries )
+            info.voltSeries->replace( info.buffer );
+
+        if ( info.freqSeries )
+            info.freqSeries->replace( info.buffer );
+
+        if ( info.fanSeries )
+        {
+            if ( info.metricGroup == MetricGroup::Rpm )
+            {
+                const double scale = metricToNormalisedScale( MetricGroup::Rpm );
+                QList< QPointF > scaled;
+                scaled.reserve( info.buffer.size() );
+                for ( const auto &pt : info.buffer )
+                    scaled.append( QPointF( pt.x(), pt.y() * scale ) );
+                info.fanSeries->replace( scaled );
+            }
+            else
+            {
+                info.fanSeries->replace( info.buffer );
+            }
+        }
+    }
 }
 
 void MonitorTab::updateAxes()
 {
-    if ( m_zoomed )
-        return;
-
     const QDateTime now = QDateTime::currentDateTime();
     const QDateTime start = now.addSecs( -m_windowSeconds );
-    m_xAxis->setRange( start, now );
-}
-
-void MonitorTab::updateYRange()
-{
-    if ( m_zoomed )
-        return;
-
-    // Compute Y range from all visible series
-    double yMin = std::numeric_limits< double >::max();
-    double yMax = std::numeric_limits< double >::lowest();
-    bool anyData = false;
-
-    for ( const auto &[key, info] : m_seriesMap )
-    {
-        if ( !info.series->isVisible() || info.buffer.isEmpty() )
-            continue;
-
-        for ( const auto &pt : info.buffer )
-        {
-            if ( pt.y() < yMin ) yMin = pt.y();
-            if ( pt.y() > yMax ) yMax = pt.y();
-            anyData = true;
-        }
-    }
-
-    if ( !anyData )
-    {
-        m_yAxis->setRange( 0, 100 );
-        return;
-    }
-
-    // Add 10% padding
-    const double range = yMax - yMin;
-    const double pad = ( range > 0 ) ? range * 0.1 : 10.0;
-    m_yAxis->setRange( std::max( 0.0, yMin - pad ), yMax + pad );
+    if ( m_xAxis && m_zoomedCharts.count( m_chart ) == 0 )
+        m_xAxis->setRange( start, now );
+    if ( m_tempXAxis && m_zoomedCharts.count( m_tempChart ) == 0 )
+        m_tempXAxis->setRange( start, now );
+    if ( m_fanXAxis && m_zoomedCharts.count( m_fanChart ) == 0 )
+        m_fanXAxis->setRange( start, now );
+    if ( m_powerXAxis && m_zoomedCharts.count( m_powerChart ) == 0 )
+        m_powerXAxis->setRange( start, now );
+    if ( m_voltXAxis && m_zoomedCharts.count( m_voltChart ) == 0 )
+        m_voltXAxis->setRange( start, now );
+    if ( m_freqXAxis && m_zoomedCharts.count( m_freqChart ) == 0 )
+        m_freqXAxis->setRange( start, now );
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +1679,7 @@ void MonitorTab::setTimeWindow( int seconds )
     if ( m_paused )
     {
         updateAxes();
+        updateStickyMarkPositions();
     }
     else
     {
@@ -870,7 +1710,7 @@ void MonitorTab::keyPressEvent( QKeyEvent *event )
     if ( event->key() == Qt::Key_Space )
     {
         m_paused = !m_paused;
-        if ( !m_paused && m_zoomed )
+        if ( !m_paused && !m_zoomedCharts.empty() )
             resetZoom();
         if ( m_pauseLabel )
             m_pauseLabel->setVisible( m_paused );
@@ -897,7 +1737,8 @@ void MonitorTab::wheelEvent( QWheelEvent *event )
 
 bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
 {
-    if ( watched != m_chartView->viewport() )
+    QChartView *activeView = chartViewForViewport( watched );
+    if ( !activeView )
         return QWidget::eventFilter( watched, event );
 
     switch ( event->type() )
@@ -905,9 +1746,16 @@ bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
         case QEvent::MouseMove:
         {
             auto *me = static_cast< QMouseEvent * >( event );
+
+            if ( m_zoomDragging )
+            {
+                m_zoomBand->setGeometry( QRect( m_zoomOrigin, me->pos() ).normalized() );
+                return true;
+            }
+
             m_lastCrosshairPos = me->pos();
             m_cursorInPlot = true;
-            updateCrosshair( me->pos(), true );
+            updateCrosshair( activeView, me->pos(), m_annotationsVisible );
             break;
         }
         case QEvent::MouseButtonPress:
@@ -920,10 +1768,31 @@ bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
             {
                 m_zoomOrigin = me->pos();
                 if ( !m_zoomBand )
-                    m_zoomBand = new QRubberBand( QRubberBand::Rectangle, m_chartView->viewport() );
+                    m_zoomBand = new QRubberBand( QRubberBand::Rectangle, activeView->viewport() );
+                else if ( m_zoomBand->parentWidget() != activeView->viewport() )
+                    m_zoomBand->setParent( activeView->viewport() );
                 m_zoomBand->setGeometry( QRect( m_zoomOrigin, QSize() ) );
                 m_zoomBand->show();
                 m_zoomDragging = true;
+                return true;
+            }
+
+            // LMB on empty space creates a grouped sticky mark
+            if ( me->button() == Qt::LeftButton && m_annotationsVisible )
+            {
+                const QPointF scenePos = activeView->mapToScene(
+                    static_cast< int >( me->pos().x() ),
+                    static_cast< int >( me->pos().y() ) );
+                const auto items = activeView->chart()->scene()->items( scenePos );
+
+                // If a clickable item (mark bg rect) is under the cursor, let it handle it
+                for ( auto *item : items )
+                {
+                    if ( dynamic_cast< ClickableRectItem * >( item ) )
+                        return false;
+                }
+
+                crosshairClick( activeView, me->pos() );
                 return true;
             }
             break;
@@ -939,7 +1808,15 @@ bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
                     m_zoomBand->hide();
                 const QRect rect = QRect( m_zoomOrigin, me->pos() ).normalized();
                 if ( rect.width() > 4 && rect.height() > 4 )
-                    applyZoomRect( rect );
+                    applyZoomRect( activeView, rect );
+                return true;
+            }
+
+            // RMB toggles annotations
+            if ( me->button() == Qt::RightButton )
+            {
+                m_annotationsVisible = !m_annotationsVisible;
+                updateCrosshair( activeView, me->pos(), m_annotationsVisible );
                 return true;
             }
             break;
@@ -947,12 +1824,15 @@ bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
         case QEvent::MouseButtonDblClick:
         {
             // Double-click to reset zoom
-            if ( m_zoomed )
+            if ( activeView && m_zoomedCharts.count( activeView->chart() ) > 0 )
             {
-                resetZoom();
-                m_paused = false;
-                if ( m_pauseLabel )
-                    m_pauseLabel->hide();
+                resetZoom( activeView->chart() );
+                if ( m_zoomedCharts.empty() )
+                {
+                    m_paused = false;
+                    if ( m_pauseLabel )
+                        m_pauseLabel->hide();
+                }
                 return true;
             }
             break;
@@ -968,14 +1848,83 @@ bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
     return QWidget::eventFilter( watched, event );
 }
 
+QChartView *MonitorTab::chartViewForViewport( QObject *watched ) const
+{
+    if ( m_chartView && watched == m_chartView->viewport() )
+        return m_chartView;
+    if ( m_tempChartView && watched == m_tempChartView->viewport() )
+        return m_tempChartView;
+    if ( m_fanChartView && watched == m_fanChartView->viewport() )
+        return m_fanChartView;
+    if ( m_powerChartView && watched == m_powerChartView->viewport() )
+        return m_powerChartView;
+    if ( m_voltChartView && watched == m_voltChartView->viewport() )
+        return m_voltChartView;
+    if ( m_freqChartView && watched == m_freqChartView->viewport() )
+        return m_freqChartView;
+    return nullptr;
+}
+
+QDateTimeAxis *MonitorTab::activeXAxis() const
+{
+    if ( !m_graphTabs )
+        return m_xAxis;
+
+    switch ( m_graphTabs->currentIndex() )
+    {
+        case 1: return m_tempXAxis;
+        case 2: return m_fanXAxis;
+        case 3: return m_powerXAxis;
+        case 4: return m_voltXAxis;
+        case 5: return m_freqXAxis;
+        default: return m_xAxis;
+    }
+}
+
+QValueAxis *MonitorTab::activeYAxis() const
+{
+    if ( !m_graphTabs )
+        return m_yAxis;
+
+    switch ( m_graphTabs->currentIndex() )
+    {
+        case 1: return m_tempYAxis;
+        case 2: return m_fanYAxis;
+        case 3: return m_powerYAxis;
+        case 4: return m_voltYAxis;
+        case 5: return m_freqYAxis;
+        default: return m_yAxis;
+    }
+}
+
+QLineSeries *MonitorTab::seriesForChart( const SeriesInfo &info, const QChart *chart ) const
+{
+    if ( chart == m_chart )
+        return info.series;
+    if ( chart == m_tempChart )
+        return info.tempSeries;
+    if ( chart == m_fanChart )
+        return info.fanSeries;
+    if ( chart == m_powerChart )
+        return info.powerSeries;
+    if ( chart == m_voltChart )
+        return info.voltSeries;
+    if ( chart == m_freqChart )
+        return info.freqSeries;
+    return nullptr;
+}
+
 // ---------------------------------------------------------------------------
-// Crosshair
+// Crosshair — vertical line + per-series labels showing real values
 // ---------------------------------------------------------------------------
 
 void MonitorTab::hideCrosshair()
 {
     if ( m_crosshairLine )
-        m_crosshairLine->hide();
+    {
+        delete m_crosshairLine;
+        m_crosshairLine = nullptr;
+    }
 
     for ( auto &cl : m_crosshairLabels )
     {
@@ -983,26 +1932,40 @@ void MonitorTab::hideCrosshair()
         delete cl.text;
     }
     m_crosshairLabels.clear();
+    m_crosshairChart = nullptr;
+    m_crosshairView = nullptr;
     m_crosshairVisible = false;
 }
 
-void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
+void MonitorTab::updateCrosshair( QChartView *chartView, const QPointF &widgetPos, bool ctrlHeld )
 {
-    if ( !m_chart )
+    if ( !chartView || !chartView->chart() )
     {
         hideCrosshair();
         return;
     }
 
-    const QPointF scenePos = m_chartView->mapToScene(
+    QChart *chart = chartView->chart();
+
+    const QPointF scenePos = chartView->mapToScene(
         static_cast< int >( widgetPos.x() ),
         static_cast< int >( widgetPos.y() ) );
-    const QRectF plotArea = m_chart->plotArea();
+    const QRectF plotArea = chart->plotArea();
 
     if ( !plotArea.contains( scenePos ) )
     {
         hideCrosshair();
         return;
+    }
+
+    if ( !m_crosshairLine || m_crosshairChart != chart )
+    {
+        hideCrosshair();
+        m_crosshairLine = new QGraphicsLineItem( chart );
+        m_crosshairLine->setPen( QPen( QColor( 200, 200, 200, 150 ), 1, Qt::DashLine ) );
+        m_crosshairLine->setZValue( 80 );
+        m_crosshairChart = chart;
+        m_crosshairView = chartView;
     }
 
     m_crosshairLine->setLine( scenePos.x(), plotArea.top(),
@@ -1023,14 +1986,15 @@ void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
         return;
     }
 
-    const QPointF dataPos = m_chart->mapToValue( scenePos );
+    const QPointF dataPos = chart->mapToValue( scenePos );
     const qint64 cursorTs = static_cast< qint64 >( dataPos.x() );
 
     // Count visible metrics with data + 1 for the timestamp label
     int totalLabels = 1;
     for ( const auto &[key, info] : m_seriesMap )
     {
-        if ( info.series->isVisible() && !info.buffer.isEmpty() )
+        QLineSeries *series = seriesForChart( info, chart );
+        if ( series && series->isVisible() && !info.buffer.isEmpty() )
             ++totalLabels;
     }
 
@@ -1038,7 +2002,8 @@ void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
 
     for ( const auto &[key, info] : m_seriesMap )
     {
-        if ( !info.series->isVisible() || info.buffer.isEmpty() )
+        QLineSeries *series = seriesForChart( info, chart );
+        if ( !series || !series->isVisible() || info.buffer.isEmpty() )
             continue;
 
         // Binary search for nearest point
@@ -1061,14 +2026,15 @@ void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
                 bestIdx = lo - 1;
         }
 
+        // Raw value from buffer (not normalised)
         const double rawVal = buf[ bestIdx ].y();
 
         const QString lbl = info.unit.isEmpty()
             ? QStringLiteral( "%1: %2" ).arg( info.label ).arg( rawVal, 0, 'f', 1 )
             : QStringLiteral( "%1: %2 %3" ).arg( info.label ).arg( rawVal, 0, 'f', 1 ).arg( info.unit );
 
-        auto *bg   = new QGraphicsRectItem( m_chart );
-        auto *text = new QGraphicsSimpleTextItem( m_chart );
+        auto *bg   = new QGraphicsRectItem( chart );
+        auto *text = new QGraphicsSimpleTextItem( chart );
 
         bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
         bg->setPen( QPen( info.color, 1 ) );
@@ -1103,8 +2069,8 @@ void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
     // Timestamp label at the bottom of the stack
     {
         constexpr qreal pad = 3.0;
-        auto *bg   = new QGraphicsRectItem( m_chart );
-        auto *text = new QGraphicsSimpleTextItem( m_chart );
+        auto *bg   = new QGraphicsRectItem( chart );
+        auto *text = new QGraphicsSimpleTextItem( chart );
 
         bg->setBrush( QBrush( QColor( 30, 30, 30, 220 ) ) );
         bg->setPen( QPen( QColor( 150, 150, 150 ), 1 ) );
@@ -1139,18 +2105,127 @@ void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
     m_crosshairVisible = true;
 }
 
+void MonitorTab::crosshairClick( QChartView *chartView, const QPointF &widgetPos )
+{
+    if ( !chartView || !chartView->chart() )
+        return;
+
+    QChart *chart = chartView->chart();
+
+    const QPointF scenePos = chartView->mapToScene(
+        static_cast< int >( widgetPos.x() ),
+        static_cast< int >( widgetPos.y() ) );
+    const QRectF plotArea = chart->plotArea();
+
+    if ( !plotArea.contains( scenePos ) )
+        return;
+
+    const QPointF dataPos = chart->mapToValue( scenePos );
+    const qint64 cursorTs = static_cast< qint64 >( dataPos.x() );
+
+    if ( static_cast< int >( m_stickyMarks.size() ) >= MAX_STICKY_MARKS )
+        return;
+
+    // Collect all visible metrics at this timestamp
+    std::vector< StickyMetricEntry > entries;
+    qint64 snapTs = cursorTs;
+
+    for ( const auto &[key, info] : m_seriesMap )
+    {
+        QLineSeries *chartSeries = seriesForChart( info, chart );
+        if ( !chartSeries || !chartSeries->isVisible() )
+            continue;
+
+        const auto &buf = info.buffer;
+        if ( buf.isEmpty() )
+            continue;
+
+        // Binary search for the nearest timestamp
+        int lo = 0, hi = buf.size() - 1;
+        while ( lo < hi )
+        {
+            const int mid = lo + ( hi - lo ) / 2;
+            if ( static_cast< qint64 >( buf[ mid ].x() ) < cursorTs )
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+
+        int bestIdx = lo;
+        if ( lo > 0 )
+        {
+            const qint64 dLo = std::abs( static_cast< qint64 >( buf[ lo ].x() ) - cursorTs );
+            const qint64 dPrev = std::abs( static_cast< qint64 >( buf[ lo - 1 ].x() ) - cursorTs );
+            if ( dPrev < dLo )
+                bestIdx = lo - 1;
+        }
+
+        // Use the first metric's snapped timestamp as the group timestamp
+        if ( entries.empty() )
+            snapTs = static_cast< qint64 >( buf[ bestIdx ].x() );
+
+        entries.push_back( { key, buf[ bestIdx ].y() } );
+    }
+
+    if ( !entries.empty() )
+    {
+        const double plotFrac = ( plotArea.height() > 0 )
+            ? ( scenePos.y() - plotArea.top() ) / plotArea.height()
+            : 0.5;
+        addStickyMarkGroup( chart, snapTs, plotFrac, entries );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Zoom
 // ---------------------------------------------------------------------------
 
-void MonitorTab::applyZoomRect( const QRect &viewportRect )
+void MonitorTab::applyZoomRect( QChartView *chartView, const QRect &viewportRect )
 {
-    if ( !m_chart || !m_xAxis || !m_yAxis )
+    if ( !chartView || !chartView->chart() )
         return;
 
-    const QPointF topLeft = m_chartView->mapToScene( viewportRect.topLeft() );
-    const QPointF bottomRight = m_chartView->mapToScene( viewportRect.bottomRight() );
-    const QRectF plotArea = m_chart->plotArea();
+    QChart *chart = chartView->chart();
+    QDateTimeAxis *xAxis = nullptr;
+    QValueAxis *yAxis = nullptr;
+
+    if ( chart == m_chart )
+    {
+        xAxis = m_xAxis;
+        yAxis = m_yAxis;
+    }
+    else if ( chart == m_tempChart )
+    {
+        xAxis = m_tempXAxis;
+        yAxis = m_tempYAxis;
+    }
+    else if ( chart == m_fanChart )
+    {
+        xAxis = m_fanXAxis;
+        yAxis = m_fanYAxis;
+    }
+    else if ( chart == m_powerChart )
+    {
+        xAxis = m_powerXAxis;
+        yAxis = m_powerYAxis;
+    }
+    else if ( chart == m_voltChart )
+    {
+        xAxis = m_voltXAxis;
+        yAxis = m_voltYAxis;
+    }
+    else if ( chart == m_freqChart )
+    {
+        xAxis = m_freqXAxis;
+        yAxis = m_freqYAxis;
+    }
+
+    if ( !xAxis || !yAxis )
+        return;
+
+    const QPointF topLeft = chartView->mapToScene( viewportRect.topLeft() );
+    const QPointF bottomRight = chartView->mapToScene( viewportRect.bottomRight() );
+    const QRectF plotArea = chart->plotArea();
 
     const QPointF clampedTL(
         std::max( topLeft.x(), plotArea.left() ),
@@ -1159,8 +2234,8 @@ void MonitorTab::applyZoomRect( const QRect &viewportRect )
         std::min( bottomRight.x(), plotArea.right() ),
         std::min( bottomRight.y(), plotArea.bottom() ) );
 
-    const QPointF dataMin = m_chart->mapToValue( clampedTL );
-    const QPointF dataMax = m_chart->mapToValue( clampedBR );
+    const QPointF dataMin = chart->mapToValue( clampedTL );
+    const QPointF dataMax = chart->mapToValue( clampedBR );
 
     const qreal yLo = std::min( dataMin.y(), dataMax.y() );
     const qreal yHi = std::max( dataMin.y(), dataMax.y() );
@@ -1171,18 +2246,55 @@ void MonitorTab::applyZoomRect( const QRect &viewportRect )
     if ( m_pauseLabel )
         m_pauseLabel->setVisible( true );
 
-    m_xAxis->setRange(
+    xAxis->setRange(
         QDateTime::fromMSecsSinceEpoch( tLo ),
         QDateTime::fromMSecsSinceEpoch( tHi ) );
-    m_yAxis->setRange( yLo, yHi );
+    yAxis->setRange( yLo, yHi );
 
-    m_zoomed = true;
+    m_zoomedCharts.insert( chart );
+    if ( chart == m_chart )
+        updateStickyMarkPositions();
 }
 
-void MonitorTab::resetZoom()
+void MonitorTab::resetZoom( QChart *chart )
 {
-    m_zoomed = false;
-    updateYRange();
+    if ( chart == nullptr )
+    {
+        m_zoomedCharts.clear();
+        if ( m_yAxis )
+            m_yAxis->setRange( 0, 100 );
+        if ( m_tempYAxis )
+            m_tempYAxis->setRange( 0, 105 );
+        if ( m_fanYAxis )
+            m_fanYAxis->setRange( 0, 100 );
+        if ( m_powerYAxis )
+            m_powerYAxis->setRange( 0, static_cast< double >( m_maxPowerW ) );
+        if ( m_voltYAxis )
+            m_voltYAxis->setRange( 0, 1500 );
+        if ( m_freqYAxis )
+            m_freqYAxis->setRange( 0, 6000 );
+        updateAxes();
+        updateStickyMarkPositions();
+        return;
+    }
+
+    if ( chart == m_chart && m_yAxis )
+        m_yAxis->setRange( 0, 100 );
+    else if ( chart == m_tempChart && m_tempYAxis )
+        m_tempYAxis->setRange( 0, 105 );
+    else if ( chart == m_fanChart && m_fanYAxis )
+        m_fanYAxis->setRange( 0, 100 );
+    else if ( chart == m_powerChart && m_powerYAxis )
+        m_powerYAxis->setRange( 0, static_cast< double >( m_maxPowerW ) );
+    else if ( chart == m_voltChart && m_voltYAxis )
+        m_voltYAxis->setRange( 0, 1500 );
+    else if ( chart == m_freqChart && m_freqYAxis )
+        m_freqYAxis->setRange( 0, 6000 );
+
+    m_zoomedCharts.erase( chart );
+    updateAxes();
+    if ( chart == m_chart )
+        updateStickyMarkPositions();
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,19 +2306,19 @@ void MonitorTab::saveSourceSelection()
     QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
     settings.beginGroup( "MonitorTab" );
 
-    // Save as a list of key|checked pairs
     QStringList entries;
-    for ( const auto &row : m_sourceRows )
-    {
-        if ( !row.activeKey.empty() )
-        {
-            const QString entry = QStringLiteral( "%1|%2" )
-                .arg( QString::fromStdString( row.activeKey ) )
-                .arg( row.checkbox && row.checkbox->isChecked() ? "1" : "0" );
-            entries.append( entry );
-        }
-    }
+    for ( const auto &key : m_activeSources )
+        entries.append( QString::fromStdString( key ) );
     settings.setValue( "SelectedSources", entries );
+
+    QStringList favoriteEntries;
+    for ( const auto &key : m_favoriteSources )
+        favoriteEntries.append( QString::fromStdString( key ) );
+    settings.setValue( "FavoriteSources", favoriteEntries );
+
+    if ( m_monitorSplitter )
+        settings.setValue( "SplitterState", m_monitorSplitter->saveState() );
+
     settings.setValue( "TimeWindowSeconds", m_windowSeconds );
     settings.endGroup();
     settings.sync();
@@ -1222,18 +2334,42 @@ void MonitorTab::loadSourceSelection()
     const QStringList entries = settings.value( "SelectedSources" ).toStringList();
     for ( const QString &entry : entries )
     {
-        const auto parts = entry.split( '|' );
-        if ( parts.size() >= 1 )
-        {
-            const std::string key = parts[0].toStdString();
-            const bool checked = ( parts.size() >= 2 ) ? ( parts[1] == "1" ) : true;
-            addSourceRow( key );
-            if ( !m_sourceRows.empty() && m_sourceRows.back().checkbox )
-                m_sourceRows.back().checkbox->setChecked( checked );
-        }
+        const std::string key = entry.toStdString();
+        if ( !key.empty() )
+            m_activeSources.insert( key );
     }
 
+    const QStringList favoriteEntries = settings.value( "FavoriteSources" ).toStringList();
+    std::set< std::string > seenFavorites;
+    for ( const QString &entry : favoriteEntries )
+    {
+        const std::string key = entry.toStdString();
+        if ( key.empty() || seenFavorites.count( key ) )
+            continue;
+
+        seenFavorites.insert( key );
+        m_favoriteSources.push_back( key );
+        if ( m_favoriteSources.size() >= 10 )
+            break;
+    }
+
+    for ( const auto &key : m_activeSources )
+    {
+        if ( seenFavorites.count( key ) )
+            continue;
+
+        m_favoriteSources.push_back( key );
+        seenFavorites.insert( key );
+        if ( m_favoriteSources.size() >= 10 )
+            break;
+    }
+
+    const QByteArray splitterState = settings.value( "SplitterState" ).toByteArray();
+
     settings.endGroup();
+
+    if ( m_monitorSplitter && !splitterState.isEmpty() )
+        m_monitorSplitter->restoreState( splitterState );
 }
 
 } // namespace ucc

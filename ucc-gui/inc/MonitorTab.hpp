@@ -23,6 +23,11 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
+#include <QListWidget>
+#include <QSplitter>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QMenu>
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
 #include <QtCharts/QLineSeries>
@@ -34,6 +39,7 @@
 #include <QGraphicsLineItem>
 #include <QLabel>
 #include <QScrollArea>
+#include <QTabWidget>
 #include <QSettings>
 #include <QStatusBar>
 #include <QKeyEvent>
@@ -42,7 +48,7 @@
 #include <QRubberBand>
 #include <map>
 #include <vector>
-#include <functional>
+#include <set>
 
 namespace ucc
 {
@@ -50,11 +56,29 @@ namespace ucc
 class UccdClient;
 
 /**
+ * @brief Metric group categories for normalisation
+ */
+enum class MetricGroup
+{
+  Temp,   ///< Temperature (°C)       — normalised range 0–105
+  Duty,   ///< Fan duty cycle (%)     — already 0–100
+  Power,  ///< Power consumption (W)  — normalised range 0–maxPowerW
+  Freq,   ///< Clock frequency (MHz)  — normalised range 0–6000
+  Volt,   ///< Core voltage (mV)      — normalised range 0–1500
+  Fps,    ///< Frames per second      — normalised range 0–300
+  Rpm,    ///< Fan/pump RPM           — normalised range 0–5000
+  Unknown ///< Anything else          — no normalisation (pass-through 0–100)
+};
+
+/**
  * @brief Monitoring tab with real-time hardware graphs.
  *
  * Dynamically discovers available monitoring sources (sensors, thermal
  * sources, fan/pump RPMs, legacy metrics) from the daemon and lets the
  * user choose which ones to plot via combo-box + checkbox selectors.
+ *
+ * The unified chart displays all metrics normalised to a 0–100 % Y axis.
+ * Sticky marks (click-to-pin) allow annotating specific data points.
  */
 class MonitorTab : public QWidget
 {
@@ -79,6 +103,10 @@ private:
   // --- Setup helpers ---
   void setupUI();
   void setupChart();
+  void setupGroupCharts();
+  void setupGroupChart( QChart *&chart, QChartView *&view,
+                        QDateTimeAxis *&xAxis, QValueAxis *&yAxis,
+                        const QString &yTitle, double yMin, double yMax );
   void setupControls();
   void refreshFpsSourceControls();
 
@@ -88,11 +116,38 @@ private:
   /** Fetch available sources from daemon and populate the combo box. */
   void refreshAvailableSources();
 
-  /** Add a new source row (combo + checkbox) to the selector panel. */
-  void addSourceRow( const std::string &key = {} );
+  /** Load user-defined sensor/device aliases from GUI settings. */
+  void loadSourceAliasesFromSettings();
 
-  /** Remove a source row and its series from the chart. */
-  void removeSourceRow( int row );
+  /** Resolve a monitor source display label, preferring user alias when present. */
+  QString displayLabelForSource( const std::string &key, const std::string &defaultLabel ) const;
+
+  /** Rebuild the source tree from m_availableSources. */
+  void rebuildSourceTree();
+
+  /** Handle tree item checkbox state changes. */
+  void onSourceTreeItemChanged( QTreeWidgetItem *item, int column );
+
+  /** Handle tree item double-click to add/remove from monitor. */
+  void onSourceTreeDoubleClicked( QTreeWidgetItem *item, int column );
+
+  /** Handle tree item right-click context menu. */
+  void onSourceTreeContextMenu( const QPoint &pos );
+
+  /** Rebuild the favorites list from saved MRU keys. */
+  void rebuildFavoritesList();
+
+  /** Handle favorites checkbox state changes. */
+  void onFavoriteItemChanged( QListWidgetItem *item );
+
+  /** Record source usage into the favorites MRU list. */
+  void recordSourceUsage( const std::string &key );
+
+  /** Resolve a source label from the current available source list. */
+  QString sourceDisplayText( const std::string &key ) const;
+
+  /** Backfill one series with historical points for current time window. */
+  void backfillSeriesHistory( const std::string &key );
 
   /** Ensure a series exists for the given key; create if needed. */
   void ensureSeries( const std::string &key );
@@ -125,11 +180,27 @@ private:
   /** Update the X-axis range to [now - window, now]. */
   void updateAxes();
 
-  /** Update the Y-axis range based on visible data. */
-  void updateYRange();
+  /** Update all per-group shadow series from raw buffers. */
+  void commitGroupSeries();
 
   /** Pick a colour for a new series (cycling palette). */
   QColor nextColor();
+
+  // --- Normalisation ---
+  /** Determine the MetricGroup for a unit string. */
+  static MetricGroup groupForUnit( const std::string &unit );
+
+  /** Scale factor to normalise a metric group value to [0, 100]. */
+  double metricToNormalisedScale( MetricGroup g ) const;
+
+  /** Undo normalisation to restore real value. */
+  double metricFromNormalisedScale( double normalisedValue, MetricGroup g ) const;
+
+  /** Get the display unit for a metric group. */
+  static const char *metricGroupUnit( MetricGroup g );
+
+  /** Initialize m_maxPowerW from hardware TDP and GPU limits. */
+  void initializeMaxPowerFromHardware();
 
   // --- Source metadata (from daemon) ---
   struct SourceDef
@@ -141,37 +212,66 @@ private:
   };
 
   std::vector< SourceDef > m_availableSources;   ///< All sources from daemon
+  std::map< std::string, QString > m_sensorAliasById;
+  std::map< std::string, QString > m_deviceAliasById;
 
   // --- Active series ---
   struct SeriesInfo
   {
     QLineSeries        *series = nullptr;
+    QLineSeries        *tempSeries = nullptr;
+    QLineSeries        *fanSeries = nullptr;
+    QLineSeries        *powerSeries = nullptr;
+    QLineSeries        *voltSeries = nullptr;
+    QLineSeries        *freqSeries = nullptr;
     QString             label;
     QColor              color;
     QString             unit;
-    QList< QPointF >    buffer;   ///< In-memory point buffer (source of truth)
+    MetricGroup         metricGroup = MetricGroup::Unknown;
+    QList< QPointF >    buffer;   ///< In-memory point buffer (raw values)
   };
 
   std::map< std::string, SeriesInfo > m_seriesMap;
 
-  // --- Source selector rows ---
-  struct SourceRow
-  {
-    QComboBox  *combo    = nullptr;
-    QCheckBox  *checkbox = nullptr;
-    QPushButton *removeBtn = nullptr;
-    std::string  activeKey;   ///< Currently selected key (empty = none)
-  };
-
-  std::vector< SourceRow > m_sourceRows;
-  QVBoxLayout *m_selectorLayout = nullptr;  ///< Layout holding source rows
-  QPushButton *m_addSourceBtn   = nullptr;  ///< "Add Source" button
+  // --- Source selector tree ---
+  QSplitter          *m_monitorSplitter = nullptr;
+  QTreeWidget        *m_sourceTree = nullptr;  ///< Hierarchical selector by group
+  QListWidget        *m_favoritesList = nullptr;
+  std::set< std::string > m_activeSources;     ///< Currently monitored source keys
+  std::vector< std::string > m_favoriteSources;
+  bool m_syncingFavorites = false;
 
   // --- Chart ---
   QChart        *m_chart     = nullptr;
   QChartView    *m_chartView = nullptr;
   QDateTimeAxis *m_xAxis     = nullptr;
   QValueAxis    *m_yAxis     = nullptr;
+  QTabWidget    *m_graphTabs = nullptr;
+
+  QChart        *m_tempChart = nullptr;
+  QChartView    *m_tempChartView = nullptr;
+  QDateTimeAxis *m_tempXAxis = nullptr;
+  QValueAxis    *m_tempYAxis = nullptr;
+
+  QChart        *m_fanChart = nullptr;
+  QChartView    *m_fanChartView = nullptr;
+  QDateTimeAxis *m_fanXAxis = nullptr;
+  QValueAxis    *m_fanYAxis = nullptr;
+
+  QChart        *m_powerChart = nullptr;
+  QChartView    *m_powerChartView = nullptr;
+  QDateTimeAxis *m_powerXAxis = nullptr;
+  QValueAxis    *m_powerYAxis = nullptr;
+
+  QChart        *m_voltChart = nullptr;
+  QChartView    *m_voltChartView = nullptr;
+  QDateTimeAxis *m_voltXAxis = nullptr;
+  QValueAxis    *m_voltYAxis = nullptr;
+
+  QChart        *m_freqChart = nullptr;
+  QChartView    *m_freqChartView = nullptr;
+  QDateTimeAxis *m_freqXAxis = nullptr;
+  QValueAxis    *m_freqYAxis = nullptr;
 
   // FPS source controls (daemon-side source selection/policy)
   QComboBox       *m_fpsSourceCombo   = nullptr;
@@ -188,6 +288,41 @@ private:
   };
   std::map< QChart *, Callout > m_callouts;
 
+  // --- Sticky marks (click-to-pin) ---
+  static constexpr int MAX_STICKY_MARKS = 10;
+
+  struct MarkGfx
+  {
+    QGraphicsRectItem       *bg   = nullptr;
+    QGraphicsSimpleTextItem *text = nullptr;
+  };
+
+  struct StickyMetricEntry
+  {
+    std::string metricKey;
+    double      rawValue;
+  };
+
+  struct StickyMark
+  {
+    qint64                            timestamp  = 0;
+    double                            clickDataY = 0.5;
+    QChart                           *chart      = nullptr;
+    std::vector< StickyMetricEntry >  entries;
+    QGraphicsRectItem                *bg     = nullptr;
+    std::vector< QGraphicsSimpleTextItem * > texts;
+    QGraphicsLineItem                *line   = nullptr;
+  };
+
+  std::vector< StickyMark > m_stickyMarks;
+
+  void handleSeriesClick( QLineSeries *ls, const QPointF &point );
+  void addStickyMarkGroup( QChart *chart, qint64 ts, double clickDataY,
+                           const std::vector< StickyMetricEntry > &entries );
+  void removeStickyMark( std::vector< StickyMark >::iterator it );
+  void updateStickyMarkPositions();
+  void crosshairClick( QChartView *chartView, const QPointF &widgetPos );
+
   // --- Crosshair ---
   struct CrosshairLabel
   {
@@ -200,17 +335,26 @@ private:
   bool m_crosshairVisible = false;
   QPointF m_lastCrosshairPos;
   bool m_cursorInPlot = false;
+  bool m_annotationsVisible = true;
 
-  void updateCrosshair( const QPointF &widgetPos, bool ctrlHeld );
+  QChartView *chartViewForViewport( QObject *watched ) const;
+  QDateTimeAxis *activeXAxis() const;
+  QValueAxis *activeYAxis() const;
+  QLineSeries *seriesForChart( const SeriesInfo &info, const QChart *chart ) const;
+
+  void updateCrosshair( QChartView *chartView, const QPointF &widgetPos, bool ctrlHeld );
   void hideCrosshair();
+
+  QChart *m_crosshairChart = nullptr;
+  QChartView *m_crosshairView = nullptr;
 
   // --- Ctrl+LMB rubber-band zoom ---
   QRubberBand *m_zoomBand       = nullptr;
   QPoint       m_zoomOrigin;
   bool         m_zoomDragging   = false;
-  bool         m_zoomed         = false;
-  void applyZoomRect( const QRect &viewportRect );
-  void resetZoom();
+  std::set< QChart * > m_zoomedCharts;
+  void applyZoomRect( QChartView *chartView, const QRect &viewportRect );
+  void resetZoom( QChart *chart = nullptr );
 
   // --- Controls ---
   QLabel    *m_pauseLabel      = nullptr;
@@ -222,6 +366,7 @@ private:
   int         m_windowSeconds = 300;
   bool        m_paused = false;
   int         m_colorIndex = 0;   ///< Cycling index into colour palette
+  int         m_maxPowerW = 150;  ///< Platform max power (TDP)
 };
 
 } // namespace ucc
