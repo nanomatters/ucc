@@ -10,6 +10,7 @@
 #include <vulkan/vulkan.h>
 
 #include "fps_reporter.hpp"
+#include "overlay_renderer.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -73,6 +74,7 @@ struct QueueDispatch
 {
   PFN_vkQueuePresentKHR pfnQueuePresentKHR{};
   void                 *deviceKey{};
+  uint32_t              queueFamilyIndex{};
 };
 
 struct InstanceDispatch
@@ -286,7 +288,7 @@ ucc_vkCreateDevice( VkPhysicalDevice             physDev,
         }
 
         std::unique_lock lk( g_lock );
-        g_queue_dispatch[ dispatch_key( queue ) ] = QueueDispatch{ fpPresent, const_cast<void *>( deviceKey ) };
+        g_queue_dispatch[ dispatch_key( queue ) ] = QueueDispatch{ fpPresent, const_cast<void *>( deviceKey ), family };
       }
     }
   }
@@ -300,6 +302,28 @@ ucc_vkCreateDevice( VkPhysicalDevice             physDev,
     d.pfnGetDeviceQueue2   = fpGetDeviceQueue2;
     d.pfnQueuePresentKHR   = fpPresent;
     d.pfnSetDeviceLoaderData = reinterpret_cast<VkResult (VKAPI_PTR *)( VkDevice, void * )>( loadData->u.pfnSetDeviceLoaderData );
+  }
+
+  // Resolve physical-device memory properties for overlay staging buffer.
+  {
+    PFN_vkGetPhysicalDeviceMemoryProperties fpGetMemProps = nullptr;
+    {
+      std::shared_lock rlk( g_lock );
+      for ( auto &[key, idisp] : g_instance_dispatch )
+      {
+        auto inst = reinterpret_cast<VkInstance>( key );
+        fpGetMemProps = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+          idisp.pfnGetInstanceProcAddr( inst, "vkGetPhysicalDeviceMemoryProperties" ) );
+        if ( fpGetMemProps )
+          break;
+      }
+    }
+    if ( fpGetMemProps )
+    {
+      VkPhysicalDeviceMemoryProperties memProps{};
+      fpGetMemProps( physDev, &memProps );
+      ucc_overlay::init_device( dispatch_key( *pDevice ), *pDevice, fpGDPA, memProps );
+    }
   }
 
   dbg("UCC: vkCreateDevice OK\n");
@@ -331,7 +355,7 @@ ucc_vkGetDeviceQueue( VkDevice device, uint32_t queueFamilyIndex, uint32_t queue
   if ( pQueue && *pQueue && dispatch.pfnQueuePresentKHR )
   {
     std::unique_lock lk( g_lock );
-    g_queue_dispatch[ dispatch_key( *pQueue ) ] = QueueDispatch{ dispatch.pfnQueuePresentKHR, deviceKey };
+    g_queue_dispatch[ dispatch_key( *pQueue ) ] = QueueDispatch{ dispatch.pfnQueuePresentKHR, deviceKey, queueFamilyIndex };
   }
 }
 
@@ -357,7 +381,7 @@ ucc_vkGetDeviceQueue2( VkDevice device, const VkDeviceQueueInfo2 *pQueueInfo, Vk
   if ( pQueue && *pQueue && dispatch.pfnQueuePresentKHR )
   {
     std::unique_lock lk( g_lock );
-    g_queue_dispatch[ dispatch_key( *pQueue ) ] = QueueDispatch{ dispatch.pfnQueuePresentKHR, deviceKey };
+    g_queue_dispatch[ dispatch_key( *pQueue ) ] = QueueDispatch{ dispatch.pfnQueuePresentKHR, deviceKey, pQueueInfo->queueFamilyIndex };
   }
 }
 
@@ -383,6 +407,8 @@ ucc_vkDestroyDevice( VkDevice device, const VkAllocationCallbacks *pAllocator )
         ++queueIt;
     }
   }
+  ucc_overlay::destroy_device( key );
+
   if ( next )
     next( device, pAllocator );
 }
@@ -396,23 +422,34 @@ ucc_vkQueuePresentKHR( VkQueue queue, const VkPresentInfoKHR *pPresentInfo )
 
   PFN_vkQueuePresentKHR next = nullptr;
   void *key = dispatch_key( queue );
+  void *devKey = nullptr;
+  uint32_t queueFamily = 0;
   {
     std::shared_lock lk( g_lock );
-    // Try queue dispatch first (populated when vkGetDeviceQueue is intercepted).
     auto qit = g_queue_dispatch.find( key );
     if ( qit != g_queue_dispatch.end() )
     {
-      next = qit->second.pfnQueuePresentKHR;
+      next        = qit->second.pfnQueuePresentKHR;
+      devKey      = qit->second.deviceKey;
+      queueFamily = qit->second.queueFamilyIndex;
     }
     else
     {
-      // Fallback: all dispatchable objects from the same device share the same
-      // dispatch key in the loader's table, so try the device dispatch map.
       auto dit = g_device_dispatch.find( key );
       if ( dit != g_device_dispatch.end() )
         next = dit->second.pfnQueuePresentKHR;
     }
   }
+
+  // Overlay blit (only active during Auto-OC / Undervolt scans)
+  if ( devKey && pPresentInfo && pPresentInfo->swapchainCount > 0 )
+  {
+    ucc_overlay::before_present( queue, devKey, queueFamily,
+                                 pPresentInfo->swapchainCount,
+                                 pPresentInfo->pSwapchains,
+                                 pPresentInfo->pImageIndices );
+  }
+
   if ( !next ) dbg("UCC: vkQueuePresentKHR: no next found!\n");
   return next ? next( queue, pPresentInfo ) : VK_SUCCESS;
 }
@@ -434,7 +471,23 @@ ucc_vkCreateSwapchainKHR( VkDevice device,
       next = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
         it->second.pfnGetDeviceProcAddr( device, "vkCreateSwapchainKHR" ) );
   }
-  return next ? next( device, pCreateInfo, pAllocator, pSwapchain ) : VK_ERROR_EXTENSION_NOT_PRESENT;
+  if ( !next )
+    return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+  // Add TRANSFER_DST so the overlay can blit onto swapchain images.
+  VkSwapchainCreateInfoKHR modCI = *pCreateInfo;
+  modCI.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+  VkResult r = next( device, &modCI, pAllocator, pSwapchain );
+  if ( r != VK_SUCCESS )
+    r = next( device, pCreateInfo, pAllocator, pSwapchain ); // fallback without flag
+
+  if ( r == VK_SUCCESS )
+    ucc_overlay::register_swapchain( dispatch_key( device ), *pSwapchain,
+                                     pCreateInfo->imageFormat,
+                                     pCreateInfo->imageExtent.width,
+                                     pCreateInfo->imageExtent.height );
+  return r;
 }
 
 static VKAPI_ATTR void VKAPI_CALL
@@ -450,6 +503,7 @@ ucc_vkDestroySwapchainKHR( VkDevice device,
       next = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
         it->second.pfnGetDeviceProcAddr( device, "vkDestroySwapchainKHR" ) );
   }
+  ucc_overlay::unregister_swapchain( dispatch_key( device ), swapchain );
   if ( next ) next( device, swapchain, pAllocator );
 }
 
@@ -467,7 +521,14 @@ ucc_vkGetSwapchainImagesKHR( VkDevice device,
       next = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
         it->second.pfnGetDeviceProcAddr( device, "vkGetSwapchainImagesKHR" ) );
   }
-  return next ? next( device, swapchain, pCount, pSwapchainImages ) : VK_ERROR_EXTENSION_NOT_PRESENT;
+  if ( !next )
+    return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+  VkResult r = next( device, swapchain, pCount, pSwapchainImages );
+  if ( r == VK_SUCCESS && pSwapchainImages && pCount && *pCount > 0 )
+    ucc_overlay::register_swapchain_images( dispatch_key( device ), swapchain,
+                                            *pCount, pSwapchainImages );
+  return r;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL

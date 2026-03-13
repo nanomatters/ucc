@@ -13,6 +13,7 @@
 , pkg-config
 , libxrandr
 , systemd
+, vulkan-headers
 , xorg
 , makeWrapper
 , tuxedo-drivers ? null
@@ -50,6 +51,7 @@ stdenv.mkDerivation {
     nlohmann_json
     libxrandr
     systemd
+    vulkan-headers
     xorg.xcbutilcursor
   ] ++ lib.optionals (tuxedo-drivers != null) [
     tuxedo-drivers
@@ -61,6 +63,7 @@ stdenv.mkDerivation {
     "-DBUILD_TRAY=ON"
     "-DBUILD_GNOME=ON"
     "-DBUILD_CLI=ON"
+    "-DBUILD_FPS_LAYER=ON"
     "-DUCC_AUTOSTART_DIR=share/xdg/autostart"
   ];
 

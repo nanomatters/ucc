@@ -150,7 +150,7 @@ static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_DISPLAY
 struct NvmlOffsetCaps
 {
   static constexpr int GPU_MIN_OFFSET  = -250;
-  static constexpr int GPU_MAX_OFFSET  =  500;
+  static constexpr int GPU_MAX_OFFSET  =  700;
   static constexpr int VRAM_MIN_OFFSET = -500;
   static constexpr int VRAM_MAX_OFFSET = 1000;
 };

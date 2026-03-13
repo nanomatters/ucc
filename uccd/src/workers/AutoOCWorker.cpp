@@ -16,6 +16,7 @@
 #include "workers/AutoOCWorker.hpp"
 
 #include "FpsServer.hpp"
+#include "OverlayShmWriter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -352,6 +353,7 @@ void AutoOCWorker::enterDone( bool success, const std::string &msg )
   result.message = msg;
 
   emitProgress( msg );
+  OverlayShmWriter::instance().setInactive();
   emit finished( result );
 }
 
@@ -1176,6 +1178,27 @@ void AutoOCWorker::emitProgress( const std::string &msg )
   prog.gpuUtilPct = static_cast< int >( util.value_or( 0 ) );
 
   prog.fps = m_fpsServer ? m_fpsServer->currentFps() : -1.0;
+
+  // Update in-game overlay via shared memory
+  {
+    UccOverlayData od{};
+    od.active          = 1;
+    od.mode            = 0; // Auto-OC
+    od.phase           = static_cast<uint8_t>( prog.phase );
+    od.iteration       = prog.iteration;
+    od.maxIterations   = prog.maxIterations;
+    od.currentOffsetMHz = prog.currentOffsetMHz;
+    od.bestStableMHz   = prog.bestStableMHz;
+    od.gpuClockMHz     = prog.gpuClockMHz;
+    od.vramClockMHz    = prog.vramClockMHz;
+    od.tempC           = prog.tempC;
+    od.gpuUtilPct      = prog.gpuUtilPct;
+    od.fps             = prog.fps;
+    od.lastResult      = static_cast<uint8_t>( prog.lastResult );
+    if ( !msg.empty() )
+      std::strncpy( od.message, msg.c_str(), sizeof( od.message ) - 1 );
+    OverlayShmWriter::instance().update( od );
+  }
 
   emit progress( prog );
 }

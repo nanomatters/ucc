@@ -44,7 +44,7 @@ foreach( target IN ITEMS ucc_fps_layer ucc_fps_gl )
     -Wno-old-style-cast
   )
 
-  target_link_libraries( ${target} PRIVATE dl pthread )
+  target_link_libraries( ${target} PRIVATE dl pthread rt )
 endforeach()
 
 target_include_directories( ucc_fps_layer PRIVATE

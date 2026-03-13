@@ -47,6 +47,7 @@ makedepends=(
   'kcoreaddons'
   'kpackage'
   'kwindowsystem'
+  'vulkan-headers'
 )
 
 # tuxedo-drivers provides the /dev/tuxedo_io kernel interface uccd talks to

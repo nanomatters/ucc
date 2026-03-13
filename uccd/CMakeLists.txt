@@ -79,6 +79,7 @@ target_link_libraries(uccd PRIVATE
 target_link_libraries(uccd PRIVATE
   udev
   dl
+  rt
   Qt6::Core
   Qt6::Bluetooth
   Qt6::DBus

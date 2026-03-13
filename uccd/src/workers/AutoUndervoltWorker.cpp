@@ -16,6 +16,7 @@
 #include "workers/AutoUndervoltWorker.hpp"
 
 #include "FpsServer.hpp"
+#include "OverlayShmWriter.hpp"
 
 #include <algorithm>
 #include <syslog.h>
@@ -437,6 +438,7 @@ void AutoUndervoltWorker::enterDone( bool success, const std::string &msg )
   result.message        = msg;
 
   emitProgress( msg );
+  OverlayShmWriter::instance().setInactive();
   emit finished( result );
 }
 
@@ -1241,6 +1243,26 @@ void AutoUndervoltWorker::emitProgress( const std::string &msg )
   prog.gpuUtilPct  = static_cast< int >( utilOpt.value_or( 0 ) );
   prog.powerDrawW  = static_cast< int >( powerOpt.value_or( 0.0 ) );
   prog.fps         = ( m_fpsServer ) ? m_fpsServer->currentFps() : -1.0;
+
+  // Update in-game overlay via shared memory
+  {
+    UccOverlayData od{};
+    od.active           = 1;
+    od.mode             = 1; // Auto-Undervolt
+    od.phase            = static_cast<uint8_t>( prog.phase );
+    od.iteration        = prog.iteration;
+    od.maxIterations    = prog.maxIterations;
+    od.currentOffsetMHz = prog.currentCapMHz;  // cap being tested
+    od.bestStableMHz    = prog.bestCapMHz;
+    od.gpuClockMHz      = prog.gpuClockMHz;
+    od.tempC            = prog.tempC;
+    od.gpuUtilPct       = prog.gpuUtilPct;
+    od.powerDrawW       = prog.powerDrawW;
+    od.fps              = prog.fps;
+    if ( !msg.empty() )
+      std::strncpy( od.message, msg.c_str(), sizeof( od.message ) - 1 );
+    OverlayShmWriter::instance().update( od );
+  }
 
   emit progress( prog );
 }
