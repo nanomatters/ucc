@@ -1376,7 +1376,8 @@ void GpuProfileTab::showAutoUndervoltDialog()
     "your current FPS. This reduces power consumption and heat while keeping "
     "performance.<br><br>"
     "<b>Requirements:</b> A Vulkan/OpenGL game or benchmark must be running "
-    "with the ucc-fps-layer active (FPS data must be streaming).<br><br>"
+    "with the ucc-fps-layer active and <tt>UCC_FPS_HOOK=1</tt> set for that "
+    "process (FPS data must be streaming).<br><br>"
     "The result is stored per-application based on the process name." );
   infoLabel->setWordWrap( true );
   layout->addWidget( infoLabel );
@@ -1574,8 +1575,8 @@ void GpuProfileTab::showAutoUndervoltDialog()
       else
       {
         statusLabel->setText(
-          "Failed to start. Ensure a game is running with the FPS layer active "
-          "and the daemon is connected." );
+          "Failed to start. Ensure a game is running with the FPS layer active, "
+          "UCC_FPS_HOOK=1 is set for that process, and the daemon is connected." );
       }
     } );
 

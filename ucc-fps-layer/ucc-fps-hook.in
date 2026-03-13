@@ -1,0 +1,130 @@
+#!/bin/sh
+
+programname=$(basename "$0")
+
+print_usage() {
+    echo "Usage: $programname [--mode auto|vulkan|glx] COMMAND [ARGS...]" >&2
+}
+
+# Backward-compatible CLI parsing:
+#   ucc-fps-hook --mode auto <cmd>
+#   ucc-fps-hook -m vulkan <cmd>
+#   UCC_FPS_MODE=glx ucc-fps-hook <cmd>
+MODE=${UCC_FPS_MODE:-auto}
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --mode|-m)
+            if [ "$#" -lt 2 ]; then
+                print_usage
+                exit 1
+            fi
+            MODE="$2"
+            shift 2
+            ;;
+        --mode=*)
+            MODE=${1#--mode=}
+            shift
+            ;;
+        --help|-h)
+            print_usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -* )
+            echo "$programname: unknown option '$1'" >&2
+            print_usage
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ "$#" -eq 0 ]; then
+    print_usage
+    exit 1
+fi
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# Modes:
+#   auto    - enable both Vulkan and OpenGL capture paths
+#   vulkan  - only set UCC_FPS_HOOK=1 (no LD_PRELOAD)
+#   glx     - preload the hook and disable Vulkan layer in this process tree
+
+set_vulkan_env() {
+    if [ -f "$SCRIPT_DIR/runtime/VkLayer_ucc_fps.json" ]; then
+        if [ -n "${VK_IMPLICIT_LAYER_PATH-}" ]; then
+            VK_IMPLICIT_LAYER_PATH="$SCRIPT_DIR/runtime:${VK_IMPLICIT_LAYER_PATH}"
+        else
+            VK_IMPLICIT_LAYER_PATH="$SCRIPT_DIR/runtime"
+        fi
+        export VK_IMPLICIT_LAYER_PATH
+        return
+    fi
+
+    if [ -f "$SCRIPT_DIR/VkLayer_ucc_fps.json" ]; then
+        if [ -n "${VK_IMPLICIT_LAYER_PATH-}" ]; then
+            VK_IMPLICIT_LAYER_PATH="$SCRIPT_DIR:${VK_IMPLICIT_LAYER_PATH}"
+        else
+            VK_IMPLICIT_LAYER_PATH="$SCRIPT_DIR"
+        fi
+        export VK_IMPLICIT_LAYER_PATH
+    fi
+}
+
+set_gl_env() {
+    if [ -f "$SCRIPT_DIR/libucc_fps_gl.so" ]; then
+        # Running from build tree: use sibling OpenGL shim.
+        UCC_FPS_GL_LIB="$SCRIPT_DIR/libucc_fps_gl.so"
+    else
+        # Installed wrapper: use system install location.
+        UCC_FPS_GL_LIB="@UCC_FPS_LAYER_LIBDIR@/libucc_fps_gl.so"
+    fi
+
+    case ":${LD_PRELOAD-}:" in
+        *:"$UCC_FPS_GL_LIB":*)
+            ;;
+        *)
+            LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$UCC_FPS_GL_LIB"
+            ;;
+    esac
+
+    export LD_PRELOAD
+}
+
+if [ "$MODE" = "vulkan" ]; then
+    set_vulkan_env
+    exec env UCC_FPS_HOOK=1 "$@"
+fi
+
+set_gl_env
+
+if [ "$MODE" = "glx" ]; then
+    # Explicit GL mode: disable the Vulkan layer for this process tree.
+    case ",${VK_LOADER_LAYERS_DISABLE-}," in
+        *,VK_LAYER_UCC_FPS,*)
+            ;;
+        *)
+            if [ -n "${VK_LOADER_LAYERS_DISABLE-}" ]; then
+                VK_LOADER_LAYERS_DISABLE="${VK_LOADER_LAYERS_DISABLE},VK_LAYER_UCC_FPS"
+            else
+                VK_LOADER_LAYERS_DISABLE="VK_LAYER_UCC_FPS"
+            fi
+            ;;
+    esac
+
+    exec env UCC_FPS_HOOK=1 VK_LOADER_LAYERS_DISABLE="$VK_LOADER_LAYERS_DISABLE" LD_PRELOAD="$LD_PRELOAD" "$@"
+fi
+
+if [ "$MODE" != "auto" ]; then
+    echo "ucc-fps-hook: unsupported UCC_FPS_MODE='$MODE' (expected auto, vulkan, or glx)" >&2
+    exit 2
+fi
+
+set_vulkan_env
+exec env UCC_FPS_HOOK=1 LD_PRELOAD="$LD_PRELOAD" "$@"

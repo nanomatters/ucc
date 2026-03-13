@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <sys/types.h>
 
@@ -29,6 +30,8 @@ class FpsServer
 public:
   static constexpr const char *kSocketPath = "/run/ucc/uccd-fps.sock";
   static constexpr const char *kLegacySocketPath = "/tmp/uccd-fps.sock";
+  /// Abstract socket name (no filesystem path — works inside containers).
+  static constexpr const char *kAbstractSocketName = "uccd-fps";
 
   FpsServer() = default;
   ~FpsServer();
@@ -85,6 +88,7 @@ private:
   void readClient();
 
   int    m_listenFd  = -1;
+  int    m_abstractListenFd = -1; ///< Abstract socket listener (for container access).
   int    m_clientFd  = -1;   ///< Only one client at a time (one layer process).
   std::string m_socketPath = kSocketPath;
   char   m_buf[ 128 ] = {};
@@ -96,4 +100,7 @@ private:
 
   pid_t       m_clientPid     = 0;
   std::string m_clientAppName;
+  std::chrono::steady_clock::time_point m_lastClientActivity{};
+  std::chrono::steady_clock::time_point m_clientConnectTime{};
+  std::chrono::steady_clock::time_point m_lastPositiveFps{};
 };

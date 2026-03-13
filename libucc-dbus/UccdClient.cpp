@@ -1505,16 +1505,6 @@ std::optional< std::string > UccdClient::getFpsSourceApp()
   return std::nullopt;
 }
 
-bool UccdClient::setFpsRequireP0( bool enabled )
-{
-  return callMethod< bool, bool >( "SetFpsRequireP0", enabled ).value_or( false );
-}
-
-std::optional< bool > UccdClient::getFpsRequireP0()
-{
-  return callMethod< bool >( "GetFpsRequireP0" );
-}
-
 void UccdClient::subscribeProfileChanged( [[maybe_unused]] ProfileChangedCallback callback )
 {
   // Already handled via Qt signal connection

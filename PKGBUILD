@@ -75,6 +75,7 @@ build() {
     -DBUILD_TRAY=ON
     -DBUILD_GNOME=ON
     -DBUILD_CLI=ON
+    -DBUILD_FPS_LAYER=ON
   )
   cmake "${cmake_options[@]}"
   cmake --build build

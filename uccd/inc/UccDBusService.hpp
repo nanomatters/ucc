@@ -465,8 +465,6 @@ public slots:
   QString GetAutoUvAutoApplyStatusJSON();
   bool SetFpsSourceApp( const QString &appName );
   QString GetFpsSourceApp();
-  bool SetFpsRequireP0( bool enabled );
-  bool GetFpsRequireP0();
 
 signals:
   void ProfileChanged( const QString &profileId,
@@ -511,8 +509,6 @@ private:
   std::unordered_set< std::string > m_seenFpsApps;
   /// Manual FPS source selection; empty or "auto" means automatic source.
   std::string m_selectedFpsApp;
-  /// If true, FPS samples are accepted only when dGPU is in P0.
-  bool m_requireFpsP0 = true;
   /// Last FPS client app for which auto-undervolt GPU profile was applied.
   std::string m_lastAutoAppliedApp;
   /// Last mapped GPU profile id auto-applied for the tracked app.

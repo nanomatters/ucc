@@ -271,6 +271,7 @@ void MonitorTab::setMonitoringActive( bool active )
         m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
         fetchData();
         m_fetchTimer.start();
+        refreshFpsSourceControls();
         if ( m_graphTabs && m_graphTabs->currentWidget() )
             m_graphTabs->currentWidget()->setFocus();
         else
@@ -449,14 +450,10 @@ void MonitorTab::setupControls()
     m_fpsSourceCombo->setMinimumWidth( 260 );
     m_fpsSourceCombo->addItem( "Auto", "auto" );
 
-    m_fpsRequireP0Check = new QCheckBox( "Require NVIDIA P0", controls );
-    m_fpsRequireP0Check->setChecked( true );
-
     m_fpsCurrentAppLabel = new QLabel( "Current: -", controls );
 
     row->addWidget( sourceLabel );
     row->addWidget( m_fpsSourceCombo );
-    row->addWidget( m_fpsRequireP0Check );
     row->addWidget( m_fpsCurrentAppLabel, 1 );
 
     connect( m_fpsSourceCombo, &QComboBox::currentIndexChanged, this, [this]( int ) {
@@ -465,19 +462,13 @@ void MonitorTab::setupControls()
         m_client->setFpsSourceApp( m_fpsSourceCombo->currentData().toString().toStdString() );
     } );
 
-    connect( m_fpsRequireP0Check, &QCheckBox::toggled, this, [this]( bool checked ) {
-        if ( m_syncingFpsControls || !m_client )
-            return;
-        m_client->setFpsRequireP0( checked );
-    } );
-
     mainLayout->addWidget( controls );
     refreshFpsSourceControls();
 }
 
 void MonitorTab::refreshFpsSourceControls()
 {
-    if ( !m_client || !m_fpsSourceCombo || !m_fpsRequireP0Check || !m_fpsCurrentAppLabel )
+    if ( !m_client || !m_fpsSourceCombo || !m_fpsCurrentAppLabel )
         return;
 
     auto jsonOpt = m_client->getFpsSourcesJSON();
@@ -490,19 +481,16 @@ void MonitorTab::refreshFpsSourceControls()
 
     const QJsonObject root = doc.object();
     const QString selected = root.value( "selectedApp" ).toString( "auto" );
-    const bool requireP0 = root.value( "requireP0" ).toBool( true );
     const QString currentApp = root.value( "currentApp" ).toString();
     const qint64 currentPid = root.value( "currentPid" ).toInteger( 0 );
 
+    // Keep the source chooser focused on live state.
+    // Daemon `apps` is a historical set, so old app names (e.g. a closed benchmark)
+    // can linger there and confuse users.
     QStringList apps;
     apps.append( "auto" );
-    const QJsonArray appArr = root.value( "apps" ).toArray();
-    for ( const auto &v : appArr )
-    {
-        const QString a = v.toString().trimmed();
-        if ( !a.isEmpty() && !apps.contains( a, Qt::CaseInsensitive ) )
-            apps.append( a );
-    }
+    if ( !currentApp.isEmpty() && !apps.contains( currentApp, Qt::CaseInsensitive ) )
+        apps.append( currentApp );
     if ( !selected.isEmpty() && !apps.contains( selected, Qt::CaseInsensitive ) )
         apps.append( selected );
 
@@ -520,8 +508,6 @@ void MonitorTab::refreshFpsSourceControls()
         idx = m_fpsSourceCombo->findData( QStringLiteral( "auto" ) );
     if ( idx >= 0 )
         m_fpsSourceCombo->setCurrentIndex( idx );
-
-    m_fpsRequireP0Check->setChecked( requireP0 );
 
     const QString currentText = currentApp.isEmpty()
         ? QStringLiteral( "Current: -" )
@@ -1478,7 +1464,7 @@ void MonitorTab::fetchData()
         return;
 
     ++m_fpsSourceRefreshTicks;
-    if ( m_fpsSourceRefreshTicks % 5 == 0 )
+    if ( m_fpsSourceRefreshTicks % 2 == 0 )
         refreshFpsSourceControls();
 
     auto result = m_client->getMonitorDataSince( m_lastTimestamp );

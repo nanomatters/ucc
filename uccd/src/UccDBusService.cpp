@@ -410,10 +410,10 @@ UccDBusInterfaceAdaptor::UccDBusInterfaceAdaptor( QObject *parent,
   setAutoRelaySignals( true );
   syslog( LOG_INFO, "UccDBusInterfaceAdaptor: registered interface %s", UccDBusInterfaceAdaptor::INTERFACE_NAME );
 
-  // Create a 1-second timer to poll the FPS socket and push MetricId::Fps
+  // Create a fast timer to poll the FPS socket and push MetricId::Fps
   // to the daemon's metric history store when sensor collection is active.
   m_fpsPollTimer = new QTimer( this );
-  m_fpsPollTimer->setInterval( 1000 );
+  m_fpsPollTimer->setInterval( 250 );
   m_fpsPollTimer->setSingleShot( false );
   QObject::connect( m_fpsPollTimer, &QTimer::timeout, this, &UccDBusInterfaceAdaptor::onFpsPollTimeout );
 
@@ -470,16 +470,9 @@ void UccDBusInterfaceAdaptor::onFpsPollTimeout()
 
   // FPS ingestion policy:
   // 1) NVIDIA must be present.
-  // 2) Optional P0 requirement.
-  // 3) Optional manual source-app filter.
+  // 2) Optional manual source-app filter.
   bool allow = m_service->m_nvml && m_service->m_nvml->isAvailable()
                && m_service->m_nvml->deviceCount() > 0;
-
-  if ( allow && m_requireFpsP0 )
-  {
-    auto pstate = m_service->m_nvml->getCurrentPstate( 0 );
-    allow = pstate.has_value() && *pstate == 0U;
-  }
 
   if ( allow && !m_selectedFpsApp.empty() && m_selectedFpsApp != "auto" )
   {
@@ -3310,7 +3303,6 @@ QString UccDBusInterfaceAdaptor::GetFpsSourcesJSON()
 {
   QJsonObject root;
   root[ "selectedApp" ] = QString::fromStdString( m_selectedFpsApp.empty() ? std::string( "auto" ) : m_selectedFpsApp );
-  root[ "requireP0" ] = m_requireFpsP0;
   root[ "currentApp" ] = QString::fromStdString( m_fpsServer.clientAppName() );
   root[ "currentPid" ] = static_cast< qlonglong >( m_fpsServer.clientPid() );
 
@@ -3364,18 +3356,6 @@ bool UccDBusInterfaceAdaptor::SetFpsSourceApp( const QString &appName )
 QString UccDBusInterfaceAdaptor::GetFpsSourceApp()
 {
   return QString::fromStdString( m_selectedFpsApp.empty() ? std::string( "auto" ) : m_selectedFpsApp );
-}
-
-bool UccDBusInterfaceAdaptor::SetFpsRequireP0( bool enabled )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  m_requireFpsP0 = enabled;
-  return true;
-}
-
-bool UccDBusInterfaceAdaptor::GetFpsRequireP0()
-{
-  return m_requireFpsP0;
 }
 
 // ---------------------------------------------------------------------------

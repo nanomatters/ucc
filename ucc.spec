@@ -103,7 +103,9 @@ does not exist and the background thread does nothing).
 
 %files fps-layer
 %{_libdir}/libucc_fps_layer.so
+%{_libdir}/libucc_fps_gl.so
 %{_datadir}/vulkan/implicit_layer.d/VkLayer_ucc_fps.json
+%{_bindir}/ucc-fps-hook
 
 # ─────────────────────────────────────────────────────────────────────────────
 

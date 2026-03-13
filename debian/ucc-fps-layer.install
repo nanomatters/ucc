@@ -1,2 +1,4 @@
 usr/lib/*/libucc_fps_layer.so
+usr/lib/*/libucc_fps_gl.so
 usr/share/vulkan/implicit_layer.d/VkLayer_ucc_fps.json
+usr/bin/ucc-fps-hook

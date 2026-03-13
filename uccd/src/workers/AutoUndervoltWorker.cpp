@@ -688,7 +688,7 @@ void AutoUndervoltWorker::onPollTick()
 
       if ( m_targetFps <= 0.0 )
       {
-        enterDone( false, "No FPS data received during baseline — is ucc-fps-layer active?" );
+        enterDone( false, "No FPS data received during baseline — is ucc-fps-layer active with UCC_FPS_HOOK=1?" );
         return;
       }
 

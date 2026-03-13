@@ -275,7 +275,6 @@ private:
 
   // FPS source controls (daemon-side source selection/policy)
   QComboBox       *m_fpsSourceCombo   = nullptr;
-  QCheckBox       *m_fpsRequireP0Check = nullptr;
   QLabel          *m_fpsCurrentAppLabel = nullptr;
   int              m_fpsSourceRefreshTicks = 0;
   bool             m_syncingFpsControls = false;

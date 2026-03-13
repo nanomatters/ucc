@@ -8,9 +8,11 @@
         "implementation_version": "1",
         "description": "UCC FPS measurement layer for GPU Auto-OC",
         "functions": {
-            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion",
             "vkGetInstanceProcAddr": "VK_LAYER_UCC_FPS_GetInstanceProcAddr",
-            "vkGetDeviceProcAddr":   "VK_LAYER_UCC_FPS_GetDeviceProcAddr"
+            "vkGetDeviceProcAddr": "VK_LAYER_UCC_FPS_GetDeviceProcAddr"
+        },
+        "enable_environment": {
+            "UCC_FPS_HOOK": "1"
         },
         "disable_environment": {
             "UCC_FPS_DISABLE": "1"

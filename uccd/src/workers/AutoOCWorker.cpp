@@ -209,7 +209,7 @@ void AutoOCWorker::enterSearch()
 
     if ( m_vramBaselineFps <= 0.0 )
     {
-      enterDone( false, "VRAM: no FPS data available — ensure ucc-fps-layer is running" );
+      enterDone( false, "VRAM: no FPS data available — ensure ucc-fps-layer is running with UCC_FPS_HOOK=1" );
       return;
     }
 

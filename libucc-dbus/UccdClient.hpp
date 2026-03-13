@@ -257,8 +257,6 @@ public:
   std::optional< std::string > getAutoUvAutoApplyStatusJSON();
   bool setFpsSourceApp( const std::string &appName );
   std::optional< std::string > getFpsSourceApp();
-  bool setFpsRequireP0( bool enabled );
-  std::optional< bool > getFpsRequireP0();
 
   // Signal Subscription
   using ProfileChangedCallback = std::function< void( const std::string &profileId ) >;
