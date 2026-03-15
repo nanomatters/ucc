@@ -44,14 +44,7 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
     return "{}";
 
   if ( m_nvml->needsReset( deviceIndex ) )
-  {
-    QJsonObject root;
-    root["needsReset"] = true;
-    root["gpuName"] = "GPU requires reset";
     log( "getOCStateJSON: GPU " + std::to_string( deviceIndex ) + " requires reset (reboot or nvidia-smi -r)" );
-    QJsonDocument doc( root );
-    return doc.toJson( QJsonDocument::Compact ).toStdString();
-  }
 
   auto stateOpt = m_nvml->getOCState( deviceIndex );
   if ( !stateOpt )
@@ -62,6 +55,9 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
   root["gpuName"] = QString::fromStdString( s.gpuName );
   root["tempC"] = static_cast< int >( s.tempC );
   root["tempShutdownC"] = static_cast< int >( s.tempShutdownC );
+  root["tempSlowdownC"] = static_cast< int >( s.tempSlowdownC );
+  root["tempGpuMaxC"] = static_cast< int >( s.tempGpuMaxC );
+  root["thermalMarginC"] = s.thermalMarginC;
   root["powerDrawW"] = s.powerDrawW;
   root["powerLimitW"] = s.powerLimitW;
   root["powerDefaultW"] = s.powerDefaultW;
@@ -258,146 +254,39 @@ bool NvidiaOCWorker::applyGpuOCProfile( const std::string &profileJSON, unsigned
   QJsonObject obj = doc.object();
   bool anyFailed = false;
 
-  // Reset existing OC state before applying new settings.
-  // This follows the same pattern as LACT: undo all offsets and locked
-  // clocks first, then layer the new configuration on cleanly.  Without
-  // this, conflicting settings (e.g. offsets + locked clocks applied on
-  // top of each other) can put Blackwell-and-later GPUs into an
-  // unrecoverable RESET_REQUIRED state.
-  resetAll( deviceIndex );
+  const auto currentState = m_nvml->getOCState( deviceIndex );
 
-  auto applyOffsets = [this, deviceIndex, &anyFailed]( const QJsonArray &arr,
-                                                        unsigned int clockType,
-                                                        const char *name ) {
-    bool requestedNonZero = false;
-    bool appliedNonZero = false;
-    bool requestedP0NonZero = false;
-    bool appliedP0NonZero = false;
+  auto isMeaningfulLockedRange = [&currentState]( const QJsonObject &lc, bool isGpu ) {
+    if ( !lc["enabled"].toBool( false ) )
+      return false;
 
-    auto applyEntry = [this, deviceIndex, clockType, name,
-                       &requestedNonZero, &appliedNonZero,
-                       &requestedP0NonZero, &appliedP0NonZero]( const QJsonObject &o ) {
-      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
-      const int offset = o["offsetMHz"].toInt();
+    if ( !currentState )
+      return true;
 
-      const bool ok = setClockOffset( deviceIndex, clockType, ps, offset );
-      if ( ok && offset != 0 )
-      {
-        appliedNonZero = true;
-        if ( ps == 0 )
-          appliedP0NonZero = true;
-      }
+    const auto &range = isGpu ? currentState->gpuClockRange : currentState->vramClockRange;
+    if ( !range )
+      return true;
 
-      if ( offset != 0 )
-      {
-        requestedNonZero = true;
-        if ( ps == 0 )
-          requestedP0NonZero = true;
-
-        if ( !ok )
-        {
-          log( std::string( "Offset write rejected for " ) + name +
-               " pstate=" + std::to_string( ps ) +
-               " offset=" + std::to_string( offset ) + " MHz" );
-        }
-      }
-    };
-
-    // Apply P0 first when present so user-requested performance-state offset
-    // is prioritized and its failure is visible to the caller.
-    for ( const auto &v : arr )
-    {
-      QJsonObject o = v.toObject();
-      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
-      if ( ps == 0 )
-        applyEntry( o );
-    }
-
-    for ( const auto &v : arr )
-    {
-      QJsonObject o = v.toObject();
-      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
-      if ( ps != 0 )
-        applyEntry( o );
-    }
-
-    if ( requestedP0NonZero && !appliedP0NonZero )
-      anyFailed = true;
-
-    if ( requestedNonZero && !appliedNonZero )
-      anyFailed = true;
+    const unsigned int lo = static_cast< unsigned int >( lc["min"].toInt() );
+    const unsigned int hi = static_cast< unsigned int >( lc["max"].toInt() );
+    return lo != range->first || hi != range->second;
   };
 
-  // Apply unified offsets format
-  if ( obj.contains( "offsets" ) && obj["offsets"].isArray() )
-  {
-    QJsonArray coreOffsets;
-    QJsonArray vramOffsets;
+  // Determine if locked clocks carry meaningful (non-full-range) values.
+  const bool gpuLockedEnabled = obj.contains( "gpuLockedClocks" )
+    && isMeaningfulLockedRange( obj["gpuLockedClocks"].toObject(), true );
+  const bool vramLockedEnabled = obj.contains( "vramLockedClocks" )
+    && isMeaningfulLockedRange( obj["vramLockedClocks"].toObject(), false );
 
-    for ( const auto &v : obj["offsets"].toArray() )
-    {
-      QJsonObject o = v.toObject();
-      const int pstate = o["pstate"].toInt();
+  // Reset existing OC state before applying new settings.
+  resetAll( deviceIndex );
 
-      if ( o.contains( "gpuOffsetMHz" ) )
-      {
-        QJsonObject coreEntry;
-        coreEntry["pstate"] = pstate;
-        coreEntry["offsetMHz"] = o["gpuOffsetMHz"].toInt();
-        coreOffsets.append( coreEntry );
-      }
+  // Helper: abort remaining operations if GPU entered RESET_REQUIRED state
+  auto gpuStillOk = [this, deviceIndex]() {
+    return !m_nvml->needsReset( deviceIndex );
+  };
 
-      if ( o.contains( "vramOffsetMHz" ) )
-      {
-        QJsonObject vramEntry;
-        vramEntry["pstate"] = pstate;
-        vramEntry["offsetMHz"] = o["vramOffsetMHz"].toInt();
-        vramOffsets.append( vramEntry );
-      }
-    }
-
-    if ( !coreOffsets.isEmpty() )
-      applyOffsets( coreOffsets, nvml::NVML_CLOCK_GRAPHICS, "graphics" );
-
-    if ( !vramOffsets.isEmpty() )
-      applyOffsets( vramOffsets, nvml::NVML_CLOCK_MEM, "memory" );
-  }
-
-  // Apply GPU locked clocks
-  if ( obj.contains( "gpuLockedClocks" ) && obj["gpuLockedClocks"].isObject() )
-  {
-    QJsonObject lc = obj["gpuLockedClocks"].toObject();
-    if ( lc["enabled"].toBool( false ) )
-    {
-      unsigned int lo = static_cast< unsigned int >( lc["min"].toInt() );
-      unsigned int hi = static_cast< unsigned int >( lc["max"].toInt() );
-      if ( !setGpuLockedClocks( deviceIndex, lo, hi ) )
-        anyFailed = true;
-    }
-    else
-    {
-      resetGpuLockedClocks( deviceIndex );
-    }
-  }
-
-  // Apply VRAM locked clocks
-  if ( obj.contains( "vramLockedClocks" ) && obj["vramLockedClocks"].isObject() )
-  {
-    QJsonObject lc = obj["vramLockedClocks"].toObject();
-    if ( lc["enabled"].toBool( false ) )
-    {
-      unsigned int lo = static_cast< unsigned int >( lc["min"].toInt() );
-      unsigned int hi = static_cast< unsigned int >( lc["max"].toInt() );
-      if ( !setVramLockedClocks( deviceIndex, lo, hi ) )
-        anyFailed = true;
-    }
-    else
-    {
-      resetVramLockedClocks( deviceIndex );
-    }
-  }
-
-  // Apply power limit
+  // Apply power limit first (least likely to conflict with other operations)
   if ( obj.contains( "powerLimitW" ) )
   {
     double pw = obj["powerLimitW"].toDouble( 0.0 );
@@ -409,6 +298,92 @@ bool NvidiaOCWorker::applyGpuOCProfile( const std::string &profileJSON, unsigned
     else
     {
       resetPowerLimit( deviceIndex );
+    }
+
+    if ( !gpuStillOk() )
+    {
+      log( "applyGpuOCProfile: GPU entered reset state after power limit — aborting" );
+      return false;
+    }
+  }
+
+  // Apply clock offsets
+  if ( obj.contains( "offsets" ) && obj["offsets"].isArray() )
+  {
+    for ( const auto &v : obj["offsets"].toArray() )
+    {
+      QJsonObject o = v.toObject();
+      const unsigned int ps = static_cast< unsigned int >( o["pstate"].toInt() );
+
+      if ( o.contains( "gpuOffsetMHz" ) )
+      {
+        const int offset = o["gpuOffsetMHz"].toInt();
+        if ( !setClockOffset( deviceIndex, nvml::NVML_CLOCK_GRAPHICS,
+                               static_cast< nvml::nvmlPstates_t >( ps ), offset ) && offset != 0 )
+        {
+          log( "Offset write rejected for graphics pstate=" + std::to_string( ps ) +
+               " offset=" + std::to_string( offset ) + " MHz" );
+          anyFailed = true;
+        }
+      }
+
+      if ( o.contains( "vramOffsetMHz" ) )
+      {
+        const int offset = o["vramOffsetMHz"].toInt();
+        if ( !setClockOffset( deviceIndex, nvml::NVML_CLOCK_MEM,
+                               static_cast< nvml::nvmlPstates_t >( ps ), offset ) && offset != 0 )
+        {
+          log( "Offset write rejected for memory pstate=" + std::to_string( ps ) +
+               " offset=" + std::to_string( offset ) + " MHz" );
+          anyFailed = true;
+        }
+      }
+    }
+
+    if ( !gpuStillOk() )
+    {
+      log( "applyGpuOCProfile: GPU entered reset state after offsets — aborting" );
+      return false;
+    }
+  }
+
+  // Apply GPU locked clocks
+  if ( obj.contains( "gpuLockedClocks" ) && obj["gpuLockedClocks"].isObject() )
+  {
+    QJsonObject lc = obj["gpuLockedClocks"].toObject();
+    if ( gpuLockedEnabled )
+    {
+      unsigned int lo = static_cast< unsigned int >( lc["min"].toInt() );
+      unsigned int hi = static_cast< unsigned int >( lc["max"].toInt() );
+      if ( !setGpuLockedClocks( deviceIndex, lo, hi ) )
+        anyFailed = true;
+    }
+    else
+    {
+      resetGpuLockedClocks( deviceIndex );
+    }
+
+    if ( !gpuStillOk() )
+    {
+      log( "applyGpuOCProfile: GPU entered reset state after GPU locked clocks — aborting" );
+      return false;
+    }
+  }
+
+  // Apply VRAM locked clocks
+  if ( obj.contains( "vramLockedClocks" ) && obj["vramLockedClocks"].isObject() )
+  {
+    QJsonObject lc = obj["vramLockedClocks"].toObject();
+    if ( vramLockedEnabled )
+    {
+      unsigned int lo = static_cast< unsigned int >( lc["min"].toInt() );
+      unsigned int hi = static_cast< unsigned int >( lc["max"].toInt() );
+      if ( !setVramLockedClocks( deviceIndex, lo, hi ) )
+        anyFailed = true;
+    }
+    else
+    {
+      resetVramLockedClocks( deviceIndex );
     }
   }
 

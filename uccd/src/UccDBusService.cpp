@@ -29,6 +29,7 @@
 #include "platform/native/GenericProfileProvider.hpp"
 #include "platform/gpu/nvidia/NvidiaGpuPowerProvider.hpp"
 #include "platform/gpu/nvidia/NvmlTempProvider.hpp"
+#include "platform/gpu/nvidia/NvidiaGpuFanProvider.hpp"
 #include "platform/cpu/amd/AmdCpuPlatformProvider.hpp"
 #include "platform/uniwill/TuxedoIOProviders.hpp"
 #include "platform/uniwill/UniwillProfileProvider.hpp"
@@ -54,8 +55,15 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <nlohmann/json.hpp>
+#include <filesystem>
 
 static std::string jsonEscape( const std::string &value );
+
+namespace
+{
+constexpr const char *AUTO_OC_CHECKPOINT_PATH = "/etc/ucc/autooc_checkpoint.json";
+constexpr const char *AUTO_UV_CHECKPOINT_PATH = "/etc/ucc/autouv_checkpoint.json";
+}
 
 // Water cooler zone IDs — these are the zone IDs created by the BLE water cooler subsystem
 static constexpr const char *kWCFanZoneId  = "wc-fan";
@@ -181,6 +189,8 @@ std::string dgpuInfoToJSON( const DGpuInfo &info )
       << "\"grClockOffsetMHz\":" << ( info.m_grClockOffsetMHz == INT_MIN ? -999 : info.m_grClockOffsetMHz ) << ","
       << "\"memClockOffsetMHz\":" << ( info.m_memClockOffsetMHz == INT_MIN ? -999 : info.m_memClockOffsetMHz ) << ","
       << "\"coreVoltageMv\":" << info.m_coreVoltageMv << ","
+      << "\"fanSpeedPct\":" << info.m_fanSpeedPct << ","
+      << "\"thermalMarginC\":" << info.m_thermalMarginC << ","
       << "\"d0MetricsUsage\":" << ( info.m_d0MetricsUsage ? "true" : "false" )
       << "}";
   return oss.str();
@@ -487,6 +497,13 @@ void UccDBusInterfaceAdaptor::onFpsPollTimeout()
 
   if ( allow )
     m_service->m_metricsStore.push( "fps", fps );
+
+  // Background stability monitor: tick when an undervolt profile is active.
+  if ( allow && !appName.empty() && m_service->m_autoUndervoltWorker
+       && !m_service->m_autoUndervoltWorker->isRunning() )
+  {
+    m_service->m_autoUndervoltWorker->tickBackgroundMonitor( appName );
+  }
 }
 
 void UccDBusInterfaceAdaptor::autoApplyGpuProfileForApp(
@@ -512,28 +529,8 @@ void UccDBusInterfaceAdaptor::autoApplyGpuProfileForApp(
     return;
   }
 
-  // No 3D app active — restore active profile's GPU profile
-  const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
-  if ( !fallbackGpuProfileId.empty() && fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId )
-  {
-    m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
-
-    if ( m_service->m_adaptor )
-    {
-      m_service->m_adaptor->emitProfileChanged( m_service->m_activeProfile.id,
-                                                m_service->m_activeProfile.keyboard.keyboardProfileId,
-                                                m_service->m_activeProfile.fan.fanProfile,
-                                                fallbackGpuProfileId );
-    }
-
-    syslog( LOG_INFO, "[AutoUV] No active 3D app; restored active profile GPU profile '%s'",
-            fallbackGpuProfileId.c_str() );
-  }
-
-  // Clear app/pid so the next 3D app launch always re-evaluates mapping.
-  m_lastAutoAppliedApp.clear();
-  m_lastAutoAppliedPid = 0;
-  m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
+  // No 3D app active — restore active profile's GPU state (or defaults).
+  restoreFallbackGpuProfile( std::string(), 0 );
 }
 
 void UccDBusInterfaceAdaptor::applyMappedGpuProfile(
@@ -578,14 +575,28 @@ void UccDBusInterfaceAdaptor::restoreFallbackGpuProfile(
     const std::string &appName, pid_t clientPid )
 {
   const std::string &fallbackGpuProfileId = m_service->m_activeProfile.gpuProfileId;
-  const bool needsFallback = !fallbackGpuProfileId.empty()
-                          && ( fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId
-                            || appName != m_lastAutoAppliedApp
-                            || clientPid != m_lastAutoAppliedPid );
+  const bool sourceChanged = ( appName != m_lastAutoAppliedApp )
+                          || ( clientPid != m_lastAutoAppliedPid );
+  const bool profileChanged = ( fallbackGpuProfileId != m_lastAutoAppliedGpuProfileId );
+  const bool needsFallback = sourceChanged || profileChanged;
   if ( !needsFallback )
     return;
 
-  m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
+  if ( fallbackGpuProfileId.empty() )
+  {
+    // Active main profile has no GPU sub-profile selected: clear runtime OC
+    // so app-mapped settings do not persist after app exit.
+    if ( m_service->m_nvidiaOCWorker && m_service->m_nvidiaOCWorker->isAvailable() )
+      m_service->m_nvidiaOCWorker->resetAll( 0 );
+
+    syslog( LOG_INFO, "[AutoUV] Restored active profile GPU state: no GPU profile selected, reset OC to defaults" );
+  }
+  else
+  {
+    m_service->applyGpuOCFromProfile( m_service->m_activeProfile );
+    syslog( LOG_INFO, "[AutoUV] Restored active profile GPU profile '%s'",
+            fallbackGpuProfileId.c_str() );
+  }
 
   if ( m_service->m_adaptor )
   {
@@ -598,8 +609,12 @@ void UccDBusInterfaceAdaptor::restoreFallbackGpuProfile(
   m_lastAutoAppliedApp = appName;
   m_lastAutoAppliedPid = clientPid;
   m_lastAutoAppliedGpuProfileId = fallbackGpuProfileId;
-  syslog( LOG_INFO, "[AutoUV] No app GPU mapping for '%s'; restored active profile GPU profile '%s'",
-          appName.c_str(), fallbackGpuProfileId.c_str() );
+
+  if ( !appName.empty() )
+  {
+    syslog( LOG_INFO, "[AutoUV] No app GPU mapping for '%s'; restored active profile GPU state",
+            appName.c_str() );
+  }
 }
 
 
@@ -765,13 +780,22 @@ UccDBusInterfaceAdaptor::GetFanDataGPU1()
   if ( gpuTemp < 0 )
     return {};
 
+  // Read GPU fan speed from NVML
+  int gpuFanSpeed = -1;
+  if ( m_service && m_service->m_nvml && m_service->m_nvml->isAvailable() )
+  {
+    auto val = m_service->m_nvml->getFanSpeedPct( 0 );
+    if ( val.has_value() )
+      gpuFanSpeed = static_cast< int >( *val );
+  }
+
   QVariantMap tempData;
   tempData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( now ) );
   tempData[ "data" ] = QVariant::fromValue( gpuTemp );
 
   QVariantMap speedData;
   speedData[ "timestamp" ] = QVariant::fromValue( static_cast< qlonglong >( now ) );
-  speedData[ "data" ] = QVariant::fromValue( -1 );
+  speedData[ "data" ] = QVariant::fromValue( gpuFanSpeed );
 
   QVariantMap result;
   result[ "speed" ] = QVariant::fromValue( speedData );
@@ -1572,6 +1596,7 @@ QString UccDBusInterfaceAdaptor::GetHardwareFanDevicesJSON()
     if ( i > 0 ) json += ',';
     json += "{\"id\":\"" + f.id + "\"";
     json += ",\"label\":\"" + f.label + "\"";
+    json += ",\"sourceName\":\"" + jsonEscape( f.sourceName ) + "\"";
     json += ",\"hwmonPath\":\"" + f.hwmonPath + "\"";
     json += ",\"index\":" + std::to_string( f.index );
     json += ",\"canRead\":" + std::string( f.canRead ? "true" : "false" );
@@ -3574,19 +3599,42 @@ QString UccDBusInterfaceAdaptor::GetAutoOCProgress()
     return QStringLiteral( "{\"running\":false}" );
 
   bool running = m_service->m_autoOCWorker->isRunning();
-  return running ? QStringLiteral( "{\"running\":true}" )
-                 : QStringLiteral( "{\"running\":false}" );
+  if ( running )
+    return QStringLiteral( "{\"running\":true,\"resumeAvailable\":false}" );
+
+  const bool resumeAvailable = std::filesystem::exists( AUTO_OC_CHECKPOINT_PATH );
+  if ( resumeAvailable )
+  {
+    return QStringLiteral(
+      "{\"running\":false,\"resumeAvailable\":true,"
+      "\"message\":\"Resume available. Start the game/application and start Auto-OC to continue from the saved step.\"}" );
+  }
+
+  return QStringLiteral( "{\"running\":false,\"resumeAvailable\":false}" );
 }
 
 // ─── Auto-Undervolt D-Bus methods ───────────────────────────────────────────
 
-bool UccDBusInterfaceAdaptor::StartAutoUndervolt( int deviceIndex )
+bool UccDBusInterfaceAdaptor::StartAutoUndervolt( int deviceIndex,
+                                                  bool targetFpsEnabled,
+                                                  int targetFps,
+                                                  bool extendedValidation,
+                                                  bool powerLimitMode )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
 
+  // Build config with target-FPS settings and pass it into start(),
+  // which replaces the worker's m_config.
+  UndervoltConfig cfg;
+  cfg.targetFpsEnabled = targetFpsEnabled;
+  cfg.targetFpsValue   = ( targetFpsEnabled && targetFps > 0 )
+                         ? static_cast< double >( targetFps ) : 0.0;
+  cfg.extendedValidation = extendedValidation;
+  cfg.powerLimitMode     = powerLimitMode;
+
   return m_service->m_autoUndervoltWorker->start(
-    static_cast< unsigned int >( deviceIndex ) );
+    static_cast< unsigned int >( deviceIndex ), cfg );
 }
 
 bool UccDBusInterfaceAdaptor::StopAutoUndervolt()
@@ -3609,8 +3657,18 @@ QString UccDBusInterfaceAdaptor::GetAutoUndervoltProgress()
     return QStringLiteral( "{\"running\":false}" );
 
   bool running = m_service->m_autoUndervoltWorker->isRunning();
-  return running ? QStringLiteral( "{\"running\":true}" )
-                 : QStringLiteral( "{\"running\":false}" );
+  if ( running )
+    return QStringLiteral( "{\"running\":true,\"resumeAvailable\":false}" );
+
+  const bool resumeAvailable = std::filesystem::exists( AUTO_UV_CHECKPOINT_PATH );
+  if ( resumeAvailable )
+  {
+    return QStringLiteral(
+      "{\"running\":false,\"resumeAvailable\":true,"
+      "\"message\":\"Resume available. Start the game/application and start Auto-Undervolt to continue from the saved step.\"}" );
+  }
+
+  return QStringLiteral( "{\"running\":false,\"resumeAvailable\":false}" );
 }
 
 QString UccDBusInterfaceAdaptor::GetAutoUndervoltProfiles()
@@ -3740,7 +3798,7 @@ UccDBusService::UccDBusService()
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
-  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"vramFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999,\"coreVoltageMv\":-1}";
+  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"vramFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999,\"coreVoltageMv\":-1,\"fanSpeedPct\":-1}";
   m_dbusData.iGpuInfoValuesJSON = "{\"vendor\":\"unknown\",\"temp\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"powerDraw\":-1}";
 
   // Keyboard backlight will be detected during worker initialization
@@ -3767,6 +3825,8 @@ UccDBusService::UccDBusService()
   m_hw.addTempProvider( std::make_unique< ucc::hal::HwmonTempProvider >() );
   // NVML-based GPU temperature (covers systems without nvidia hwmon, e.g. RTX 5090)
   m_hw.addTempProvider( std::make_unique< ucc::hal::NvmlTempProvider >( m_nvml.get() ) );
+  // NVML-based GPU fan provider (desktop NVIDIA GPUs with NVML fan control)
+  m_hw.addFanProvider( std::make_unique< ucc::hal::NvidiaGpuFanProvider >( m_nvml.get() ) );
   // CPU-specific platform providers (AMD via RyzenAdj/SMU, Intel TBD)
   m_hw.addPlatformProvider( std::make_unique< ucc::hal::AmdCpuPlatformProvider >() );
   // Profile providers — Uniwill-specific (high priority) and generic fallback
@@ -4559,6 +4619,12 @@ void UccDBusService::setupGpuDataCallback()
       if ( dGpuInfo.m_coreVoltageMv > -1 )
         m_metricsStore.push( "gpuCoreVoltage", now,
                              static_cast< double >( dGpuInfo.m_coreVoltageMv ) );
+      if ( dGpuInfo.m_fanSpeedPct > -1 )
+        m_metricsStore.push( "gpuFanDuty", now,
+                             static_cast< double >( dGpuInfo.m_fanSpeedPct ) );
+      if ( dGpuInfo.m_thermalMarginC > -1 )
+        m_metricsStore.push( "gpuThermalMargin", now,
+                             static_cast< double >( dGpuInfo.m_thermalMarginC ) );
 
       // Expose dGPU temperature through fan data for UI compatibility
       if ( dGpuInfo.m_temp > -1.0 and m_dbusData.fans.size() > 1 )
@@ -4728,11 +4794,16 @@ bool UccDBusService::initDBus()
             "\"currentOffsetMHz\":%6,\"bestOffsetMHz\":%7,"
             "\"temp\":%8,\"gpuClock\":%9,\"powerDraw\":%10,"
             "\"gpuUtil\":%11,\"fps\":%12,\"baselineFps\":%13,"
-            "\"app\":\"%14\",\"message\":\"%15\"}" )
+            "\"targetFps\":%14,"
+            "\"fpsPerWatt\":%15,\"baselineFpsPerWatt\":%16,"
+            "\"currentPowerLimitW\":%17,"
+            "\"app\":\"%18\",\"message\":\"%19\"}" )
           .arg( prog.phase == UVPhase::Baseline    ? "baseline"
+                : prog.phase == UVPhase::CapReduction ? "capReduction"
                 : prog.phase == UVPhase::Searching  ? "searching"
               : prog.phase == UVPhase::OffsetSearching ? "offset_searching"
                 : prog.phase == UVPhase::Validating ? "validating"
+                : prog.phase == UVPhase::PowerLimitSweep ? "powerLimitSweep"
                 : prog.phase == UVPhase::Done       ? "done"
                 : "idle" )
           .arg( prog.iteration )
@@ -4747,6 +4818,10 @@ bool UccDBusService::initDBus()
           .arg( prog.gpuUtilPct )
           .arg( prog.fps, 0, 'f', 1 )
           .arg( prog.baselineFps, 0, 'f', 1 )
+          .arg( prog.targetFps, 0, 'f', 1 )
+          .arg( prog.fpsPerWatt, 0, 'f', 2 )
+          .arg( prog.baselineFpsPerWatt, 0, 'f', 2 )
+          .arg( prog.currentPowerLimitW )
           .arg( QString::fromStdString( prog.appName ) )
           .arg( QString::fromStdString( prog.message ) );
 

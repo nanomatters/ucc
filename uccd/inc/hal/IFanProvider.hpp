@@ -30,6 +30,7 @@ struct FanInfo
 {
   std::string id;         // unique id, e.g. "hwmon3_fan1", "tuxedio_fan0"
   std::string label;      // human-readable, e.g. "CPU Fan", "Chassis Fan 1"
+  std::string sourceName; // grouping root, e.g. GPU model, board name, controller name
   std::string hwmonPath;  // base hwmon directory (for hwmon-based)
   int index = 0;          // fan number within the provider
   bool canRead = false;   // can read RPM

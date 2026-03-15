@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
 #include <dlfcn.h>
 #include <iostream>
 #include <map>
@@ -37,6 +38,37 @@ using nvmlDevice_t = void*;
 
 static constexpr nvmlReturn_t NVML_SUCCESS = 0;
 static constexpr nvmlReturn_t NVML_ERROR_NOT_SUPPORTED = 3;
+
+enum nvmlValueType_t : unsigned int
+{
+  NVML_VALUE_TYPE_UNSIGNED_INT = 0,
+  NVML_VALUE_TYPE_UNSIGNED_LONG = 1,
+  NVML_VALUE_TYPE_UNSIGNED_LONG_LONG = 2,
+  NVML_VALUE_TYPE_SIGNED_LONG_LONG = 3,
+  NVML_VALUE_TYPE_DOUBLE = 4,
+  NVML_VALUE_TYPE_STRING = 5,
+};
+
+union nvmlValue_t
+{
+  unsigned int uiVal;
+  unsigned long ulVal;
+  unsigned long long ullVal;
+  long long sllVal;
+  double dVal;
+  char str[4096];
+};
+
+struct nvmlFieldValue_t
+{
+  unsigned int fieldId;
+  unsigned int scopeId;
+  long long timestamp;
+  long long latencyUsec;
+  unsigned int valueType;
+  nvmlReturn_t nvmlReturn;
+  nvmlValue_t value;
+};
 
 enum nvmlClockType_t : unsigned int
 {
@@ -88,6 +120,18 @@ struct nvmlUtilization_t
 {
   unsigned int gpu;    ///< Compute utilization in percent over the last sample period
   unsigned int memory; ///< Memory utilization in percent over the last sample period
+};
+
+/// PCI info struct returned by nvmlDeviceGetPciInfo_v3
+struct nvmlPciInfo_t
+{
+  char busIdLegacy[16];
+  unsigned int domain;
+  unsigned int bus;
+  unsigned int device;
+  unsigned int pciDeviceId;
+  unsigned int pciSubSystemId;
+  char busId[32];
 };
 
 /// Device memory information returned by nvmlDeviceGetMemoryInfo(_v2)
@@ -198,6 +242,9 @@ struct NvmlOCState
   // Temperature
   unsigned int tempC = 0;
   unsigned int tempShutdownC = 0;
+  unsigned int tempSlowdownC = 0;
+  unsigned int tempGpuMaxC = 0;
+  int thermalMarginC = -1;  ///< Distance to thermal limit in °C, or -1 if unavailable
 
   bool offsetsSupported = false;
   bool lockedClocksSupported = false;
@@ -315,8 +362,14 @@ public:
   /** @brief Default (factory) power limit in watts. */
   [[nodiscard]] std::optional< double > getPowerDefaultLimitW( unsigned int deviceIndex ) const noexcept;
 
+  /** @brief NVML recovery action enum from field value ID 230, if available. */
+  [[nodiscard]] std::optional< unsigned int > getGpuRecoveryAction( unsigned int deviceIndex ) const noexcept;
+
   /** @brief Current graphics clock in MHz. */
   [[nodiscard]] std::optional< unsigned int > getGpuClockMHz( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Human-readable GPU model name. */
+  [[nodiscard]] std::optional< std::string > getDeviceName( unsigned int deviceIndex ) const;
 
   /** @brief Maximum (boost) graphics clock in MHz. */
   [[nodiscard]] std::optional< unsigned int > getMaxGpuClockMHz( unsigned int deviceIndex ) const noexcept;
@@ -367,6 +420,33 @@ public:
 
   /** @brief Current P-state index (0 = P0 maximum, 15 = P15 minimum). */
   [[nodiscard]] std::optional< unsigned int > getCurrentPstate( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Thermal margin: distance to thermal limit in °C. */
+  [[nodiscard]] std::optional< unsigned int > getMarginTemperature( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Fan speed in percent for given fan index (0-based). */
+  [[nodiscard]] std::optional< unsigned int > getFanSpeedPct( unsigned int deviceIndex, unsigned int fanIndex = 0 ) const noexcept;
+
+  /** @brief Number of fans on the GPU. */
+  [[nodiscard]] std::optional< unsigned int > getNumFans( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Target fan speed in percent for given fan index (0-based). */
+  [[nodiscard]] std::optional< unsigned int > getTargetFanSpeedPct( unsigned int deviceIndex, unsigned int fanIndex ) const noexcept;
+
+  /** @brief Min/max fan speed in percent (device-wide). Returns {min, max}. */
+  [[nodiscard]] std::optional< std::pair< unsigned int, unsigned int > > getMinMaxFanSpeedPct( unsigned int deviceIndex ) const noexcept;
+
+  /** @brief Fan control policy for given fan index. 0=auto, 1=manual. */
+  [[nodiscard]] std::optional< unsigned int > getFanControlPolicy( unsigned int deviceIndex, unsigned int fanIndex ) const noexcept;
+
+  /** @brief Set fan speed (0–100%) for a given fan. Returns true on success. */
+  bool setFanSpeed( unsigned int deviceIndex, unsigned int fanIndex, unsigned int speedPct );
+
+  /** @brief Set fan control policy (0=auto, 1=manual) for a given fan. Returns true on success. */
+  bool setFanControlPolicy( unsigned int deviceIndex, unsigned int fanIndex, unsigned int policy );
+
+  /** @brief Restore fan to automatic firmware control. Returns true on success. */
+  bool resetFanSpeed( unsigned int deviceIndex, unsigned int fanIndex );
 
   /** @brief Current graphics-clock offset in MHz at the current P-state. */
   [[nodiscard]] std::optional< int > getGrClockOffsetMHz( unsigned int deviceIndex ) const noexcept;
@@ -449,6 +529,10 @@ private:
   mutable std::map< unsigned int, std::map< int /*clockType*pstate*/, int > > m_appliedOffsets;
   std::map< unsigned int, std::map< int /*clockType*pstate*/, bool > > m_writableOffsets;
   std::map< unsigned int, std::vector< nvml::nvmlPstates_t > > m_supportedPstates;
+  mutable std::map< unsigned int, bool > m_resetRequiredCache;
+  mutable std::map< unsigned int, unsigned long long > m_lastEnergyMj;
+  mutable std::map< unsigned int, std::chrono::steady_clock::time_point > m_lastEnergyTime;
+  mutable std::map< unsigned int, double > m_lastComputedPowerW;
 
   // Function pointer types
   using InitFn = nvml::nvmlReturn_t ( * )();
@@ -456,22 +540,28 @@ private:
   using DeviceGetCountFn = nvml::nvmlReturn_t ( * )( unsigned int* );
   using DeviceGetHandleByIndexFn = nvml::nvmlReturn_t ( * )( unsigned int, nvml::nvmlDevice_t* );
   using DeviceGetNameFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, char*, unsigned int );
-  using DeviceGetPciBusIdFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, char*, unsigned int );
+  using DeviceGetPciInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPciInfo_t* );
   using DeviceGetSupportedPstatesFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPstates_t*, unsigned int );
   using DeviceGetMinMaxClockFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClockType_t, nvml::nvmlPstates_t, unsigned int*, unsigned int* );
   using DeviceGetClockOffsetsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClockOffset_t* );
   using DeviceSetClockOffsetsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlClockOffset_t* );
+  using DeviceGetGpcClkVfOffsetFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, int* );
+  using DeviceSetGpcClkVfOffsetFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, int );
+  using DeviceGetMemClkVfOffsetFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, int* );
+  using DeviceSetMemClkVfOffsetFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, int );
   using DeviceSetGpuLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int );
   using DeviceSetMemLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int );
   using DeviceResetGpuLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t );
   using DeviceResetMemLockedClocksFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t );
   using DeviceGetTemperatureFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
   using DeviceGetTemperatureThresholdFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetMarginTemperatureFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
   using DeviceGetPowerUsageFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
   using DeviceGetPowerManagementLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
   using DeviceSetPowerManagementLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int );
   using DeviceGetPowerManagementLimitConstraintsFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
   using DeviceGetPowerManagementDefaultLimitFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+  using DeviceGetFieldValuesFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, int, nvml::nvmlFieldValue_t * );
   using DeviceGetPerformanceStateFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPstates_t* );
   using DeviceGetClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
   using DeviceGetMaxClockInfoFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
@@ -485,6 +575,14 @@ private:
   using DeviceGetViolationStatusFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, nvml::nvmlPerfPolicyType_t, nvml::nvmlViolationTime_t * );
   using DeviceGetEncoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
   using DeviceGetDecoderUtilizationFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
+  using DeviceGetFanSpeedV2Fn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetNumFansFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int* );
+  using DeviceSetFanSpeedV2Fn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int );
+  using DeviceGetTargetFanSpeedFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceGetMinMaxFanSpeedFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int*, unsigned int* );
+  using DeviceGetFanControlPolicyV2Fn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int* );
+  using DeviceSetFanControlPolicyFn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int, unsigned int );
+  using DeviceSetDefaultFanSpeedV2Fn = nvml::nvmlReturn_t ( * )( nvml::nvmlDevice_t, unsigned int );
 
   using NvApiQueryInterfaceFn = void * ( * )( uint32_t );
   using NvApiInitializeFn = int32_t ( * )( void );
@@ -501,22 +599,28 @@ private:
   DeviceGetCountFn m_getCount = nullptr;
   DeviceGetHandleByIndexFn m_getHandle = nullptr;
   DeviceGetNameFn m_getName = nullptr;
-  DeviceGetPciBusIdFn m_getPciBusId = nullptr;
+  DeviceGetPciInfoFn m_getPciInfo = nullptr;
   DeviceGetSupportedPstatesFn m_getSupportedPstates = nullptr;
   DeviceGetMinMaxClockFn m_getMinMaxClock = nullptr;
   DeviceGetClockOffsetsFn m_getClockOffsets = nullptr;
   DeviceSetClockOffsetsFn m_setClockOffsets = nullptr;
+  DeviceGetGpcClkVfOffsetFn m_getGpcClkVfOffset = nullptr;
+  DeviceSetGpcClkVfOffsetFn m_setGpcClkVfOffset = nullptr;
+  DeviceGetMemClkVfOffsetFn m_getMemClkVfOffset = nullptr;
+  DeviceSetMemClkVfOffsetFn m_setMemClkVfOffset = nullptr;
   DeviceSetGpuLockedClocksFn m_setGpuLockedClocks = nullptr;
   DeviceSetMemLockedClocksFn m_setMemLockedClocks = nullptr;
   DeviceResetGpuLockedClocksFn m_resetGpuLockedClocks = nullptr;
   DeviceResetMemLockedClocksFn m_resetMemLockedClocks = nullptr;
   DeviceGetTemperatureFn m_getTemperature = nullptr;
   DeviceGetTemperatureThresholdFn m_getTemperatureThreshold = nullptr;
+  DeviceGetMarginTemperatureFn m_getMarginTemperature = nullptr;
   DeviceGetPowerUsageFn m_getPowerUsage = nullptr;
   DeviceGetPowerManagementLimitFn m_getPowerLimit = nullptr;
   DeviceSetPowerManagementLimitFn m_setPowerLimit = nullptr;
   DeviceGetPowerManagementLimitConstraintsFn m_getPowerLimitConstraints = nullptr;
   DeviceGetPowerManagementDefaultLimitFn m_getPowerLimitDefault = nullptr;
+  DeviceGetFieldValuesFn m_getFieldValues = nullptr;
   DeviceGetPerformanceStateFn m_getPerformanceState = nullptr;
   DeviceGetClockInfoFn m_getClockInfo = nullptr;
   DeviceGetMaxClockInfoFn m_getMaxClockInfo = nullptr;
@@ -530,6 +634,14 @@ private:
   DeviceGetViolationStatusFn m_getViolationStatus = nullptr;
   DeviceGetEncoderUtilizationFn m_getEncoderUtilization = nullptr;
   DeviceGetDecoderUtilizationFn m_getDecoderUtilization = nullptr;
+  DeviceGetFanSpeedV2Fn m_getFanSpeedV2 = nullptr;
+  DeviceGetNumFansFn m_getNumFans = nullptr;
+  DeviceSetFanSpeedV2Fn m_setFanSpeedV2 = nullptr;
+  DeviceGetTargetFanSpeedFn m_getTargetFanSpeed = nullptr;
+  DeviceGetMinMaxFanSpeedFn m_getMinMaxFanSpeed = nullptr;
+  DeviceGetFanControlPolicyV2Fn m_getFanControlPolicyV2 = nullptr;
+  DeviceSetFanControlPolicyFn m_setFanControlPolicy = nullptr;
+  DeviceSetDefaultFanSpeedV2Fn m_setDefaultFanSpeedV2 = nullptr;
 
   NvApiQueryInterfaceFn m_nvapiQueryInterface = nullptr;
   NvApiInitializeFn m_nvapiInitialize = nullptr;
@@ -560,4 +672,10 @@ private:
   void cacheSupportedPstates();
   void initNvapi();
   void probeWritableOffsetPstates();
+
+  [[nodiscard]] std::optional< unsigned long >
+  getFieldUnsignedLong( unsigned int deviceIndex, unsigned int fieldId, unsigned int scopeId = 0 ) const noexcept;
+
+  [[nodiscard]] std::optional< unsigned int >
+  getFieldUnsignedInt( unsigned int deviceIndex, unsigned int fieldId, unsigned int scopeId = 0 ) const noexcept;
 };

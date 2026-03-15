@@ -83,6 +83,7 @@ public:
 
 public slots:
   void refresh();
+  void refreshGpuProfiles();
   void setActiveProfile( const QString &profileId );
   void setActiveProfileByIndex( int index );
   void saveProfile( const QString &profileJSON );

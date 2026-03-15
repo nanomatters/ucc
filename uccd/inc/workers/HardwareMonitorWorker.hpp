@@ -64,6 +64,8 @@ struct DGpuInfo
   int m_grClockOffsetMHz  = INT_MIN; ///< Graphics-clock offset at current P-state, INT_MIN = unavailable
   int m_memClockOffsetMHz = INT_MIN; ///< Memory-clock offset at current P-state, INT_MIN = unavailable
   int m_coreVoltageMv = -1;      ///< Core voltage in mV, or -1
+  int m_fanSpeedPct   = -1;      ///< Fan speed in %, or -1 if unavailable
+  int m_thermalMarginC = -1;     ///< Distance to thermal limit in °C, or -1
 
   void print() const noexcept;
 };

@@ -430,7 +430,8 @@ public slots:
   QString GetAutoOCProgress();
 
   // NVIDIA Auto-Undervolt methods
-  bool StartAutoUndervolt( int deviceIndex );
+  bool StartAutoUndervolt( int deviceIndex, bool targetFpsEnabled, int targetFps,
+                           bool extendedValidation, bool powerLimitMode );
   bool StopAutoUndervolt();
   bool GetAutoUndervoltRunning();
   QString GetAutoUndervoltProgress();

@@ -1696,6 +1696,10 @@ void FanControlTab::onSensorDropped( int row, const QString &sensorId )
 
 QString FanControlTab::normalizedDeviceGroup( const QJsonObject &device )
 {
+  const QString sourceName = device[QStringLiteral( "sourceName" )].toString().trimmed();
+  if ( !sourceName.isEmpty() )
+    return sourceName;
+
   const QString dt = device[QStringLiteral( "deviceType" )].toString().toLower();
   if ( dt == QStringLiteral( "fan" ) )         return QStringLiteral( "Fans" );
   if ( dt == QStringLiteral( "pump" ) )        return QStringLiteral( "Pumps" );

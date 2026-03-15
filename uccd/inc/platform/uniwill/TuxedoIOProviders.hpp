@@ -86,6 +86,7 @@ public:
       FanInfo fi;
       fi.id = "tuxedio_fan" + std::to_string( i );
       fi.label = ( i == 0 ) ? "CPU Fan" : "GPU Fan " + std::to_string( i );
+      fi.sourceName = "Embedded Controller";
       fi.index = i;
       fi.canRead = true;
       fi.canControl = true;

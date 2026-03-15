@@ -41,9 +41,11 @@ enum class UVPhase
 {
   Idle,       ///< Not running
   Baseline,   ///< Measuring baseline FPS / clocks at max settings
+  CapReduction, ///< Reducing freq cap toward user-defined target FPS
   Searching,  ///< Fixed-cap offset sweep (increase offset while stable)
   OffsetSearching, ///< Reserved for compatibility (unused)
   Validating, ///< Extended stability test of the chosen cap
+  PowerLimitSweep, ///< Power-limit reduction mode (#1)
   Done,       ///< Complete (success or failure)
 };
 
@@ -83,6 +85,36 @@ struct UndervoltConfig
   int  maxNvapiLimiterPct = 90;  ///< Allowed ratio of non-zero NvAPI perf limiter mask samples
   int  maxStepRetries   = 1;     ///< Retries per candidate to reduce noise false negatives
   int  safetyMarginMHz  = 15;    ///< Added above the lowest stable cap as safety margin
+
+  // ── Thermal soak (#6) ──
+  int  thermalSoakMs      = 30000; ///< Pre-baseline warm-up: wait for temp to stabilise
+  int  thermalSoakSlopeCPerMin = 2; ///< Temp slope threshold (°C/min) to consider stable
+
+  // ── Extended validation (#7) ──
+  bool extendedValidation = false; ///< Use 5-minute validation instead of 60 s
+  int  extendedValidationMs = 300000; ///< Duration of extended validation (ms)
+
+  // ── Frame time stutter gate (#3) ──
+  double maxFpsStddevPct  = 15.0;  ///< Max FPS stddev as % of mean before step is unstable
+  double min1PctLowRatio  = 0.70;  ///< 1% low must be >= this ratio of mean FPS
+
+  // ── Voltage sanity (#4) ──
+  double maxVoltageRisePct = 2.0;  ///< If voltage exceeds baseline by this %, stop offset sweep
+
+  // ── Validation oscillation limit (#8) ──
+  int  maxValidationOscillations = 3; ///< Cap direction reversals before freezing cap
+
+  // ── Target FPS cap-reduction ──
+  bool targetFpsEnabled   = false; ///< Whether to reduce freq cap toward a target FPS
+  double targetFpsValue   = 0.0;   ///< Desired FPS; cap is reduced until reaching this
+  int  capReductionStepMHz = 100;  ///< Initial freq cap step during cap-reduction (MHz)
+  int  capReductionFineStepMHz = 25; ///< Fine step once near target FPS (MHz)
+  int  capReductionWindowMs = 10000; ///< FPS averaging window during cap-reduction (ms)
+
+  // ── Power-limit mode (#1) ──
+  bool powerLimitMode     = false; ///< Use power-limit reduction instead of offset sweep
+  int  powerLimitStepW    = 5;     ///< Power-limit step size in watts
+  int  powerLimitTestMs   = 15000; ///< Per-step test duration during power-limit sweep (ms)
 };
 
 /**
@@ -97,12 +129,16 @@ struct UndervoltProgress
   int         bestCapMHz     = 0;     ///< Best (lowest) stable cap found so far
   int         currentOffsetMHz = 0;   ///< Current core offset under test
   int         bestOffsetMHz    = 0;   ///< Best stable core offset at chosen cap
+  double      targetFps      = 0.0;   ///< User-defined target FPS (0 = not set)
   int         tempC          = 0;
   int         gpuClockMHz    = 0;
   int         powerDrawW     = 0;
   int         gpuUtilPct     = 0;
   double      fps            = -1.0;
   double      baselineFps    = -1.0;
+  double      fpsPerWatt     = 0.0;   ///< Current FPS/W efficiency (#11)
+  double      baselineFpsPerWatt = 0.0; ///< Baseline FPS/W for comparison (#11)
+  int         currentPowerLimitW = 0; ///< During power-limit sweep (#1)
   std::string appName;
   std::string message;
 };
@@ -121,6 +157,10 @@ struct UndervoltResult
   double      baselineVoltageMv = 0.0;
   double      finalVoltageMv = 0.0;
   double      powerSavedPct  = 0.0;  ///< Estimated power saving vs baseline
+  double      fpsPerWatt     = 0.0;  ///< Final FPS/W efficiency (#11)
+  double      baselineFpsPerWatt = 0.0; ///< Baseline FPS/W (#11)
+  double      efficiencyGainPct = 0.0; ///< % improvement in FPS/W (#11)
+  int         finalPowerLimitW = 0;  ///< Final power limit when in power-limit mode (#1)
   bool        success        = false;
   std::string appName;               ///< The app this profile was found for
   std::string message;
@@ -220,6 +260,10 @@ public:
   /// Apply a previously stored per-app profile (locks GPU clocks).
   bool applyAppProfile( const std::string &appName, unsigned int deviceIndex = 0 );
 
+  /// Notify the worker that the given app is still running so background
+  /// monitoring can check profile health.  Call periodically from FPS poll.
+  void tickBackgroundMonitor( const std::string &appName, unsigned int deviceIndex = 0 );
+
   /// Remove a stored per-app profile.
   void removeAppProfile( const std::string &appName );
 
@@ -232,6 +276,9 @@ public:
 
   /// Restore profiles from serialised data (called on daemon start).
   void loadProfiles( const std::map< std::string, AppUndervoltProfile > &profiles );
+
+  /// @return mutable reference to the worker config (for pre-start setup).
+  UndervoltConfig &config() noexcept { return m_config; }
 
 signals:
   /// Emitted every pollIntervalMs with current progress.
@@ -246,9 +293,11 @@ private slots:
 private:
   // ── State machine ──
   void enterBaseline();
+  void enterCapReduction();
   void enterSearch();
   void enterOffsetSearch();
   void enterValidation();
+  void enterPowerLimitSweep();
   void enterDone( bool success, const std::string &msg );
   void resetStepMetrics();
   bool evaluateStep( double &avgFpsOut,
@@ -273,8 +322,14 @@ private:
   void captureOriginalState();
   void restoreOriginalState( bool keepCurrentCap );
   void ensureMaxPowerLimit();
+  bool isThermallyStable() const;
   void log( const std::string &msg );
   void emitProgress( const std::string &msg = {} );
+
+  // ── Crash-resume checkpointing ──
+  void saveCheckpoint( bool force = false );
+  void clearCheckpoint();
+  bool tryResumeFromCheckpoint( unsigned int deviceIndex );
 
   // ── Members ──
   std::shared_ptr< NvmlWrapper > m_nvml;
@@ -293,12 +348,14 @@ private:
 
   // Baseline measurements
   int    m_baselineClockMHz = 0;
+  int    m_baselineMaxClockMHz = 0;  ///< Peak observed clock during baseline (cap-reduction start)
   double m_baselineFps      = 0.0;
   double m_targetFps         = 0.0;  ///< Baseline reference FPS (fixed after baseline)
   double m_fpsThreshold      = 0.0;  ///< Fixed pass/fail threshold derived from baseline
   double m_peakFpsObserved   = 0.0;  ///< Running peak FPS across all samples
   double m_baselinePowerW   = 0.0;
   double m_baselineVoltageMv = 0.0;
+  double m_baselineFpsPerWatt = 0.0;  ///< Baseline FPS/W (#11)
   int    m_baselineTempC    = 0;
 
   // FPS accumulation for current step
@@ -338,11 +395,19 @@ private:
   int m_bestOffset = 0;
   int m_finalCapMHz = 0;
 
+  // Cap-reduction phase state (target FPS)
+  int m_capReductionCurrentMHz = 0;  ///< Current cap being tested
+  int m_capReductionPrevMHz    = 0;  ///< Previous cap (fallback)
+  double m_capReductionFpsAccum = 0.0;
+  int    m_capReductionFpsSamples = 0;
+  bool   m_capReductionFineMode = false; ///< Switched to fine steps (#5)
+
   // Fixed-cap offset sweep state (v3)
   int m_searchCapMHz = 0;
   int m_searchOffsetMHz = 0;
   int m_stableCapMHz = 0;
   int m_stableOffsetMHz = 0;
+  double m_prevSearchAvgFps = 0.0;
   UVSearchAction m_lastAction = UVSearchAction::None;
   UVSearchAction m_nextAction = UVSearchAction::RaiseOffset;
   bool m_blockedLowerCap = false;
@@ -377,14 +442,39 @@ private:
   int m_clockHistoryCount = 0;
   int m_slidingRefClockMHz = 0;
 
+  // Validation oscillation tracking (#8)
+  int m_validationCapDir = 0;    ///< +1 = last raised, -1 = last lowered
+  int m_validationOscillations = 0; ///< Direction reversal count
+
+  // Thermal soak tracking (#6)
+  std::vector< int > m_soakTempSamples;
+
+  // Background monitoring (#9)
+  int m_bgMonDroopCount = 0;
+  int m_bgMonSampleCount = 0;
+  std::string m_bgMonApp;
+  std::chrono::steady_clock::time_point m_bgMonLastCheck;
+
   // Per-app stored profiles
   std::map< std::string, AppUndervoltProfile > m_appProfiles;
 
   // Original GPU state snapshot for safe restoration
   std::optional< double > m_originalPowerLimitW;
   std::optional< std::pair< unsigned int, unsigned int > > m_originalGpuLockedClocks;
+  std::optional< unsigned int > m_originalGpuMinClockMHz;
   std::optional< int > m_originalCoreOffsetMHz;
 
   // Max power limit (read once at start)
   double m_maxPowerW = 0.0;
+
+  // Power-limit sweep state (#1)
+  unsigned int m_plCurrentMW = 0;   ///< Current power limit under test (milliwatts)
+  unsigned int m_plMinMW = 0;       ///< Hardware minimum power limit (milliwatts)
+  unsigned int m_plDefaultMW = 0;   ///< Default power limit (milliwatts)
+  unsigned int m_plBestMW = 0;      ///< Lowest stable power limit found
+  double       m_plBestFps = 0.0;    ///< FPS measured at best power limit
+  double       m_plBaselineFps = 0.0; ///< FPS at default power limit
+
+  // Crash-resume checkpoint throttling
+  std::chrono::steady_clock::time_point m_lastCheckpointPersist;
 };

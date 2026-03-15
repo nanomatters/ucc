@@ -1,0 +1,217 @@
+=== NVIDIA Driver 595.45.04 Deep Probe ===
+GPU count: 1
+
+========================================
+GPU 0: NVIDIA GeForce RTX 5090
+========================================
+
+--- 1. nvmlDeviceGetClockOffsets ---
+  sz=8 ver=1 -> Argument version mismatch
+  sz=12 ver=1 -> Argument version mismatch
+  sz=16 ver=1 -> Argument version mismatch
+  sz=20 ver=1 -> Argument version mismatch
+  FOUND: sz=24, ver=1, vword=0x01000018
+  f[0] = 0x01000018 (16777240 / 16777240)
+  f[4] = 0xFFFFFC18 (4294966296 / -1000)
+  f[5] = 0x000003E8 (1000 / 1000)
+  Raw hex (first 128 bytes):
+    18 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 18 fc ff ff e8 03 00 00 
+
+--- 2. nvmlDeviceSetClockOffsets ---
+  Exported: YES
+
+--- 3. nvmlDeviceGetMinMaxClockOfPState ---
+  Graphics P0: min=270 MHz, max=3180 MHz
+  Graphics P1: min=270 MHz, max=3180 MHz
+  Graphics P2: Unknown Error
+  Graphics P3: min=270 MHz, max=3180 MHz
+  Graphics P4: Unknown Error
+  SM P0: min=270 MHz, max=3180 MHz
+  SM P1: min=270 MHz, max=3180 MHz
+  SM P2: Unknown Error
+  SM P3: min=270 MHz, max=3180 MHz
+  SM P4: Unknown Error
+  Memory P0: min=14001 MHz, max=14001 MHz
+  Memory P1: min=13801 MHz, max=13801 MHz
+  Memory P2: Unknown Error
+  Memory P3: min=7001 MHz, max=7001 MHz
+  Memory P4: Unknown Error
+  Video P0: min=600 MHz, max=3090 MHz
+  Video P1: min=600 MHz, max=3090 MHz
+  Video P2: Unknown Error
+  Video P3: min=600 MHz, max=3090 MHz
+  Video P4: Unknown Error
+
+--- 4. VfOffset APIs ---
+  GPC VfOffset: SUCCESS -> 0
+  Mem VfOffset: SUCCESS -> 0
+
+--- 5. Power Smoothing APIs ---
+  SetState exported: YES
+  ActivatePresetProfile exported: YES
+  UpdatePresetProfileParam exported: YES
+
+  Probing PowerSmoothingSetState:
+    sz=8, ver=1, vword=0x01000008 -> Not Supported
+
+  Probing ActivatePresetProfile:
+    sz=24, ver=1, vword=0x01000018 -> Not Supported
+
+  Probing UpdatePresetProfileParam:
+    sz=24, ver=1, vword=0x01000018 -> Not Supported
+
+--- 6. Workload Power Profile APIs ---
+  GetProfilesInfo: YES
+  GetCurrentProfiles: YES
+  SetRequestedProfiles: YES
+  ClearRequestedProfiles: YES
+  UpdateProfiles_v1: YES
+
+  Probing GetProfilesInfo:
+
+  Probing GetCurrentProfiles:
+    sz=100 ver=1 -> NOT_SUPPORTED
+
+--- 7. Fan & Cooler APIs ---
+  Fan count: 3 (SUCCESS)
+  Fan 0:
+    Speed: 0% (SUCCESS)
+    Target: 30% (SUCCESS)
+    RPM: 0 (Invalid Argument)
+    Policy: 0 (SUCCESS)
+  Fan 1:
+    Speed: 0% (SUCCESS)
+    Target: 30% (SUCCESS)
+  [CRASHED in getFanRPM]
+    RPM: 0 (CRASHED)
+    Policy: 0 (SUCCESS)
+  Fan 2:
+    Speed: 0% (SUCCESS)
+    Target: 30% (SUCCESS)
+  [CRASHED in getFanRPM]
+    RPM: 0 (CRASHED)
+    Policy: 0 (SUCCESS)
+  MinMax fan speed: min=30%, max=100% (SUCCESS)
+
+  CoolerInfo probe:
+    FOUND: sz=16, ver=1, vword=0x01000010
+  f[0] = 0x01000010 (16777232 / 16777232)
+  f[2] = 0x00000002 (2 / 2)
+  f[3] = 0x0000000E (14 / 14)
+
+--- 8. PerformanceModes ---
+  Status: SUCCESS
+  Text: perf=0, nvclock=180, nvclockmin=180, nvclockmax=885, nvclockeditable=1, memclock=405, memclockmin=405, memclockmax=405, memclockeditable=1, memTransferRate=810, memTransferRatemin=810, memTransferRatemax=810, memTransferRateeditable=1 ; perf=1, nvclock=180, nvclockmin=180, nvclockmax=3090, nvclockeditable=1, memclock=810, memclockmin=810, memclockmax=810, memclockeditable=1, memTransferRate=1620, memTransferRatemin=1620, memTransferRatemax=1620, memTransferRateeditable=1 ; perf=2, nvclock=270, nvclockmin=270, nvclockmax=3180, nvclockeditable=1, memclock=7001, memclockmin=7001, memclockmax=7001, memclockeditable=1, memTransferRate=14002, memTransferRatemin=14002, memTransferRatemax=14002, memTransferRateeditable=1 ; perf=3, nvclock=270, nvclockmin=270, nvclockmax=3180, nvclockeditable=1, memclock=13801, memclockmin=13801, memclockmax=13801, memclockeditable=1, memTransferRate=27602, memTransferRatemin=27602, memTransferRatemax=27602, memTransferRateeditable=1 ; perf=4, nvclock=270, nvclockmin=270, nvclockmax=3
+
+--- 9. MarginTemperature ---
+  Status: SUCCESS
+  Thermal margin: 58°C
+
+--- 10. DynamicPstatesInfo ---
+  Status: SUCCESS
+  Flags: 0
+  GPU: 8%
+  VideoEngine: 13%
+  Slot4: 0%
+  Slot6: 91%
+
+--- 11. Power Management ---
+  Current power limit: 600000 mW (600 W) [SUCCESS]
+  Default power limit: 600000 mW (600 W) [SUCCESS]
+  Power constraints: min=400000 mW (400 W), max=600000 mW (600 W) [SUCCESS]
+  Enforced power limit: 600000 mW (600 W) [SUCCESS]
+  Current power usage: 21560 mW (21.6 W) [SUCCESS]
+  Total energy: 1012936398 mJ [SUCCESS]
+
+--- 12. Locked Clocks ---
+  nvmlDeviceSupportsLockClocksDeferred: NOT EXPORTED
+  Current Graphics clock: 270 MHz [SUCCESS]
+  Current SM clock: 270 MHz [SUCCESS]
+  Current Memory clock: 405 MHz [SUCCESS]
+  Current Video clock: 600 MHz [SUCCESS]
+  Max Graphics clock: 3180 MHz [SUCCESS]
+  Max SM clock: 3180 MHz [SUCCESS]
+  Max Memory clock: 14001 MHz [SUCCESS]
+  Max Video clock: 3090 MHz [SUCCESS]
+  Max customer boost (graphics): 0 MHz [Not Supported]
+  Max customer boost (memory): 0 MHz [Not Supported]
+
+--- 13. Violation & Throttle Status ---
+  Power: ref=1773939650721685 ns, violation=238847936 ns
+  Thermal: ref=1773939650725866 ns, violation=0 ns
+  SyncBoost: ref=1773939650726231 ns, violation=0 ns
+  BoardLimit: ref=1773939650726992 ns, violation=0 ns
+  LowUtil: ref=1773939650727754 ns, violation=19341684155520 ns
+  Reliability: ref=1773939650728522 ns, violation=0 ns
+  AppClock: Invalid Argument
+  BaseClock: Invalid Argument
+  Throttle reasons: 0x0000000000000000 [SUCCESS]
+
+  ThermalSettings:
+    Status: SUCCESS
+  f[0] = 0x00000001 (1 / 1)
+  f[1] = 0x00000001 (1 / 1)
+  f[3] = 0x0000007F (127 / 127)
+  f[4] = 0x0000001F (31 / 31)
+  f[5] = 0x00000001 (1 / 1)
+
+--- 14. PowerMizerMode ---
+  Status: SUCCESS
+  f[2] = 0x00000007 (7 / 7)
+
+--- 15. GPU Info ---
+  Architecture: 10 [SUCCESS]
+  CUDA cores: 21760 [SUCCESS]
+  Memory bus width: 512 bits [SUCCESS]
+  Board Part Number:  [SUCCESS]
+
+--- 16. Adaptive Clock ---
+  AdaptiveClockInfoStatus: 1 [SUCCESS]
+
+--- 17. P-State Support ---
+  Supported throttle reasons: 0x00000000000001FF [SUCCESS]
+  Current P-state: P8 [SUCCESS]
+  Supported memory clock count: 5 [Insufficient Size]
+
+--- 18. Pstates20 ---
+  NOT EXPORTED
+
+--- 19. Memory & Temperature ---
+  GPU Temp: 32°C [SUCCESS]
+  Mem Temp: 0°C [Invalid Argument]
+  Threshold Shutdown: 96°C
+  Threshold Slowdown: 93°C
+  Threshold GpuMax: 90°C
+
+
+========================================
+=== NvAPI Function ID Probe ===
+========================================
+
+  0xDCB616C3 GPU_GetAllClockFrequencies                    FOUND
+  0x465F9BCF GPU_GetVoltage                                FOUND
+  0x60DED2ED GPU_ClientPowerTopologyGetInfo                FOUND
+  0x3D358A0C GPU_PerfPoliciesGetStatus                     FOUND
+  0x65FE3AAD GPU_GetThermalInfo                            FOUND
+  0x0D258BB5 GPU_Unknown_ReferenceClocks                   FOUND
+  0x23F1B133 GPU_GetClockBoostTable                        FOUND
+  0x507B4B59 GPU_GetClockBoostTable_alt                    FOUND
+  0x21537AD4 GPU_GetVFPCurve                               FOUND
+  0x7F5F90A7 GPU_GetVFPCurve_alt                           not available
+  0x0C0B2B96 GPU_GetClockBoostLock                         not available
+  0x39944E71 GPU_GetClockBoostMask                         not available
+  0xE5AC921F GPU_SetClockBoostLock                         FOUND
+  0x74819072 GPU_SetClockBoostTable                        not available
+  0x0733D009 GPU_GetClockBoostRanges                       not available
+  0x34206D86 GPU_GetClockTable                             FOUND
+  0xDA4A8A28 GPU_ClientPowerPoliciesGetInfo                not available
+  0x34206D86 GPU_ClientPowerPoliciesGetStatus              FOUND
+  0xAD95F5ED GPU_ClientPowerPoliciesSetStatus              FOUND
+  0x28E5B430 GPU_GetThermalPoliciesInfo                    not available
+  0xE9C425A1 GPU_GetThermalPoliciesStatus                  FOUND
+  0x034C0B13 GPU_SetThermalPoliciesStatus                  not available
+  0x6FF81213 GPU_GetPstates20                              FOUND
+  0x0F4DAC4F GPU_SetPstates20                              not available
+  0x1F7B35A2 GPU_GetPerformanceDecreaseInfo                not available
+  0x60DED2ED GPU_ClientPowerTopology                       FOUND
+  0xA084F1A0 GPU_GetCoole

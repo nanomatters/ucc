@@ -63,6 +63,10 @@ struct TccSettings
   std::optional< std::string > chargingPriority;  // null in TypeScript
   // keyboardBacklightStates omitted for now - complex nested structure
 
+  // Auto-Undervolt target FPS
+  bool undervoltTargetFpsEnabled = false;
+  int  undervoltTargetFps        = 0;
+
   // Default constructor – stateMap starts empty.
   // uccd must not auto-assign profiles; it waits for ucc-gui to assign them.
   TccSettings() = default;

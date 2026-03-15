@@ -37,6 +37,102 @@ namespace ucc::hal
 {
 
 /**
+ * @brief Fan provider that aggregates fans from multiple child providers.
+ *
+ * When more than one IFanProvider detects fans (e.g. hwmon for chassis fans
+ * AND NVML for GPU fans), this composite merges them into a single provider
+ * so the rest of the code (FanControlWorker, D-Bus) sees one flat fan list.
+ */
+class CompositeFanProvider : public IFanProvider
+{
+public:
+  explicit CompositeFanProvider( std::vector< IFanProvider * > children )
+    : m_children( std::move( children ) )
+  {
+    std::string n = "composite(";
+    for ( size_t i = 0; i < m_children.size(); ++i )
+    {
+      if ( i > 0 ) n += '+';
+      n += m_children[i]->name();
+    }
+    n += ')';
+    m_name = std::move( n );
+
+    for ( auto *child : m_children )
+    {
+      for ( auto &fan : child->enumerateFans() )
+      {
+        m_fanOwner[fan.id] = child;
+        m_allFans.push_back( std::move( fan ) );
+      }
+    }
+  }
+
+  std::string name() const override { return m_name; }
+  bool detect() override { return true; }
+  int priority() const override { return 100; }
+  std::vector< FanInfo > enumerateFans() override { return m_allFans; }
+
+  std::optional< int > getFanRPM( const FanInfo &fan ) override
+  {
+    auto *p = ownerOf( fan );
+    return p ? p->getFanRPM( fan ) : std::nullopt;
+  }
+
+  std::optional< int > getFanSpeedPercent( const FanInfo &fan ) override
+  {
+    auto *p = ownerOf( fan );
+    return p ? p->getFanSpeedPercent( fan ) : std::nullopt;
+  }
+
+  bool setFanSpeedPercent( const FanInfo &fan, int percent ) override
+  {
+    auto *p = ownerOf( fan );
+    return p ? p->setFanSpeedPercent( fan, percent ) : false;
+  }
+
+  bool setFanAuto( const FanInfo &fan ) override
+  {
+    auto *p = ownerOf( fan );
+    return p ? p->setFanAuto( fan ) : false;
+  }
+
+  void refresh() override
+  {
+    for ( auto *c : m_children ) c->refresh();
+  }
+
+  void restoreAllAuto() override
+  {
+    for ( auto *c : m_children ) c->restoreAllAuto();
+  }
+
+  int getMinSpeedPercent( const FanInfo &fan ) override
+  {
+    auto *p = ownerOf( fan );
+    return p ? p->getMinSpeedPercent( fan ) : 0;
+  }
+
+  bool canTurnOff( const FanInfo &fan ) override
+  {
+    auto *p = ownerOf( fan );
+    return p ? p->canTurnOff( fan ) : false;
+  }
+
+private:
+  IFanProvider *ownerOf( const FanInfo &fan )
+  {
+    auto it = m_fanOwner.find( fan.id );
+    return it != m_fanOwner.end() ? it->second : nullptr;
+  }
+
+  std::vector< IFanProvider * > m_children;
+  std::vector< FanInfo > m_allFans;
+  std::map< std::string, IFanProvider * > m_fanOwner;
+  std::string m_name;
+};
+
+/**
  * @brief Central hardware abstraction manager.
  *
  * Owns all provider instances, probes them at startup, and selects the
@@ -97,8 +193,36 @@ public:
     syslog( LOG_INFO, "[HardwareManager] Chassis type: %s",
             chassisTypeToString( m_chassisType ).c_str() );
 
-    // --- Fan providers ---
-    selectBest( m_fanProviders, m_activeFanProvider, "fan" );
+    // --- Fan providers (accumulate ALL that detect, merge via composite) ---
+    {
+      std::vector< IFanProvider * > detected;
+      std::sort( m_fanProviders.begin(), m_fanProviders.end(),
+                 []( const auto &a, const auto &b )
+                 { return a->priority() > b->priority(); } );
+
+      for ( auto &p : m_fanProviders )
+      {
+        if ( p->detect() )
+        {
+          syslog( LOG_INFO, "[HardwareManager] fan provider '%s' (priority %d) detected",
+                  p->name().c_str(), p->priority() );
+          detected.push_back( p.get() );
+        }
+      }
+
+      if ( detected.size() == 1 )
+      {
+        m_activeFanProvider = detected[0];
+      }
+      else if ( detected.size() > 1 )
+      {
+        m_compositeFanProvider = std::make_unique< CompositeFanProvider >( std::move( detected ) );
+        m_activeFanProvider = m_compositeFanProvider.get();
+      }
+
+      if ( !m_activeFanProvider )
+        syslog( LOG_INFO, "[HardwareManager] No fan provider detected" );
+    }
 
     // --- Temp providers (may accumulate ALL that detect) ---
     m_activeTempProviders.clear();
@@ -652,6 +776,7 @@ private:
 
   // Active (selected) providers (raw pointers into owned vectors)
   IFanProvider *m_activeFanProvider = nullptr;
+  std::unique_ptr< CompositeFanProvider > m_compositeFanProvider;
   std::vector< ITempProvider * > m_activeTempProviders;
   std::vector< IPlatformProvider * > m_activePlatformProviders;
   IPlatformProvider *m_activePlatformProvider = nullptr; // highest-priority (primary)

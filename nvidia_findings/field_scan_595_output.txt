@@ -1,0 +1,107 @@
+============================================================
+NVML Field Scan - Driver 595 - direct nvmlDeviceGetFieldValues
+============================================================
+
+Reference NVML values (for correlation):
+
+Phase 1: broad scan IDs 1..8192 (scopeId=0)
+Only IDs returning data (nvmlReturn=0) are listed.
+
+ID    3 -> type=3 ret=0 ts=1773948562758013 lat=150 sll=0
+ID    4 -> type=3 ret=0 ts=1773948562758121 lat=105 sll=0
+ID    5 -> type=3 ret=0 ts=1773948562758199 lat=76 sll=0
+ID    6 -> type=3 ret=0 ts=1773948562758265 lat=64 sll=0
+ID  147 -> type=0 ret=0 ts=0 lat=0 ui=0
+ID  187 -> type=1 ret=0 ts=1773948562759242 lat=0 ul=400000
+ID  188 -> type=1 ret=0 ts=1773948562759243 lat=0 ul=600000
+ID  189 -> type=1 ret=0 ts=1773948562759243 lat=0 ul=600000
+ID  196 -> type=5 ret=0 ts=1773948562759369 lat=0 str=<non-ascii>
+ID  230 -> type=1 ret=0 ts=1773948562759473 lat=4 ul=1
+
+Phase 1 summary: 10 field IDs returned successful data.
+
+Phase 2: candidate correlation for temperature/power/clock-like values
+Heuristic: print successful numeric fields with plausible ranges.
+
+ID  187 -> type=1 ret=0 ts=1773948562762061 lat=0 ul=400000  [power-like]  [counter-like]
+ID  188 -> type=1 ret=0 ts=1773948562762064 lat=0 ul=600000  [power-like]  [counter-like]  [voltage-like]
+ID  189 -> type=1 ret=0 ts=1773948562762065 lat=0 ul=600000  [power-like]  [counter-like]  [voltage-like]
+
+Phase 3: probe successful IDs across scopeId=0..8
+
+ID    3:
+  scope=0 -> type=3 ret=0 ts=1773948562765399 lat=50 sll=0
+  scope=1 -> type=3 ret=0 ts=1773948562765447 lat=46 sll=0
+  scope=2 -> type=3 ret=0 ts=1773948562765493 lat=46 sll=0
+  scope=3 -> type=3 ret=0 ts=1773948562765538 lat=45 sll=0
+  scope=4 -> type=3 ret=0 ts=1773948562765584 lat=45 sll=0
+  scope=5 -> type=3 ret=0 ts=1773948562765630 lat=45 sll=0
+  scope=6 -> type=3 ret=0 ts=1773948562765676 lat=46 sll=0
+  scope=7 -> type=3 ret=0 ts=1773948562765721 lat=45 sll=0
+  scope=8 -> type=3 ret=0 ts=1773948562765767 lat=45 sll=0
+ID    4:
+  scope=0 -> type=3 ret=0 ts=1773948562765813 lat=46 sll=0
+  scope=1 -> type=3 ret=0 ts=1773948562765859 lat=46 sll=0
+  scope=2 -> type=3 ret=0 ts=1773948562765904 lat=45 sll=0
+  scope=3 -> type=3 ret=0 ts=1773948562765950 lat=45 sll=0
+  scope=4 -> type=3 ret=0 ts=1773948562765996 lat=45 sll=0
+  scope=5 -> type=3 ret=0 ts=1773948562766042 lat=46 sll=0
+  scope=6 -> type=3 ret=0 ts=1773948562766091 lat=49 sll=0
+  scope=7 -> type=3 ret=0 ts=1773948562766138 lat=46 sll=0
+  scope=8 -> type=3 ret=0 ts=1773948562766184 lat=46 sll=0
+ID    5:
+  scope=0 -> type=3 ret=0 ts=1773948562766230 lat=46 sll=0
+  scope=1 -> type=3 ret=0 ts=1773948562766276 lat=46 sll=0
+  scope=2 -> type=3 ret=0 ts=1773948562766322 lat=46 sll=0
+  scope=3 -> type=3 ret=0 ts=1773948562766369 lat=46 sll=0
+  scope=4 -> type=3 ret=0 ts=1773948562766414 lat=45 sll=0
+  scope=5 -> type=3 ret=0 ts=1773948562766460 lat=45 sll=0
+  scope=6 -> type=3 ret=0 ts=1773948562766506 lat=45 sll=0
+  scope=7 -> type=3 ret=0 ts=1773948562766553 lat=47 sll=0
+  scope=8 -> type=3 ret=0 ts=1773948562766599 lat=46 sll=0
+ID    6:
+  scope=0 -> type=3 ret=0 ts=1773948562766645 lat=46 sll=0
+  scope=1 -> type=3 ret=0 ts=1773948562766690 lat=45 sll=0
+  scope=2 -> type=3 ret=0 ts=1773948562766736 lat=45 sll=0
+  scope=3 -> type=3 ret=0 ts=1773948562766782 lat=45 sll=0
+  scope=4 -> type=3 ret=0 ts=1773948562766828 lat=45 sll=0
+  scope=5 -> type=3 ret=0 ts=1773948562766874 lat=45 sll=0
+  scope=6 -> type=3 ret=0 ts=1773948562766920 lat=46 sll=0
+  scope=7 -> type=3 ret=0 ts=1773948562766966 lat=46 sll=0
+  scope=8 -> type=3 ret=0 ts=1773948562767012 lat=46 sll=0
+ID  147:
+  scope=0 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=1 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=2 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=3 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=4 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=5 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=6 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=7 -> type=0 ret=0 ts=0 lat=0 ui=0
+  scope=8 -> type=0 ret=0 ts=0 lat=0 ui=0
+ID  187:
+  scope=0 -> type=1 ret=0 ts=1773948562767042 lat=0 ul=400000
+ID  188:
+  scope=0 -> type=1 ret=0 ts=1773948562767043 lat=0 ul=600000
+ID  189:
+  scope=0 -> type=1 ret=0 ts=1773948562767065 lat=0 ul=600000
+ID  196:
+  scope=0 -> type=5 ret=0 ts=1773948562767067 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=1 -> type=5 ret=0 ts=1773948562767068 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=2 -> type=5 ret=0 ts=1773948562767069 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=3 -> type=5 ret=0 ts=1773948562767070 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=4 -> type=5 ret=0 ts=1773948562767070 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=5 -> type=5 ret=0 ts=1773948562767071 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=6 -> type=5 ret=0 ts=1773948562767071 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=7 -> type=5 ret=0 ts=1773948562767072 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+  scope=8 -> type=5 ret=0 ts=1773948562767072 lat=0 str=<non-ascii> hex=00000000000000000000000000000000
+ID  230:
+  scope=0 -> type=1 ret=0 ts=1773948562767079 lat=6 ul=1
+  scope=1 -> type=1 ret=0 ts=1773948562767082 lat=3 ul=1
+  scope=2 -> type=1 ret=0 ts=1773948562767085 lat=3 ul=1
+  scope=3 -> type=1 ret=0 ts=1773948562767089 lat=3 ul=1
+  scope=4 -> type=1 ret=0 ts=1773948562767092 lat=3 ul=1
+  scope=5 -> type=1 ret=0 ts=1773948562767095 lat=3 ul=1
+  scope=6 -> type=1 ret=0 ts=1773948562767098 lat=3 ul=1
+  scope=7 -> type=1 ret=0 ts=1773948562767101 lat=3 ul=1
+  scope=8 -> type=1 ret=0 ts=1773948562767104 lat=3 ul=1

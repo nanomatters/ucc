@@ -20,8 +20,56 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <syslog.h>
+
+namespace
+{
+constexpr const char *AUTO_OC_CHECKPOINT_PATH = "/etc/ucc/autooc_checkpoint.json";
+
+const char *autoOcPhaseToString( AutoOCPhase phase )
+{
+  switch ( phase )
+  {
+  case AutoOCPhase::Idle: return "idle";
+  case AutoOCPhase::Baseline: return "baseline";
+  case AutoOCPhase::Searching: return "searching";
+  case AutoOCPhase::Validating: return "validating";
+  case AutoOCPhase::Done: return "done";
+  }
+  return "idle";
+}
+
+AutoOCPhase autoOcPhaseFromString( const std::string &value )
+{
+  if ( value == "baseline" ) return AutoOCPhase::Baseline;
+  if ( value == "searching" ) return AutoOCPhase::Searching;
+  if ( value == "validating" ) return AutoOCPhase::Validating;
+  if ( value == "done" ) return AutoOCPhase::Done;
+  return AutoOCPhase::Idle;
+}
+
+const char *autoOcCompToString( AutoOCComponent component )
+{
+  switch ( component )
+  {
+  case AutoOCComponent::Core: return "core";
+  case AutoOCComponent::Vram: return "vram";
+  case AutoOCComponent::Both: return "both";
+  }
+  return "core";
+}
+
+AutoOCComponent autoOcCompFromString( const std::string &value )
+{
+  if ( value == "vram" ) return AutoOCComponent::Vram;
+  if ( value == "both" ) return AutoOCComponent::Both;
+  return AutoOCComponent::Core;
+}
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Construction / destruction
@@ -114,6 +162,9 @@ bool AutoOCWorker::start( AutoOCComponent component,
   else if ( m_fpsServer )
     log( "AutoOC: FPS socket server unavailable (no layer data)" );
 
+  if ( tryResumeFromCheckpoint( component, deviceIndex ) )
+    return true;
+
   enterBaseline();
   return true;
 }
@@ -175,6 +226,7 @@ void AutoOCWorker::enterBaseline()
        + ( m_activeClk == AutoOCComponent::Vram ? " [VRAM ramp mode]"
            : " [max-offset mode]" ) );
   emitProgress( "Measuring baseline..." );
+  saveCheckpoint( true );
 
   m_pollTimer->start( m_config.pollIntervalMs );
 }
@@ -252,6 +304,7 @@ void AutoOCWorker::enterSearch()
     m_slidingRefClockMHz = 0;
 
     emitProgress( "VRAM ramp: testing +" + std::to_string( m_vramRampOffset ) + " MHz" );
+    saveCheckpoint( true );
   }
   else
   {
@@ -284,6 +337,7 @@ void AutoOCWorker::enterSearch()
     m_slidingRefClockMHz = 0;
 
     emitProgress( "Testing offset +" + std::to_string( m_mid ) + " MHz" );
+    saveCheckpoint( true );
   }
 }
 
@@ -322,12 +376,14 @@ void AutoOCWorker::enterValidation()
 
   emitProgress( "Validating +" + std::to_string( candidate ) + " MHz (" +
                 std::to_string( m_config.validationTestMs / 1000 ) + " s)" );
+  saveCheckpoint( true );
 }
 
 void AutoOCWorker::enterDone( bool success, const std::string &msg )
 {
   m_pollTimer->stop();
   m_phase = AutoOCPhase::Done;
+  clearCheckpoint();
 
   if ( !success )
   {
@@ -1201,4 +1257,266 @@ void AutoOCWorker::emitProgress( const std::string &msg )
   }
 
   emit progress( prog );
+
+  saveCheckpoint( false );
+}
+
+void AutoOCWorker::saveCheckpoint( bool force )
+{
+  if ( m_phase == AutoOCPhase::Idle || m_phase == AutoOCPhase::Done )
+    return;
+
+  const auto now = std::chrono::steady_clock::now();
+  if ( !force && m_lastCheckpointPersist.time_since_epoch().count() != 0 )
+  {
+    const auto deltaMs = std::chrono::duration_cast< std::chrono::milliseconds >( now - m_lastCheckpointPersist ).count();
+    if ( deltaMs < 2000 )
+      return;
+  }
+
+  try
+  {
+    nlohmann::json j;
+    j["kind"] = "auto_oc";
+    j["version"] = 1;
+    j["phase"] = autoOcPhaseToString( m_phase );
+    j["deviceIndex"] = m_deviceIndex;
+    j["component"] = autoOcCompToString( m_component );
+    j["activeComponent"] = autoOcCompToString( m_activeClk );
+
+    j["config"] = {
+      { "mode", static_cast< int >( m_config.mode ) },
+      { "resolutionMHz", m_config.resolutionMHz },
+      { "safetyMarginCoreMHz", m_config.safetyMarginCoreMHz },
+      { "safetyMarginVramMHz", m_config.safetyMarginVramMHz },
+      { "searchTestMs", m_config.searchTestMs },
+      { "validationTestMs", m_config.validationTestMs },
+      { "baselineMs", m_config.baselineMs },
+      { "settleMs", m_config.settleMs },
+      { "thermalLimitC", m_config.thermalLimitC },
+      { "clockDroopMHz", m_config.clockDroopMHz },
+      { "pollIntervalMs", m_config.pollIntervalMs },
+      { "minGpuUtilPct", m_config.minGpuUtilPct },
+      { "vramRampStepMHz", m_config.vramRampStepMHz },
+      { "vramRampTestMs", m_config.vramRampTestMs },
+      { "vramFpsDropPct", m_config.vramFpsDropPct },
+      { "vramConfirmSteps", m_config.vramConfirmSteps },
+      { "vramDeepSearch", m_config.vramDeepSearch },
+      { "vramFineStepMHz", m_config.vramFineStepMHz }
+    };
+
+    j["state"] = {
+      { "lo", m_lo },
+      { "hi", m_hi },
+      { "mid", m_mid },
+      { "iteration", m_iteration },
+      { "maxIterations", m_maxIterations },
+      { "bestStable", m_bestStable },
+      { "baselineClockMHz", m_baselineClockMHz },
+      { "baselineTempC", m_baselineTempC },
+      { "stepDurationMs", m_stepDurationMs },
+      { "vramRampOffset", m_vramRampOffset },
+      { "vramPeakOffset", m_vramPeakOffset },
+      { "vramPeakFps", m_vramPeakFps },
+      { "vramBaselineFps", m_vramBaselineFps },
+      { "rampDeclineCount", m_rampDeclineCount },
+      { "vramDeepPhase", m_vramDeepPhase },
+      { "vramCoarsePeakOffset", m_vramCoarsePeakOffset },
+      { "finalCoreOffset", m_finalCoreOffset },
+      { "finalVramOffset", m_finalVramOffset }
+    };
+
+    std::filesystem::create_directories( std::filesystem::path( AUTO_OC_CHECKPOINT_PATH ).parent_path() );
+    const std::string tmpPath = std::string( AUTO_OC_CHECKPOINT_PATH ) + ".tmp";
+
+    std::ofstream out( tmpPath, std::ios::trunc );
+    if ( !out.is_open() )
+      return;
+    out << j.dump( 2 );
+    out.close();
+
+    std::filesystem::rename( tmpPath, AUTO_OC_CHECKPOINT_PATH );
+    m_lastCheckpointPersist = now;
+  }
+  catch ( ... )
+  {
+  }
+}
+
+void AutoOCWorker::clearCheckpoint()
+{
+  try
+  {
+    std::filesystem::remove( AUTO_OC_CHECKPOINT_PATH );
+  }
+  catch ( ... )
+  {
+  }
+}
+
+bool AutoOCWorker::tryResumeFromCheckpoint( AutoOCComponent requestedComponent,
+                                            unsigned int requestedDeviceIndex )
+{
+  try
+  {
+    if ( !std::filesystem::exists( AUTO_OC_CHECKPOINT_PATH ) )
+      return false;
+
+    std::ifstream in( AUTO_OC_CHECKPOINT_PATH );
+    if ( !in.is_open() )
+      return false;
+
+    nlohmann::json j;
+    in >> j;
+
+    if ( j.value( "kind", std::string() ) != "auto_oc" )
+      return false;
+    if ( j.value( "deviceIndex", static_cast< unsigned int >( 0 ) ) != requestedDeviceIndex )
+      return false;
+
+    const AutoOCComponent checkpointComponent = autoOcCompFromString( j.value( "component", std::string( "core" ) ) );
+    if ( checkpointComponent != requestedComponent )
+      return false;
+
+    m_component = checkpointComponent;
+    m_activeClk = autoOcCompFromString( j.value( "activeComponent", std::string( "core" ) ) );
+
+    if ( j.contains( "config" ) && j["config"].is_object() )
+    {
+      const auto &cfg = j["config"];
+      m_config.mode = static_cast< AutoOCMode >( cfg.value( "mode", static_cast< int >( m_config.mode ) ) );
+      m_config.resolutionMHz = cfg.value( "resolutionMHz", m_config.resolutionMHz );
+      m_config.safetyMarginCoreMHz = cfg.value( "safetyMarginCoreMHz", m_config.safetyMarginCoreMHz );
+      m_config.safetyMarginVramMHz = cfg.value( "safetyMarginVramMHz", m_config.safetyMarginVramMHz );
+      m_config.searchTestMs = cfg.value( "searchTestMs", m_config.searchTestMs );
+      m_config.validationTestMs = cfg.value( "validationTestMs", m_config.validationTestMs );
+      m_config.baselineMs = cfg.value( "baselineMs", m_config.baselineMs );
+      m_config.settleMs = cfg.value( "settleMs", m_config.settleMs );
+      m_config.thermalLimitC = cfg.value( "thermalLimitC", m_config.thermalLimitC );
+      m_config.clockDroopMHz = cfg.value( "clockDroopMHz", m_config.clockDroopMHz );
+      m_config.pollIntervalMs = cfg.value( "pollIntervalMs", m_config.pollIntervalMs );
+      m_config.minGpuUtilPct = cfg.value( "minGpuUtilPct", m_config.minGpuUtilPct );
+      m_config.vramRampStepMHz = cfg.value( "vramRampStepMHz", m_config.vramRampStepMHz );
+      m_config.vramRampTestMs = cfg.value( "vramRampTestMs", m_config.vramRampTestMs );
+      m_config.vramFpsDropPct = cfg.value( "vramFpsDropPct", m_config.vramFpsDropPct );
+      m_config.vramConfirmSteps = cfg.value( "vramConfirmSteps", m_config.vramConfirmSteps );
+      m_config.vramDeepSearch = cfg.value( "vramDeepSearch", m_config.vramDeepSearch );
+      m_config.vramFineStepMHz = cfg.value( "vramFineStepMHz", m_config.vramFineStepMHz );
+    }
+
+    if ( j.contains( "state" ) && j["state"].is_object() )
+    {
+      const auto &s = j["state"];
+      m_lo = s.value( "lo", 0 );
+      m_hi = s.value( "hi", 0 );
+      m_mid = s.value( "mid", 0 );
+      m_iteration = s.value( "iteration", 0 );
+      m_maxIterations = s.value( "maxIterations", 0 );
+      m_bestStable = s.value( "bestStable", 0 );
+      m_baselineClockMHz = s.value( "baselineClockMHz", 0 );
+      m_baselineTempC = s.value( "baselineTempC", 0 );
+      m_stepDurationMs = s.value( "stepDurationMs", m_config.searchTestMs );
+      m_vramRampOffset = s.value( "vramRampOffset", 0 );
+      m_vramPeakOffset = s.value( "vramPeakOffset", 0 );
+      m_vramPeakFps = s.value( "vramPeakFps", 0.0 );
+      m_vramBaselineFps = s.value( "vramBaselineFps", 0.0 );
+      m_rampDeclineCount = s.value( "rampDeclineCount", 0 );
+      m_vramDeepPhase = s.value( "vramDeepPhase", false );
+      m_vramCoarsePeakOffset = s.value( "vramCoarsePeakOffset", 0 );
+      m_finalCoreOffset = s.value( "finalCoreOffset", 0 );
+      m_finalVramOffset = s.value( "finalVramOffset", 0 );
+    }
+
+    const AutoOCPhase checkpointPhase = autoOcPhaseFromString( j.value( "phase", std::string( "idle" ) ) );
+    if ( checkpointPhase == AutoOCPhase::Idle || checkpointPhase == AutoOCPhase::Done )
+      return false;
+
+    log( "AutoOC: resuming interrupted session from phase '" + std::string( autoOcPhaseToString( checkpointPhase ) ) + "'" );
+
+    if ( m_component == AutoOCComponent::Both && m_activeClk == AutoOCComponent::Vram && m_finalCoreOffset > 0 )
+      m_nvml->setClockOffset( m_deviceIndex, nvml::NVML_CLOCK_GRAPHICS, nvml::NVML_PSTATE_0, m_finalCoreOffset );
+
+    switch ( checkpointPhase )
+    {
+    case AutoOCPhase::Baseline:
+      enterBaseline();
+      return true;
+
+    case AutoOCPhase::Searching:
+      // If interruption happened while testing a higher core offset than the
+      // last stable one, consider that candidate failed and finalize search
+      // at the last stable point.
+      if ( m_activeClk != AutoOCComponent::Vram
+           && m_bestStable > 0
+           && m_mid > m_bestStable )
+      {
+        log( "AutoOC: resume detected interrupted core step (+"
+             + std::to_string( m_mid ) + " MHz); using last stable +"
+             + std::to_string( m_bestStable ) + " MHz" );
+
+        m_mid = m_bestStable;
+        enterValidation();
+        m_pollTimer->start( m_config.pollIntervalMs );
+        saveCheckpoint( true );
+        return true;
+      }
+
+      m_phase = AutoOCPhase::Searching;
+      if ( m_mid <= 0 )
+        m_mid = std::max( m_config.resolutionMHz, m_vramRampOffset );
+      applyOffset( m_mid );
+      m_stepStart = std::chrono::steady_clock::now();
+      m_sampleCount = 0;
+      m_stableSampleCount = 0;
+      m_droopCount = 0;
+      m_thermalCount = 0;
+      m_lowUtilCount = 0;
+      m_peakTempC = 0;
+      m_minClockMHz = INT32_MAX;
+      m_achievedClockMHz = 0;
+      m_clockHistoryIdx = 0;
+      m_clockHistoryCount = 0;
+      m_slidingRefClockMHz = 0;
+      m_rampFpsSum = 0.0;
+      m_rampSampleCount = 0;
+      emitProgress( "Resuming search — start the game/application now so workload/FPS signals are available." );
+      m_pollTimer->start( m_config.pollIntervalMs );
+      saveCheckpoint( true );
+      return true;
+
+    case AutoOCPhase::Validating:
+      m_phase = AutoOCPhase::Validating;
+      if ( m_mid <= 0 )
+        m_mid = std::max( 0, m_bestStable );
+      applyOffset( m_mid );
+      m_stepStart = std::chrono::steady_clock::now();
+      m_stepDurationMs = m_config.validationTestMs;
+      m_sampleCount = 0;
+      m_stableSampleCount = 0;
+      m_droopCount = 0;
+      m_thermalCount = 0;
+      m_lowUtilCount = 0;
+      m_peakTempC = 0;
+      m_minClockMHz = INT32_MAX;
+      m_achievedClockMHz = 0;
+      m_clockHistoryIdx = 0;
+      m_clockHistoryCount = 0;
+      m_slidingRefClockMHz = 0;
+      m_rampFpsSum = 0.0;
+      m_rampSampleCount = 0;
+      emitProgress( "Resuming validation — start the game/application now so workload/FPS signals are available." );
+      m_pollTimer->start( m_config.pollIntervalMs );
+      saveCheckpoint( true );
+      return true;
+
+    default:
+      break;
+    }
+  }
+  catch ( const std::exception &e )
+  {
+    log( std::string( "AutoOC: checkpoint resume failed: " ) + e.what() );
+  }
+
+  return false;
 }

@@ -183,7 +183,11 @@ public:
   std::optional< std::string > getAutoOCProgress();
 
   // NVIDIA Auto-Undervolt
-  bool startAutoUndervolt( int deviceIndex = 0 );
+  bool startAutoUndervolt( int deviceIndex = 0,
+                           bool targetFpsEnabled = false,
+                           int  targetFps = 0,
+                           bool extendedValidation = false,
+                           bool powerLimitMode = false );
   bool stopAutoUndervolt();
   std::optional< bool > getAutoUndervoltRunning();
   std::optional< std::string > getAutoUndervoltProgress();

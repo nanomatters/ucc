@@ -228,6 +228,12 @@ private:
   void log( const std::string &msg );
   void emitProgress( const std::string &msg = {} );
 
+  // ── Crash-resume checkpointing ──
+  void saveCheckpoint( bool force = false );
+  void clearCheckpoint();
+  bool tryResumeFromCheckpoint( AutoOCComponent requestedComponent,
+                                unsigned int requestedDeviceIndex );
+
   // ── Members ──
   std::shared_ptr< NvmlWrapper > m_nvml;
   LogFn m_logFn;
@@ -302,4 +308,7 @@ private:
   // Results (when scanning "Both")
   int m_finalCoreOffset = 0;
   int m_finalVramOffset = 0;
+
+  // Crash-resume checkpoint throttling
+  std::chrono::steady_clock::time_point m_lastCheckpointPersist;
 };

@@ -1481,6 +1481,10 @@ void MainWindow::onProfileIndexChanged( int index )
 
 void MainWindow::onAllProfilesChanged()
 {
+  // Keep GPU profile combos in sync before loading active profile details,
+  // so the GPU tab can resolve the active profile's gpuProfileId.
+  onGpuProfilesChanged();
+
   // Block combo signals to prevent cascading loadProfileDetails calls
   // while we repopulate the list.
   m_profileCombo->blockSignals( true );
@@ -1993,12 +1997,12 @@ void MainWindow::loadProfileDetails( const QString &profileId )
       auto *gpuCombo = m_gpuProfileTab->gpuProfileCombo();
       gpuCombo->blockSignals( true );
 
+      // Always sync GPU tab combo with the profile reference.
+      // Empty/unknown IDs map to the first entry.
+      int gpuTabIdx = -1;
       if ( !gpuProfileId.isEmpty() )
-      {
-        int gpuTabIdx = gpuCombo->findData( gpuProfileId );
-        if ( gpuTabIdx >= 0 )
-          gpuCombo->setCurrentIndex( gpuTabIdx );
-      }
+        gpuTabIdx = gpuCombo->findData( gpuProfileId );
+      gpuCombo->setCurrentIndex( gpuTabIdx >= 0 ? gpuTabIdx : 0 );
 
       gpuCombo->blockSignals( false );
 

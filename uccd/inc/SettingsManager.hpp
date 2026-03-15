@@ -244,6 +244,10 @@ private:
       if (j.contains("chargingProfile") && j["chargingProfile"].is_string()) settings.chargingProfile = j["chargingProfile"];
       if (j.contains("chargingPriority") && j["chargingPriority"].is_string()) settings.chargingPriority = j["chargingPriority"];
 
+      // Parse auto-undervolt target FPS settings
+      if (j.contains("undervoltTargetFpsEnabled")) settings.undervoltTargetFpsEnabled = j["undervoltTargetFpsEnabled"];
+      if (j.contains("undervoltTargetFps")) settings.undervoltTargetFps = j["undervoltTargetFps"];
+
       // Parse ycbcr420Workaround array
       if (j.contains("ycbcr420Workaround")) {
         auto& ycbcr = j["ycbcr420Workaround"];
@@ -346,6 +350,8 @@ private:
 
     json << "  \"chargingProfile\": " << ( settings.chargingProfile.has_value() ? "\"" + settings.chargingProfile.value() + "\"" : "null" ) << ",\n";
     json << "  \"chargingPriority\": " << ( settings.chargingPriority.has_value() ? "\"" + settings.chargingPriority.value() + "\"" : "null" ) << ",\n";
+    json << "  \"undervoltTargetFpsEnabled\": " << ( settings.undervoltTargetFpsEnabled ? "true" : "false" ) << ",\n";
+    json << "  \"undervoltTargetFps\": " << settings.undervoltTargetFps << ",\n";
     json << "  \"keyboardBacklightStates\": []\n";
     json << "}\n";
 

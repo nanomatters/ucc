@@ -81,6 +81,7 @@ public:
 
         FanInfo fi;
         fi.id = entry.path().filename().string() + "_fan" + std::to_string( i );
+        fi.sourceName = resolveSourceName( chipName );
         fi.hwmonPath = hwmonDir.string();
         fi.index = i;
         fi.canRead = true;
@@ -235,6 +236,68 @@ private:
   static std::string readHwmonName( const std::filesystem::path &hwmonDir )
   {
     return readLine( ( hwmonDir / "name" ).string() );
+  }
+
+  static std::string trimCopy( const std::string &in )
+  {
+    size_t b = 0;
+    while ( b < in.size() && std::isspace( static_cast< unsigned char >( in[b] ) ) )
+      ++b;
+    size_t e = in.size();
+    while ( e > b && std::isspace( static_cast< unsigned char >( in[e - 1] ) ) )
+      --e;
+    return in.substr( b, e - b );
+  }
+
+  static std::string readFirstLine( const std::string &path )
+  {
+    std::ifstream in( path );
+    if ( !in.is_open() )
+      return {};
+    std::string line;
+    std::getline( in, line );
+    return trimCopy( line );
+  }
+
+  static std::string readBoardDisplayName()
+  {
+    const std::string boardVendor = readFirstLine( "/sys/class/dmi/id/board_vendor" );
+    const std::string boardName = readFirstLine( "/sys/class/dmi/id/board_name" );
+    const std::string productName = readFirstLine( "/sys/class/dmi/id/product_name" );
+
+    if ( !boardVendor.empty() && !boardName.empty() )
+      return boardVendor + " " + boardName;
+    if ( !boardName.empty() )
+      return boardName;
+    if ( !productName.empty() )
+      return productName;
+    return {};
+  }
+
+  static std::string resolveSourceName( const std::string &chipName )
+  {
+    const std::string lower = [&]() {
+      std::string s = chipName;
+      std::transform( s.begin(), s.end(), s.begin(),
+                      []( unsigned char c ) { return static_cast< char >( std::tolower( c ) ); } );
+      return s;
+    }();
+
+    const bool looksLikeMainboardController = lower.rfind( "nct", 0 ) == 0
+                                           || lower.rfind( "it", 0 ) == 0
+                                           || lower.rfind( "w836", 0 ) == 0
+                                           || lower.rfind( "f718", 0 ) == 0
+                                           || lower.find( "superio" ) != std::string::npos
+                                           || lower == "acpi_ec";
+
+    if ( looksLikeMainboardController )
+    {
+      const std::string boardName = readBoardDisplayName();
+      if ( !boardName.empty() )
+        return boardName;
+    }
+
+    return chipName.empty() ? std::string( "Board" ) : chipName;
   }
 
   static std::string readLine( const std::string &path )

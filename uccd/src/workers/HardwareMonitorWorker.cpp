@@ -671,6 +671,12 @@ DGpuInfo HardwareMonitorWorker::getNvidiaDGpuValues() const noexcept
   if ( auto v = m_nvml->getCoreVoltageMv( 0 ) )
     values.m_coreVoltageMv = static_cast< int >( *v );
 
+  if ( auto v = m_nvml->getFanSpeedPct( 0 ) )
+    values.m_fanSpeedPct = static_cast< int >( *v );
+
+  if ( auto v = m_nvml->getMarginTemperature( 0 ) )
+    values.m_thermalMarginC = static_cast< int >( *v );
+
   return values;
 }
 

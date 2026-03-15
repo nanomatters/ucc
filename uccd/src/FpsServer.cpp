@@ -440,6 +440,7 @@ void FpsServer::acceptClients()
     std::string newClientAppName;
     struct ucred cred{};
     socklen_t credLen = sizeof( cred );
+
     if ( ::getsockopt( fd, SOL_SOCKET, SO_PEERCRED, &cred, &credLen ) == 0 && cred.pid > 0 )
     {
       newClientPid = cred.pid;
@@ -452,11 +453,9 @@ void FpsServer::acceptClients()
         ::close( fd );
         continue;
       }
+
       if ( is_blacklisted_fps_process( newClientAppName ) )
       {
-        syslog( LOG_DEBUG,
-                "FpsServer: ignoring blacklisted FPS client pid=%d app='%s'",
-                static_cast< int >( newClientPid ), newClientAppName.c_str() );
         ::close( fd );
         continue;
       }

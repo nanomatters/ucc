@@ -34,6 +34,8 @@
 #include <QDebug>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QSettings>
+#include <QSpinBox>
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -218,7 +220,7 @@ void GpuProfileTab::setupUI()
   m_gpuLockedGroup = new QGroupBox( "GPU Core Locked Clocks" );
   m_gpuLockedGroup->setVisible( m_ocAvailable );
   m_gpuLockedGroup->setCheckable( true );
-  m_gpuLockedGroup->setChecked( true );
+  m_gpuLockedGroup->setChecked( false );
   QVBoxLayout *gpuLockedLayout = new QVBoxLayout( m_gpuLockedGroup );
 
   QHBoxLayout *gpuLockedRow = new QHBoxLayout();
@@ -242,7 +244,7 @@ void GpuProfileTab::setupUI()
   m_vramLockedGroup = new QGroupBox( "VRAM Locked Clocks" );
   m_vramLockedGroup->setVisible( m_ocAvailable );
   m_vramLockedGroup->setCheckable( true );
-  m_vramLockedGroup->setChecked( true );
+  m_vramLockedGroup->setChecked( false );
   QVBoxLayout *vramLockedLayout = new QVBoxLayout( m_vramLockedGroup );
 
   QHBoxLayout *vramLockedRow = new QHBoxLayout();
@@ -437,8 +439,18 @@ void GpuProfileTab::refreshOCState()
 
   QJsonObject state = doc.object();
 
+  // Check if GPU needs reset
+  if ( state.contains( "needsReset" ) && state["needsReset"].toBool() )
+  {
+    m_gpuNameLabel->setText( state["gpuName"].toString( "Unknown" ) +
+      "  ⚠ GPU requires reset (reboot or nvidia-smi -r)" );
+  }
+  else
+  {
+    m_gpuNameLabel->setText( state["gpuName"].toString( "Unknown" ) );
+  }
+
   // Update info labels
-  m_gpuNameLabel->setText( state["gpuName"].toString( "Unknown" ) );
   refreshLiveMetrics();
 
   // Update power label: "cTGP" for Uniwill/Tuxedo laptops, "Power Limit" otherwise
@@ -524,38 +536,62 @@ void GpuProfileTab::refreshOCState()
   {
     QJsonObject r = state["gpuClockRange"].toObject();
     int lo = r["min"].toInt(), hi = r["max"].toInt();
-    m_gpuLockedMinSlider->setMinimum( lo );
-    m_gpuLockedMinSlider->setMaximum( hi );
-    m_gpuLockedMaxSlider->setMinimum( lo );
-    m_gpuLockedMaxSlider->setMaximum( hi );
-    m_gpuLockedMinSpin->setMinimum( lo );
-    m_gpuLockedMinSpin->setMaximum( hi );
-    m_gpuLockedMaxSpin->setMinimum( lo );
-    m_gpuLockedMaxSpin->setMaximum( hi );
+    if ( lo > 0 && hi > lo )
+    {
+      m_gpuLockedMinSlider->setMinimum( lo );
+      m_gpuLockedMinSlider->setMaximum( hi );
+      m_gpuLockedMaxSlider->setMinimum( lo );
+      m_gpuLockedMaxSlider->setMaximum( hi );
+      m_gpuLockedMinSpin->setMinimum( lo );
+      m_gpuLockedMinSpin->setMaximum( hi );
+      m_gpuLockedMaxSpin->setMinimum( lo );
+      m_gpuLockedMaxSpin->setMaximum( hi );
 
-    // Set defaults
-    m_gpuLockedMinSlider->setValue( lo );
-    m_gpuLockedMaxSlider->setValue( hi );
+      // Set defaults
+      m_gpuLockedMinSlider->setValue( lo );
+      m_gpuLockedMaxSlider->setValue( hi );
+      if ( m_gpuLockedGroup )
+        m_gpuLockedGroup->setEnabled( true );
+    }
+  }
+  else if ( m_gpuLockedGroup )
+  {
+    m_gpuLockedGroup->setEnabled( false );
   }
 
   if ( state.contains( "vramClockRange" ) )
   {
     QJsonObject r = state["vramClockRange"].toObject();
     int lo = r["min"].toInt(), hi = r["max"].toInt();
-    m_vramLockedMinSlider->setMinimum( lo );
-    m_vramLockedMinSlider->setMaximum( hi );
-    m_vramLockedMaxSlider->setMinimum( lo );
-    m_vramLockedMaxSlider->setMaximum( hi );
-    m_vramLockedMinSpin->setMinimum( lo );
-    m_vramLockedMinSpin->setMaximum( hi );
-    m_vramLockedMaxSpin->setMinimum( lo );
-    m_vramLockedMaxSpin->setMaximum( hi );
+    if ( lo > 0 && hi > lo )
+    {
+      m_vramLockedMinSlider->setMinimum( lo );
+      m_vramLockedMinSlider->setMaximum( hi );
+      m_vramLockedMaxSlider->setMinimum( lo );
+      m_vramLockedMaxSlider->setMaximum( hi );
+      m_vramLockedMinSpin->setMinimum( lo );
+      m_vramLockedMinSpin->setMaximum( hi );
+      m_vramLockedMaxSpin->setMinimum( lo );
+      m_vramLockedMaxSpin->setMaximum( hi );
 
-    m_vramLockedMinSlider->setValue( lo );
-    m_vramLockedMaxSlider->setValue( hi );
+      m_vramLockedMinSlider->setValue( lo );
+      m_vramLockedMaxSlider->setValue( hi );
+      if ( m_vramLockedGroup )
+        m_vramLockedGroup->setEnabled( true );
+    }
+  }
+  else if ( m_vramLockedGroup )
+  {
+    m_vramLockedGroup->setEnabled( false );
   }
 
   // Load existing locked clocks if applied
+  if ( m_gpuLockedGroup )
+  {
+    m_gpuLockedGroup->blockSignals( true );
+    m_gpuLockedGroup->setChecked( state.contains( "gpuLockedClocks" ) );
+    m_gpuLockedGroup->blockSignals( false );
+  }
   if ( state.contains( "gpuLockedClocks" ) )
   {
     QJsonObject lc = state["gpuLockedClocks"].toObject();
@@ -563,6 +599,12 @@ void GpuProfileTab::refreshOCState()
     m_gpuLockedMaxSlider->setValue( lc["max"].toInt() );
   }
 
+  if ( m_vramLockedGroup )
+  {
+    m_vramLockedGroup->blockSignals( true );
+    m_vramLockedGroup->setChecked( state.contains( "vramLockedClocks" ) );
+    m_vramLockedGroup->blockSignals( false );
+  }
   if ( state.contains( "vramLockedClocks" ) )
   {
     QJsonObject lc = state["vramLockedClocks"].toObject();
@@ -822,21 +864,35 @@ QString GpuProfileTab::buildProfileJSON() const
   // GPU locked clocks (only include enabled when feature is supported)
   if ( m_gpuLockedGroup && m_gpuLockedGroup->isChecked() )
   {
-    QJsonObject gpuLocked;
-    gpuLocked["enabled"] = true;
-    gpuLocked["min"] = m_gpuLockedMinSlider->value();
-    gpuLocked["max"] = m_gpuLockedMaxSlider->value();
-    root["gpuLockedClocks"] = gpuLocked;
+    const int minValue = m_gpuLockedMinSlider->value();
+    const int maxValue = m_gpuLockedMaxSlider->value();
+    const bool isFullRange = minValue == m_gpuLockedMinSlider->minimum()
+                          && maxValue == m_gpuLockedMaxSlider->maximum();
+    if ( !isFullRange )
+    {
+      QJsonObject gpuLocked;
+      gpuLocked["enabled"] = true;
+      gpuLocked["min"] = minValue;
+      gpuLocked["max"] = maxValue;
+      root["gpuLockedClocks"] = gpuLocked;
+    }
   }
 
   // VRAM locked clocks (only include enabled when feature is supported)
   if ( m_vramLockedGroup && m_vramLockedGroup->isChecked() )
   {
-    QJsonObject vramLocked;
-    vramLocked["enabled"] = true;
-    vramLocked["min"] = m_vramLockedMinSlider->value();
-    vramLocked["max"] = m_vramLockedMaxSlider->value();
-    root["vramLockedClocks"] = vramLocked;
+    const int minValue = m_vramLockedMinSlider->value();
+    const int maxValue = m_vramLockedMaxSlider->value();
+    const bool isFullRange = minValue == m_vramLockedMinSlider->minimum()
+                          && maxValue == m_vramLockedMaxSlider->maximum();
+    if ( !isFullRange )
+    {
+      QJsonObject vramLocked;
+      vramLocked["enabled"] = true;
+      vramLocked["min"] = minValue;
+      vramLocked["max"] = maxValue;
+      root["vramLockedClocks"] = vramLocked;
+    }
   }
 
   // Power limit — include both cTGP offset (for Uniwill/Tuxedo laptops with
@@ -932,13 +988,23 @@ void GpuProfileTab::loadProfile( const QString &json )
   if ( obj.contains( "gpuLockedClocks" ) )
   {
     QJsonObject lc = obj["gpuLockedClocks"].toObject();
+    const int minVal = lc["min"].toInt();
+    const int maxVal = lc["max"].toInt();
 
     m_gpuLockedMinSlider->blockSignals( true );
-    m_gpuLockedMinSlider->setValue( lc["min"].toInt() );
+    m_gpuLockedMinSlider->setValue( minVal );
     m_gpuLockedMinSlider->blockSignals( false );
     m_gpuLockedMaxSlider->blockSignals( true );
-    m_gpuLockedMaxSlider->setValue( lc["max"].toInt() );
+    m_gpuLockedMaxSlider->setValue( maxVal );
     m_gpuLockedMaxSlider->blockSignals( false );
+
+    // Slider signals are blocked above, so keep spin labels in sync manually.
+    m_gpuLockedMinSpin->blockSignals( true );
+    m_gpuLockedMinSpin->setValue( minVal );
+    m_gpuLockedMinSpin->blockSignals( false );
+    m_gpuLockedMaxSpin->blockSignals( true );
+    m_gpuLockedMaxSpin->setValue( maxVal );
+    m_gpuLockedMaxSpin->blockSignals( false );
   }
 
   // Load VRAM locked clocks
@@ -948,13 +1014,23 @@ void GpuProfileTab::loadProfile( const QString &json )
   if ( obj.contains( "vramLockedClocks" ) )
   {
     QJsonObject lc = obj["vramLockedClocks"].toObject();
+    const int minVal = lc["min"].toInt();
+    const int maxVal = lc["max"].toInt();
 
     m_vramLockedMinSlider->blockSignals( true );
-    m_vramLockedMinSlider->setValue( lc["min"].toInt() );
+    m_vramLockedMinSlider->setValue( minVal );
     m_vramLockedMinSlider->blockSignals( false );
     m_vramLockedMaxSlider->blockSignals( true );
-    m_vramLockedMaxSlider->setValue( lc["max"].toInt() );
+    m_vramLockedMaxSlider->setValue( maxVal );
     m_vramLockedMaxSlider->blockSignals( false );
+
+    // Slider signals are blocked above, so keep spin labels in sync manually.
+    m_vramLockedMinSpin->blockSignals( true );
+    m_vramLockedMinSpin->setValue( minVal );
+    m_vramLockedMinSpin->blockSignals( false );
+    m_vramLockedMaxSpin->blockSignals( true );
+    m_vramLockedMaxSpin->setValue( maxVal );
+    m_vramLockedMaxSpin->blockSignals( false );
   }
 
   // Load cTGP offset profile data (preferred)
@@ -1185,6 +1261,20 @@ void GpuProfileTab::showAutoOCDialog()
   statusLabel->setWordWrap( true );
   layout->addWidget( statusLabel );
 
+  if ( auto ocProgress = m_uccdClient->getAutoOCProgress(); ocProgress.has_value() )
+  {
+    const QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *ocProgress ).toUtf8() );
+    if ( doc.isObject() )
+    {
+      const QJsonObject obj = doc.object();
+      if ( !obj.value( "running" ).toBool( false ) && obj.value( "resumeAvailable" ).toBool( false ) )
+      {
+        statusLabel->setText( obj.value( "message" ).toString(
+          "Resume available. Start the game/application, then click Start to continue." ) );
+      }
+    }
+  }
+
   // ── Buttons ──
   QHBoxLayout *btnRow = new QHBoxLayout();
   QPushButton *startBtn = new QPushButton( "Start" );
@@ -1404,6 +1494,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
   QLabel *clockValueLabel = new QLabel( "—" );
   QLabel *powerValueLabel = new QLabel( "—" );
   QLabel *utilValueLabel = new QLabel( "—" );
+  QLabel *efficiencyValueLabel = new QLabel( "—" );
 
   QFont boldFont = phaseValueLabel->font();
   boldFont.setBold( true );
@@ -1434,12 +1525,81 @@ void GpuProfileTab::showAutoUndervoltDialog()
   ++row;
   metricsGrid->addWidget( new QLabel( "GPU util:" ), row, 0 );
   metricsGrid->addWidget( utilValueLabel, row, 1 );
+  metricsGrid->addWidget( new QLabel( "Efficiency:" ), row, 2 );
+  metricsGrid->addWidget( efficiencyValueLabel, row, 3 );
   layout->addLayout( metricsGrid );
 
   // ── Status label ──
   QLabel *statusLabel = new QLabel( "Ready — start a GPU workload and click Start." );
   statusLabel->setWordWrap( true );
   layout->addWidget( statusLabel );
+
+  if ( auto uvProgress = m_uccdClient->getAutoUndervoltProgress(); uvProgress.has_value() )
+  {
+    const QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *uvProgress ).toUtf8() );
+    if ( doc.isObject() )
+    {
+      const QJsonObject obj = doc.object();
+      if ( !obj.value( "running" ).toBool( false ) && obj.value( "resumeAvailable" ).toBool( false ) )
+      {
+        statusLabel->setText( obj.value( "message" ).toString(
+          "Resume available. Start the game/application, then click Start to continue." ) );
+      }
+    }
+  }
+
+  // ── Target FPS controls ──
+  QHBoxLayout *targetFpsRow = new QHBoxLayout();
+  QCheckBox *targetFpsCheck = new QCheckBox( "Target frame rate" );
+  QSpinBox *targetFpsSpin = new QSpinBox();
+  targetFpsSpin->setRange( 10, 999 );
+  targetFpsSpin->setSuffix( " FPS" );
+  targetFpsSpin->setEnabled( false );
+  targetFpsRow->addWidget( targetFpsCheck );
+  targetFpsRow->addWidget( targetFpsSpin );
+  targetFpsRow->addStretch();
+  layout->addLayout( targetFpsRow );
+
+  // Load saved target FPS settings from uccrc
+  {
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    targetFpsCheck->setChecked( settings.value( "gpu/undervoltTargetFpsEnabled", false ).toBool() );
+    targetFpsSpin->setValue( settings.value( "gpu/undervoltTargetFps", 60 ).toInt() );
+    targetFpsSpin->setEnabled( targetFpsCheck->isChecked() );
+  }
+
+  connect( targetFpsCheck, &QCheckBox::toggled, dlg, [targetFpsSpin]( bool checked ) {
+    targetFpsSpin->setEnabled( checked );
+  } );
+
+  // ── Extended validation checkbox ──
+  QCheckBox *extendedValCheck = new QCheckBox( "Extended validation (5 min)" );
+  layout->addWidget( extendedValCheck );
+
+  // ── Power limit mode checkbox ──
+  QCheckBox *powerLimitCheck = new QCheckBox( "Power limit mode (reduce wattage instead of frequency cap)" );
+  layout->addWidget( powerLimitCheck );
+
+  // Load advanced settings from uccrc
+  {
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    extendedValCheck->setChecked( settings.value( "gpu/undervoltExtendedValidation", false ).toBool() );
+    powerLimitCheck->setChecked( settings.value( "gpu/undervoltPowerLimitMode", false ).toBool() );
+  }
+
+  // Save target FPS settings when changed
+  auto saveTargetFps = [targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]() {
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    settings.setValue( "gpu/undervoltTargetFpsEnabled", targetFpsCheck->isChecked() );
+    settings.setValue( "gpu/undervoltTargetFps", targetFpsSpin->value() );
+    settings.setValue( "gpu/undervoltExtendedValidation", extendedValCheck->isChecked() );
+    settings.setValue( "gpu/undervoltPowerLimitMode", powerLimitCheck->isChecked() );
+    settings.sync();
+  };
+  connect( targetFpsCheck, &QCheckBox::toggled, dlg, saveTargetFps );
+  connect( targetFpsSpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveTargetFps );
+  connect( extendedValCheck, &QCheckBox::toggled, dlg, saveTargetFps );
+  connect( powerLimitCheck, &QCheckBox::toggled, dlg, saveTargetFps );
 
   // ── Buttons ──
   QHBoxLayout *btnRow = new QHBoxLayout();
@@ -1465,13 +1625,17 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
       QString phaseStr = obj["phase"].toString( "idle" );
       int phase = 0;
-      if ( phaseStr == "baseline" )        phase = 1;
-      else if ( phaseStr == "searching" )  phase = 2;
-      else if ( phaseStr == "validating" ) phase = 3;
-      else if ( phaseStr == "done" )       phase = 4;
+      if ( phaseStr == "baseline" )           phase = 1;
+      else if ( phaseStr == "capReduction" )  phase = 2;
+      else if ( phaseStr == "searching" )     phase = 3;
+      else if ( phaseStr == "validating" )    phase = 4;
+      else if ( phaseStr == "powerLimitSweep" ) phase = 5;
+      else if ( phaseStr == "done" )          phase = 6;
 
-      static const char *phaseNames[] = { "Idle", "Baseline", "Searching", "Validating", "Done" };
-      if ( phase >= 0 && phase <= 4 )
+      static const char *phaseNames[] = {
+        "Idle", "Baseline", "Cap Reduction", "Searching", "Validating",
+        "Power Limit Sweep", "Done" };
+      if ( phase >= 0 && phase <= 6 )
         phaseValueLabel->setText( phaseNames[phase] );
 
       QString app = obj["app"].toString();
@@ -1480,7 +1644,12 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
       int currentCap = obj["currentCapMHz"].toInt( 0 );
       int bestCap = obj["bestCapMHz"].toInt( 0 );
-      if ( currentCap > 0 )
+      int plW = obj["currentPowerLimitW"].toInt( 0 );
+      if ( plW > 0 && currentCap > 0 )
+        capValueLabel->setText( QString( "%1 MHz (best: %2) / %3 W" ).arg( currentCap ).arg( bestCap ).arg( plW ) );
+      else if ( plW > 0 )
+        capValueLabel->setText( QString( "%1 W (power limit)" ).arg( plW ) );
+      else if ( currentCap > 0 )
         capValueLabel->setText( QString( "%1 MHz (best: %2)" ).arg( currentCap ).arg( bestCap ) );
 
       int tempC = obj["temp"].toInt( 0 );
@@ -1497,6 +1666,21 @@ void GpuProfileTab::showAutoUndervoltDialog()
       fpsValueLabel->setText( fps >= 0.0 ? QString( "%1" ).arg( fps, 0, 'f', 1 ) : "—" );
       baselineFpsLabel->setText( blFps >= 0.0 ? QString( "%1" ).arg( blFps, 0, 'f', 1 ) : "—" );
 
+      double fpsPerWatt = obj["fpsPerWatt"].toDouble( 0.0 );
+      double baselineFpw = obj["baselineFpsPerWatt"].toDouble( 0.0 );
+      if ( fpsPerWatt > 0.0 && baselineFpw > 0.0 )
+      {
+        double gainPct = ( ( fpsPerWatt - baselineFpw ) / baselineFpw ) * 100.0;
+        efficiencyValueLabel->setText( QString( "%1 FPS/W (%2%3%)" )
+          .arg( fpsPerWatt, 0, 'f', 2 )
+          .arg( gainPct >= 0.0 ? "+" : "" )
+          .arg( gainPct, 0, 'f', 1 ) );
+      }
+      else if ( fpsPerWatt > 0.0 )
+        efficiencyValueLabel->setText( QString( "%1 FPS/W" ).arg( fpsPerWatt, 0, 'f', 2 ) );
+      else
+        efficiencyValueLabel->setText( "—" );
+
       int iter = obj["iteration"].toInt( 0 );
       int maxIter = obj["maxIterations"].toInt( 1 );
       if ( phase == 1 )
@@ -1506,15 +1690,26 @@ void GpuProfileTab::showAutoUndervoltDialog()
       }
       else if ( phase == 2 )
       {
+        progressBar->setRange( 0, 0 );
+        progressBar->setFormat( "Cap Reduction..." );
+      }
+      else if ( phase == 3 )
+      {
         progressBar->setRange( 0, maxIter );
         progressBar->setValue( iter );
         progressBar->setFormat( "Searching — step %v/%m" );
       }
-      else if ( phase == 3 )
+      else if ( phase == 4 )
       {
         progressBar->setRange( 0, 100 );
         progressBar->setValue( 100 );
         progressBar->setFormat( "Validating..." );
+      }
+      else if ( phase == 5 )
+      {
+        progressBar->setRange( 0, maxIter );
+        progressBar->setValue( iter );
+        progressBar->setFormat( "Power Limit Sweep — step %v/%m" );
       }
 
       QString msg = obj["message"].toString();
@@ -1541,6 +1736,12 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
       if ( success )
       {
+        if ( m_profileManager )
+        {
+          m_profileManager->refreshGpuProfiles();
+          reloadGpuProfiles();
+        }
+
         QString summary = QString(
           "Auto undervolt complete for '%1'!\n\n"
           "GPU frequency cap: %2 MHz\n\n"
@@ -1560,9 +1761,12 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
   // ── Button handlers ──
   connect( startBtn, &QPushButton::clicked, dlg,
-    [this, startBtn, stopBtn, statusLabel, capValueLabel, progressBar]()
+    [this, startBtn, stopBtn, statusLabel, capValueLabel, progressBar,
+     targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]()
     {
-      bool ok = m_uccdClient->startAutoUndervolt( 0 );
+      bool ok = m_uccdClient->startAutoUndervolt(
+        0, targetFpsCheck->isChecked(), targetFpsSpin->value(),
+        extendedValCheck->isChecked(), powerLimitCheck->isChecked() );
       if ( ok )
       {
         startBtn->setEnabled( false );

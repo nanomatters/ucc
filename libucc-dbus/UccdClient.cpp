@@ -1006,9 +1006,15 @@ void UccdClient::subscribeAutoOCFinished( AutoOCFinishedCallback callback )
 // NVIDIA Auto-Undervolt
 // ---------------------------------------------------------------------------
 
-bool UccdClient::startAutoUndervolt( int deviceIndex )
+bool UccdClient::startAutoUndervolt( int deviceIndex,
+                                     bool targetFpsEnabled,
+                                     int  targetFps,
+                                     bool extendedValidation,
+                                     bool powerLimitMode )
 {
-  return callMethod< bool, int >( "StartAutoUndervolt", deviceIndex ).value_or( false );
+  return callMethod< bool, int, bool, int, bool, bool >(
+    "StartAutoUndervolt", deviceIndex, targetFpsEnabled, targetFps,
+    extendedValidation, powerLimitMode ).value_or( false );
 }
 
 bool UccdClient::stopAutoUndervolt()

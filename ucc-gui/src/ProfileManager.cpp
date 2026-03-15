@@ -209,6 +209,11 @@ void ProfileManager::refresh()
   updateProfiles();
 }
 
+void ProfileManager::refreshGpuProfiles()
+{
+  loadGpuProfilesFromDaemon();
+}
+
 void ProfileManager::updateProfiles()
 {
   // Fetch profiles from daemon if not already loaded
