@@ -118,7 +118,7 @@ PC3.ScrollView {
                     visible: dashTab.backend.gpuComputeUtilPct >= 0
                 }
                 PC3.Label {
-                    text: i18n("VRAM Load")
+                    text: i18n("VRAM Bus Load")
                     opacity: 0.7
                     visible: dashTab.backend.gpuMemoryUtilPct >= 0
                 }

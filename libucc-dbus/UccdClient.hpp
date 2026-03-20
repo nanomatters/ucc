@@ -178,9 +178,13 @@ public:
 
   // NVIDIA Auto-OC
   bool startAutoOC( const std::string &component = "both", int deviceIndex = 0 );
+  bool resumeAutoOC( const std::string &mode,
+                     const std::string &component = "both", int deviceIndex = 0 );
   bool stopAutoOC();
   std::optional< bool > getAutoOCRunning();
   std::optional< std::string > getAutoOCProgress();
+  bool hasAutoOCCheckpoint();
+  bool clearAutoOCCheckpoint();
 
   // NVIDIA Auto-Undervolt
   bool startAutoUndervolt( int deviceIndex = 0,
@@ -188,10 +192,18 @@ public:
                            int  targetFps = 0,
                            bool extendedValidation = false,
                            bool powerLimitMode = false );
+  bool resumeAutoUndervolt( const std::string &mode,
+                            int deviceIndex = 0,
+                            bool targetFpsEnabled = false,
+                            int  targetFps = 0,
+                            bool extendedValidation = false,
+                            bool powerLimitMode = false );
   bool stopAutoUndervolt();
   std::optional< bool > getAutoUndervoltRunning();
   std::optional< std::string > getAutoUndervoltProgress();
   std::optional< std::string > getAutoUndervoltProfiles();
+  bool hasAutoUndervoltCheckpoint();
+  bool clearAutoUndervoltCheckpoint();
 
   // Device Capability Queries
   std::optional< bool > getWaterCoolerSupported();

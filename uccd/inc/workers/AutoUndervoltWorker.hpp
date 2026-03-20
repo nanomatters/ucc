@@ -239,6 +239,13 @@ public:
   /// @return true if NVML is initialised and GPU locking is supported.
   [[nodiscard]] bool isAvailable() const;
 
+  /// Resume mode controls how tryResumeFromCheckpoint handles the
+  /// search-phase step that was active when the scan was interrupted.
+  enum class ResumeMode { StepBack, RepeatStep };
+
+  /// Set the resume strategy before calling start() when resuming.
+  void setResumeMode( ResumeMode mode ) noexcept { m_resumeMode = mode; }
+
   /// Start the undervolt scan for the app currently sending FPS data.
   /// Returns false if already running, no FPS client, or NVML unavailable.
   bool start( unsigned int deviceIndex = 0,
@@ -299,6 +306,7 @@ private:
   void enterValidation();
   void enterPowerLimitSweep();
   void enterDone( bool success, const std::string &msg );
+  void enterCrashSuspend( const std::string &msg );
   void resetStepMetrics();
   bool evaluateStep( double &avgFpsOut,
                      bool &validWorkloadOut,
@@ -327,7 +335,7 @@ private:
   void emitProgress( const std::string &msg = {} );
 
   // ── Crash-resume checkpointing ──
-  void saveCheckpoint( bool force = false );
+  void saveCheckpoint( bool force = false, const std::string &suspendReason = {} );
   void clearCheckpoint();
   bool tryResumeFromCheckpoint( unsigned int deviceIndex );
 
@@ -448,6 +456,13 @@ private:
 
   // Thermal soak tracking (#6)
   std::vector< int > m_soakTempSamples;
+
+  // Crash detection — consecutive ticks with no valid FPS data
+  int m_noFpsTicks = 0;                ///< Consecutive poll ticks with fps <= 0
+  bool m_hadFpsData = false;           ///< True once at least one valid fps > 0 was received
+  static constexpr int kCrashNoFpsTicks = 20; ///< Threshold: 20 × 500 ms = 10 s of no FPS
+
+  ResumeMode m_resumeMode = ResumeMode::StepBack; ///< How to resume after interrupt
 
   // Background monitoring (#9)
   int m_bgMonDroopCount = 0;

@@ -586,6 +586,10 @@ void AutoUndervoltWorker::enterBaseline()
   m_clkSampleCount = 0;
   m_soakTempSamples.clear();
 
+  // Reset crash detection state
+  m_noFpsTicks  = 0;
+  m_hadFpsData  = false;
+
   // Reset validation oscillation state (#8)
   m_validationCapDir = 0;
   m_validationOscillations = 0;
@@ -763,6 +767,41 @@ void AutoUndervoltWorker::enterPowerLimitSweep()
 
   emitProgress( "Power-limit sweep: " + std::to_string( m_plCurrentMW / 1000 ) + " W" );
   saveCheckpoint( true );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Crash suspend — save state and stop without clearing the checkpoint so
+// the scan can be resumed when the application is relaunched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AutoUndervoltWorker::enterCrashSuspend( const std::string &msg )
+{
+  m_pollTimer->stop();
+
+  log( "AutoUV: crash detected — " + msg );
+  saveCheckpoint( true, "crash_detected" );  // persist current state for later resume
+
+  // Restore GPU to safe defaults but don't clear the checkpoint.
+  restoreOriginalState( false );
+
+  UndervoltResult result;
+  result.gpuFreqCapMHz  = 0;
+  result.coreOffsetMHz  = 0;
+  result.baselineClkMHz = m_baselineClockMHz;
+  result.baselineFps    = m_baselineFps;
+  result.finalFps       = 0.0;
+  result.finalPowerW    = 0.0;
+  result.powerSavedPct  = 0.0;
+  result.success        = false;
+  result.appName        = m_appName;
+  result.message        = "Suspended: " + msg
+    + ". Progress has been saved — restart the application and resume the scan.";
+
+  m_phase = UVPhase::Done;
+
+  emitProgress( result.message );
+  OverlayShmWriter::instance().setInactive();
+  emit finished( result );
 }
 
 void AutoUndervoltWorker::enterDone( bool success, const std::string &msg )
@@ -1034,6 +1073,14 @@ void AutoUndervoltWorker::onPollTick()
         m_peakFpsObserved = fps;
       if ( m_minFpsObserved < 0.0 || fps < m_minFpsObserved )
         m_minFpsObserved = fps;
+
+      m_hadFpsData = true;
+      m_noFpsTicks = 0;
+    }
+    else if ( m_hadFpsData )
+    {
+      // FPS was flowing before but stopped — count consecutive misses.
+      ++m_noFpsTicks;
     }
     if ( powerW > 0.0 )
     {
@@ -1053,6 +1100,18 @@ void AutoUndervoltWorker::onPollTick()
     m_appName = m_fpsServer->clientAppName();
     if ( !m_appName.empty() )
       log( "AutoUV: detected app='" + m_appName + "'" );
+  }
+
+  // ── Crash detection: FPS source disappeared ──
+  if ( m_hadFpsData && m_noFpsTicks >= kCrashNoFpsTicks )
+  {
+    const bool processGone = m_fpsServer && m_fpsServer->clientPid() == 0;
+    std::string reason = processGone
+      ? "Application process disappeared (likely crashed)"
+      : "FPS data stopped for " + std::to_string( m_noFpsTicks * m_config.pollIntervalMs / 1000 )
+        + " seconds (application may have crashed or exited)";
+    enterCrashSuspend( reason );
+    return;
   }
 
   // ── Phase dispatch ──
@@ -2137,7 +2196,7 @@ void AutoUndervoltWorker::emitProgress( const std::string &msg )
   saveCheckpoint( false );
 }
 
-void AutoUndervoltWorker::saveCheckpoint( bool force )
+void AutoUndervoltWorker::saveCheckpoint( bool force, const std::string &suspendReason )
 {
   if ( m_phase == UVPhase::Idle || m_phase == UVPhase::Done )
     return;
@@ -2158,6 +2217,8 @@ void AutoUndervoltWorker::saveCheckpoint( bool force )
     j["phase"] = uvPhaseToString( m_phase );
     j["deviceIndex"] = m_deviceIndex;
     j["appName"] = m_appName;
+    if ( !suspendReason.empty() )
+      j["suspendReason"] = suspendReason;
 
     j["config"] = {
       { "baselineMs", m_config.baselineMs },
@@ -2401,12 +2462,14 @@ bool AutoUndervoltWorker::tryResumeFromCheckpoint( unsigned int deviceIndex )
       return true;
 
     case UVPhase::Searching:
-      // If the interruption happened while testing a raised offset, treat
-      // that candidate as unstable and continue from the last known-stable
+      // StepBack: If the interruption happened while testing a raised offset,
+      // treat that candidate as unstable and continue from the last known-stable
       // offset rather than retrying the same risky point.
-      if ( m_searchOffsetMHz > m_stableOffsetMHz && m_stableOffsetMHz >= 0 )
+      // RepeatStep: User quit voluntarily — just repeat the same step.
+      if ( m_resumeMode == ResumeMode::StepBack
+           && m_searchOffsetMHz > m_stableOffsetMHz && m_stableOffsetMHz >= 0 )
       {
-        log( "AutoUV: resume detected interrupted raised-offset step (+"
+        log( "AutoUV: resume (step-back) detected interrupted raised-offset step (+"
              + std::to_string( m_searchOffsetMHz ) + " MHz); using last stable +"
              + std::to_string( m_stableOffsetMHz ) + " MHz" );
 
@@ -2423,6 +2486,9 @@ bool AutoUndervoltWorker::tryResumeFromCheckpoint( unsigned int deviceIndex )
         saveCheckpoint( true );
         return true;
       }
+
+      if ( m_resumeMode == ResumeMode::RepeatStep )
+        log( "AutoUV: resume (repeat-step) — retrying last step" );
 
       m_phase = UVPhase::Searching;
       ensureMaxPowerLimit();

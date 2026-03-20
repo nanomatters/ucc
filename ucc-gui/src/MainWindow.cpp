@@ -3207,30 +3207,30 @@ void MainWindow::onApplyGpuProfileClicked()
     return;
   }
 
-  QString profileJson = m_gpuProfileTab->buildProfileJSON();
-
+  const QString profileJson = m_gpuProfileTab->buildProfileJSON();
   QString selectedGpuProfileId;
   QString selectedGpuProfileName;
+
   if ( m_gpuProfileTab->gpuProfileCombo() )
   {
     selectedGpuProfileId = m_gpuProfileTab->gpuProfileCombo()->currentData().toString();
     selectedGpuProfileName = m_gpuProfileTab->gpuProfileCombo()->currentText();
   }
 
-  qDebug() << "[GPU-CTGP] Apply clicked"
-           << "selectedGpuProfileId=" << selectedGpuProfileId
-           << "selectedGpuProfileName=" << selectedGpuProfileName
-           << "payload=" << profileJson;
+  //qDebug() << "[GPU-CTGP] Apply clicked"
+  //         << "selectedGpuProfileId=" << selectedGpuProfileId
+  //         << "selectedGpuProfileName=" << selectedGpuProfileName
+  //         << "payload=" << profileJson;
 
   if ( m_UccdClient->applyNvidiaGpuOCProfile( profileJson.toStdString() ) )
   {
     statusBar()->showMessage( "GPU OC settings applied (temporary; use Save to persist)" );
 
-    const auto offsetAfterApply = m_UccdClient->getNVIDIAPowerOffset();
-    const auto ocStateAfterApply = m_UccdClient->getNvidiaOCState( 0 );
-    qDebug() << "[GPU-CTGP] Apply success"
-             << "offsetAfterApply=" << ( offsetAfterApply ? QString::number( *offsetAfterApply ) : QString( "<none>" ) )
-             << "ocStateAfterApply=" << ( ocStateAfterApply ? QString::fromStdString( *ocStateAfterApply ) : QString( "<none>" ) );
+    //const auto offsetAfterApply = m_UccdClient->getNVIDIAPowerOffset();
+    //const auto ocStateAfterApply = m_UccdClient->getNvidiaOCState( 0 );
+    //qDebug() << "[GPU-CTGP] Apply success"
+    //         << "offsetAfterApply=" << ( offsetAfterApply ? QString::number( *offsetAfterApply ) : QString( "<none>" ) )
+    //         << "ocStateAfterApply=" << ( ocStateAfterApply ? QString::fromStdString( *ocStateAfterApply ) : QString( "<none>" ) );
 
     m_gpuProfileTab->refreshOCState();
   }

@@ -1270,19 +1270,23 @@ void GpuProfileTab::showAutoOCDialog()
       if ( !obj.value( "running" ).toBool( false ) && obj.value( "resumeAvailable" ).toBool( false ) )
       {
         statusLabel->setText( obj.value( "message" ).toString(
-          "Resume available. Start the game/application, then click Start to continue." ) );
+          "Resume available. Start the game/application, then click Resume to continue." ) );
       }
     }
   }
 
   // ── Buttons ──
+  const bool ocHasCheckpoint = m_uccdClient->hasAutoOCCheckpoint();
   QHBoxLayout *btnRow = new QHBoxLayout();
   QPushButton *startBtn = new QPushButton( "Start" );
+  QPushButton *resumeBtn = new QPushButton( "Resume" );
   QPushButton *stopBtn = new QPushButton( "Stop" );
   QPushButton *closeBtn = new QPushButton( "Close" );
   stopBtn->setEnabled( false );
+  resumeBtn->setEnabled( ocHasCheckpoint );
   btnRow->addStretch();
   btnRow->addWidget( startBtn );
+  btnRow->addWidget( resumeBtn );
   btnRow->addWidget( stopBtn );
   btnRow->addWidget( closeBtn );
   layout->addLayout( btnRow );
@@ -1371,15 +1375,18 @@ void GpuProfileTab::showAutoOCDialog()
 
   QMetaObject::Connection finishedConn = connect(
     m_uccdClient, &UccdClient::autoOCFinished,
-    dlg, [this, startBtn, stopBtn, componentCombo, progressBar, coreValueLabel, vramValueLabel, statusLabel, dlg]( int coreOff, int vramOff, bool success, const QString &message )
+    dlg, [this, startBtn, resumeBtn, stopBtn, componentCombo, progressBar, coreValueLabel, vramValueLabel, statusLabel, dlg]( int coreOff, int vramOff, bool success, const QString &message )
     {
       startBtn->setEnabled( true );
       stopBtn->setEnabled( false );
       componentCombo->setEnabled( true );
 
+      const bool suspended = message.startsWith( QStringLiteral( "Suspended:" ) );
+      resumeBtn->setEnabled( suspended || m_uccdClient->hasAutoOCCheckpoint() );
+
       progressBar->setRange( 0, 100 );
       progressBar->setValue( success ? 100 : 0 );
-      progressBar->setFormat( success ? "Complete" : "Failed" );
+      progressBar->setFormat( success ? "Complete" : ( suspended ? "Suspended" : "Failed" ) );
 
       if ( coreOff > 0 )
         coreValueLabel->setText( QString( "+%1 MHz" ).arg( coreOff ) );
@@ -1388,7 +1395,12 @@ void GpuProfileTab::showAutoOCDialog()
 
       statusLabel->setText( message );
 
-      if ( success )
+      if ( suspended )
+      {
+        QMessageBox::warning( dlg, "Auto Overclock — Application Crash Detected",
+          message + "\n\nClick Resume when your application is running again to continue from the last saved step." );
+      }
+      else if ( success )
       {
         QString summary = QString( "Auto overclock complete!\n\n"
                                    "Core offset: +%1 MHz\n"
@@ -1410,12 +1422,13 @@ void GpuProfileTab::showAutoOCDialog()
   } );
 
   // ── Button handlers ──
-  connect( startBtn, &QPushButton::clicked, dlg, [this, componentCombo, startBtn, stopBtn, statusLabel, coreValueLabel, vramValueLabel, progressBar]() {
+  auto launchOC = [this, componentCombo, startBtn, resumeBtn, stopBtn, statusLabel, coreValueLabel, vramValueLabel, progressBar]() {
     QString comp = componentCombo->currentData().toString();
     bool ok = m_uccdClient->startAutoOC( comp.toStdString(), 0 );
     if ( ok )
     {
       startBtn->setEnabled( false );
+      resumeBtn->setEnabled( false );
       stopBtn->setEnabled( true );
       componentCombo->setEnabled( false );
       statusLabel->setText( "Starting auto overclock scan..." );
@@ -1429,7 +1442,29 @@ void GpuProfileTab::showAutoOCDialog()
       statusLabel->setText( "Failed to start auto overclock. "
                             "Check that the daemon is running and NVML is available." );
     }
+  };
+
+  connect( startBtn, &QPushButton::clicked, dlg, [this, dlg, launchOC]() {
+    if ( m_uccdClient->hasAutoOCCheckpoint() )
+    {
+      auto reply = QMessageBox::question( dlg, "Start New Overclock Scan",
+        "A suspended overclock process exists. Starting a new scan will discard "
+        "the saved progress.\n\nAre you sure you want to start from scratch?",
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+      if ( reply != QMessageBox::Yes )
+        return;
+      m_uccdClient->clearAutoOCCheckpoint();
+    }
+    launchOC();
   } );
+
+  connect( resumeBtn, &QPushButton::clicked, dlg,
+    [this, dlg, componentCombo, startBtn, resumeBtn, stopBtn, statusLabel,
+     coreValueLabel, vramValueLabel, progressBar]()
+    {
+      handleResumeAutoOC( dlg, componentCombo, startBtn, resumeBtn, stopBtn,
+                          statusLabel, coreValueLabel, vramValueLabel, progressBar );
+    } );
 
   connect( stopBtn, &QPushButton::clicked, dlg, [this, stopBtn, statusLabel]() {
     m_uccdClient->stopAutoOC();
@@ -1543,7 +1578,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
       if ( !obj.value( "running" ).toBool( false ) && obj.value( "resumeAvailable" ).toBool( false ) )
       {
         statusLabel->setText( obj.value( "message" ).toString(
-          "Resume available. Start the game/application, then click Start to continue." ) );
+          "Resume available. Start the game/application, then click Resume to continue." ) );
       }
     }
   }
@@ -1577,7 +1612,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
   layout->addWidget( extendedValCheck );
 
   // ── Power limit mode checkbox ──
-  QCheckBox *powerLimitCheck = new QCheckBox( "Power limit mode (reduce wattage instead of frequency cap)" );
+  QCheckBox *powerLimitCheck = new QCheckBox( "Power limit mode" );
   layout->addWidget( powerLimitCheck );
 
   // Load advanced settings from uccrc
@@ -1602,13 +1637,17 @@ void GpuProfileTab::showAutoUndervoltDialog()
   connect( powerLimitCheck, &QCheckBox::toggled, dlg, saveTargetFps );
 
   // ── Buttons ──
+  const bool uvHasCheckpoint = m_uccdClient->hasAutoUndervoltCheckpoint();
   QHBoxLayout *btnRow = new QHBoxLayout();
   QPushButton *startBtn = new QPushButton( "Start" );
+  QPushButton *resumeBtn = new QPushButton( "Resume" );
   QPushButton *stopBtn = new QPushButton( "Stop" );
   QPushButton *closeBtn = new QPushButton( "Close" );
   stopBtn->setEnabled( false );
+  resumeBtn->setEnabled( uvHasCheckpoint );
   btnRow->addStretch();
   btnRow->addWidget( startBtn );
+  btnRow->addWidget( resumeBtn );
   btnRow->addWidget( stopBtn );
   btnRow->addWidget( closeBtn );
   layout->addLayout( btnRow );
@@ -1719,22 +1758,30 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
   QMetaObject::Connection finishedConn = connect(
     m_uccdClient, &UccdClient::autoUndervoltFinished,
-    dlg, [this, startBtn, stopBtn, progressBar, capValueLabel, statusLabel, dlg](
+    dlg, [this, startBtn, resumeBtn, stopBtn, progressBar, capValueLabel, statusLabel, dlg](
       int gpuFreqCapMHz, bool success, const QString &message, const QString &appName )
     {
       startBtn->setEnabled( true );
       stopBtn->setEnabled( false );
 
+      const bool suspended = message.startsWith( QStringLiteral( "Suspended:" ) );
+      resumeBtn->setEnabled( suspended || m_uccdClient->hasAutoUndervoltCheckpoint() );
+
       progressBar->setRange( 0, 100 );
       progressBar->setValue( success ? 100 : 0 );
-      progressBar->setFormat( success ? "Complete" : "Failed" );
+      progressBar->setFormat( success ? "Complete" : ( suspended ? "Suspended" : "Failed" ) );
 
       if ( success && gpuFreqCapMHz > 0 )
         capValueLabel->setText( QString( "%1 MHz (applied)" ).arg( gpuFreqCapMHz ) );
 
       statusLabel->setText( message );
 
-      if ( success )
+      if ( suspended )
+      {
+        QMessageBox::warning( dlg, "Auto Undervolt — Application Crash Detected",
+          message + "\n\nClick Resume when your application is running again to continue from the last saved step." );
+      }
+      else if ( success )
       {
         if ( m_profileManager )
         {
@@ -1760,8 +1807,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
   } );
 
   // ── Button handlers ──
-  connect( startBtn, &QPushButton::clicked, dlg,
-    [this, startBtn, stopBtn, statusLabel, capValueLabel, progressBar,
+  auto launchUV = [this, startBtn, resumeBtn, stopBtn, statusLabel, capValueLabel, progressBar,
      targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]()
     {
       bool ok = m_uccdClient->startAutoUndervolt(
@@ -1770,6 +1816,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
       if ( ok )
       {
         startBtn->setEnabled( false );
+        resumeBtn->setEnabled( false );
         stopBtn->setEnabled( true );
         statusLabel->setText( "Starting auto undervolt scan..." );
         capValueLabel->setText( "—" );
@@ -1782,6 +1829,32 @@ void GpuProfileTab::showAutoUndervoltDialog()
           "Failed to start. Ensure a game is running with the FPS layer active, "
           "UCC_FPS_HOOK=1 is set for that process, and the daemon is connected." );
       }
+    };
+
+  connect( startBtn, &QPushButton::clicked, dlg,
+    [this, dlg, launchUV]()
+    {
+      if ( m_uccdClient->hasAutoUndervoltCheckpoint() )
+      {
+        auto reply = QMessageBox::question( dlg, "Start New Undervolt Scan",
+          "A suspended undervolt process exists. Starting a new scan will discard "
+          "the saved progress.\n\nAre you sure you want to start from scratch?",
+          QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
+        if ( reply != QMessageBox::Yes )
+          return;
+        m_uccdClient->clearAutoUndervoltCheckpoint();
+      }
+      launchUV();
+    } );
+
+  connect( resumeBtn, &QPushButton::clicked, dlg,
+    [this, dlg, startBtn, resumeBtn, stopBtn, statusLabel, capValueLabel, progressBar,
+     targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]()
+    {
+      handleResumeAutoUV( dlg, startBtn, resumeBtn, stopBtn, statusLabel,
+                          capValueLabel, progressBar,
+                          targetFpsCheck, targetFpsSpin,
+                          extendedValCheck, powerLimitCheck );
     } );
 
   connect( stopBtn, &QPushButton::clicked, dlg, [this, stopBtn, statusLabel]() {
@@ -1793,6 +1866,152 @@ void GpuProfileTab::showAutoUndervoltDialog()
   connect( closeBtn, &QPushButton::clicked, dlg, &QDialog::close );
 
   dlg->show();
+}
+
+// ─── Resume helpers ─────────────────────────────────────────────────────────
+
+std::string GpuProfileTab::askResumeMode( QWidget *parent, const QString &title,
+                                          const QString &suspendReason ) const
+{
+  if ( suspendReason == QStringLiteral( "crash_detected" ) )
+  {
+    auto reply = QMessageBox::question( parent, title,
+      "The previous scan was interrupted because FPS data stopped.\n\n"
+      "Did your application crash, or did you close it yourself?\n\n"
+      "\u2022 Yes = I closed it (repeat the last step)\n"
+      "\u2022 No = It crashed (go back one step for safety)",
+      QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
+      QMessageBox::No );
+    if ( reply == QMessageBox::Cancel )
+      return {};  // empty → caller should abort
+    return ( reply == QMessageBox::Yes ) ? "repeat_step" : "step_back";
+  }
+  // No suspendReason (daemon crash) → always step back
+  return "step_back";
+}
+
+void GpuProfileTab::handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
+                                        QPushButton *startBtn, QPushButton *resumeBtn,
+                                        QPushButton *stopBtn, QLabel *statusLabel,
+                                        QLabel *coreValueLabel, QLabel *vramValueLabel,
+                                        QProgressBar *progressBar )
+{
+  // Determine resume mode from checkpoint's suspendReason
+  QString suspendReason;
+  if ( auto progressJson = m_uccdClient->getAutoOCProgress() )
+  {
+    QJsonDocument pdoc = QJsonDocument::fromJson(
+      QString::fromStdString( *progressJson ).toUtf8() );
+    suspendReason = pdoc.object().value( "suspendReason" ).toString();
+  }
+
+  std::string resumeMode = askResumeMode( dlg, "Resume Overclock Scan", suspendReason );
+  if ( resumeMode.empty() )
+    return;  // user cancelled
+
+  // Verify an FPS client is connected
+  if ( auto fpsJson = m_uccdClient->getFpsSourcesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson(
+      QString::fromStdString( *fpsJson ).toUtf8() );
+    if ( doc.object().value( "currentApp" ).toString().isEmpty() )
+    {
+      QMessageBox::warning( dlg, "Cannot Resume",
+        "No application is delivering FPS data.\n\n"
+        "Start the game or application with the FPS layer active "
+        "(UCC_FPS_HOOK=1) before resuming." );
+      return;
+    }
+  }
+
+  QString comp = componentCombo->currentData().toString();
+  if ( m_uccdClient->resumeAutoOC( resumeMode, comp.toStdString(), 0 ) )
+  {
+    startBtn->setEnabled( false );
+    resumeBtn->setEnabled( false );
+    stopBtn->setEnabled( true );
+    componentCombo->setEnabled( false );
+    statusLabel->setText( "Resuming auto overclock scan..." );
+    coreValueLabel->setText( "\u2014" );
+    vramValueLabel->setText( "\u2014" );
+    progressBar->setRange( 0, 0 );
+    progressBar->setFormat( "Resuming..." );
+  }
+  else
+  {
+    statusLabel->setText( "Failed to resume. Check that the daemon is running." );
+  }
+}
+
+void GpuProfileTab::handleResumeAutoUV( QDialog *dlg,
+                                        QPushButton *startBtn, QPushButton *resumeBtn,
+                                        QPushButton *stopBtn, QLabel *statusLabel,
+                                        QLabel *capValueLabel, QProgressBar *progressBar,
+                                        QCheckBox *targetFpsCheck, QSpinBox *targetFpsSpin,
+                                        QCheckBox *extendedValCheck, QCheckBox *powerLimitCheck )
+{
+  // Read checkpoint metadata
+  QString expectedApp;
+  QString suspendReason;
+  if ( auto uvProgress = m_uccdClient->getAutoUndervoltProgress() )
+  {
+    QJsonDocument pdoc = QJsonDocument::fromJson(
+      QString::fromStdString( *uvProgress ).toUtf8() );
+    QJsonObject pobj = pdoc.object();
+    expectedApp = pobj.value( "checkpointApp" ).toString();
+    suspendReason = pobj.value( "suspendReason" ).toString();
+  }
+
+  std::string resumeMode = askResumeMode( dlg, "Resume Undervolt Scan", suspendReason );
+  if ( resumeMode.empty() )
+    return;  // user cancelled
+
+  // Verify the expected application is running and delivering FPS
+  if ( auto fpsJson = m_uccdClient->getFpsSourcesJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson(
+      QString::fromStdString( *fpsJson ).toUtf8() );
+    QString currentApp = doc.object().value( "currentApp" ).toString();
+    if ( currentApp.isEmpty() )
+    {
+      QString msg = "No application is delivering FPS data.\n\n";
+      if ( !expectedApp.isEmpty() )
+        msg += QString( "Start '%1' with the FPS layer active "
+                        "(UCC_FPS_HOOK=1) before resuming." ).arg( expectedApp );
+      else
+        msg += "Start the game or application with the FPS layer active "
+               "(UCC_FPS_HOOK=1) before resuming.";
+      QMessageBox::warning( dlg, "Cannot Resume", msg );
+      return;
+    }
+    if ( !expectedApp.isEmpty() && currentApp != expectedApp )
+    {
+      QMessageBox::warning( dlg, "Cannot Resume",
+        QString( "The checkpoint was saved for '%1', but '%2' is currently running.\n\n"
+                 "Start '%1' or click Start to begin a new scan for '%2'." )
+          .arg( expectedApp, currentApp ) );
+      return;
+    }
+  }
+
+  if ( m_uccdClient->resumeAutoUndervolt(
+         resumeMode, 0, targetFpsCheck->isChecked(), targetFpsSpin->value(),
+         extendedValCheck->isChecked(), powerLimitCheck->isChecked() ) )
+  {
+    startBtn->setEnabled( false );
+    resumeBtn->setEnabled( false );
+    stopBtn->setEnabled( true );
+    statusLabel->setText( "Resuming auto undervolt scan..." );
+    capValueLabel->setText( "\u2014" );
+    progressBar->setRange( 0, 0 );
+    progressBar->setFormat( "Resuming..." );
+  }
+  else
+  {
+    statusLabel->setText(
+      "Failed to resume. Ensure a game is running with the FPS layer active, "
+      "UCC_FPS_HOOK=1 is set for that process, and the daemon is connected." );
+  }
 }
 
 bool GpuProfileTab::ensureOverclockWarningAcknowledged()

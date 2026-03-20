@@ -178,6 +178,13 @@ public:
   /// @return true if NVML is initialized and offsets are writable.
   [[nodiscard]] bool isAvailable() const;
 
+  /// Resume mode controls how tryResumeFromCheckpoint handles the
+  /// search-phase step that was active when the scan was interrupted.
+  enum class ResumeMode { StepBack, RepeatStep };
+
+  /// Set the resume strategy before calling start() when resuming.
+  void setResumeMode( ResumeMode mode ) noexcept { m_resumeMode = mode; }
+
   /// Start the auto-OC scan. Returns false if already running or unavailable.
   bool start( AutoOCComponent component,
               unsigned int deviceIndex = 0,
@@ -212,6 +219,7 @@ private:
   void enterSearch();
   void enterValidation();
   void enterDone( bool success, const std::string &msg );
+  void enterCrashSuspend( const std::string &msg );
 
   // ── Stability testing ──
   StabilityResult sampleStability();
@@ -229,7 +237,7 @@ private:
   void emitProgress( const std::string &msg = {} );
 
   // ── Crash-resume checkpointing ──
-  void saveCheckpoint( bool force = false );
+  void saveCheckpoint( bool force = false, const std::string &suspendReason = {} );
   void clearCheckpoint();
   bool tryResumeFromCheckpoint( AutoOCComponent requestedComponent,
                                 unsigned int requestedDeviceIndex );
@@ -304,6 +312,13 @@ private:
   // Non-owning pointer to the shared FpsServer in UccDBusInterfaceAdaptor;
   // nullptr means FPS measurement is unavailable.
   FpsServer *m_fpsServer = nullptr;
+
+  // Crash detection — consecutive ticks with no valid FPS data
+  int m_noFpsTicks = 0;                ///< Consecutive poll ticks with fps <= 0
+  bool m_hadFpsData = false;           ///< True once at least one valid fps > 0 was received
+  static constexpr int kCrashNoFpsTicks = 20; ///< Threshold: 20 × 500 ms = 10 s of no FPS
+
+  ResumeMode m_resumeMode = ResumeMode::StepBack; ///< How to resume after interrupt
 
   // Results (when scanning "Both")
   int m_finalCoreOffset = 0;

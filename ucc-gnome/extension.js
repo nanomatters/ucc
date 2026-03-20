@@ -317,7 +317,7 @@ class UccIndicator extends PanelMenu.Button {
         this._lGpuFan   = labelRow('Fan');    gpuGrid.add_child(this._lGpuFan.box);
         // Extended NVIDIA metrics (hidden when data unavailable)
         this._lGpuLoad       = labelRow('GPU Load');      gpuGrid.add_child(this._lGpuLoad.box);
-        this._lVramLoad      = labelRow('VRAM Load');     gpuGrid.add_child(this._lVramLoad.box);
+        this._lVramLoad      = labelRow('VRAM Bus Load');     gpuGrid.add_child(this._lVramLoad.box);
         this._lPstate        = labelRow('P-State');       gpuGrid.add_child(this._lPstate.box);
         this._lVramFreq      = labelRow('VRAM Freq');     gpuGrid.add_child(this._lVramFreq.box);
         this._lCoreVoltage   = labelRow('Core Voltage');  gpuGrid.add_child(this._lCoreVoltage.box);

@@ -459,7 +459,7 @@ void DashboardTab::setupUI()
     // Bottom caption overlay — ON bottom border (labels for row 2, hidden until row 2 visible)
     m_dGpuBottomCaps = makeCaptionRow({
       makeCaptionBadge( "GPU Load (%)" ),
-      makeCaptionBadge( "VRAM Load (%)" ),
+      makeCaptionBadge( "VRAM Bus Load (%)" ),
       makeCaptionBadge( "P-State" ),
       makeCaptionBadge( "Clock Offset (MHz)" )
     });

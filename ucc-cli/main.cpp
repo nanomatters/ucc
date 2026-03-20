@@ -324,7 +324,7 @@ static int cmdStatus( ucc::UccdClient &c )
     if ( hasExtended )
     {
       printVal( "GPU load:",          computeUtil, "%" );
-      printVal( "Memory load:",       memUtil, "%" );
+      printVal( "VRAM bus load:",     memUtil, "%" );
       if ( vramUsed && *vramUsed >= 0 && vramTotal && *vramTotal > 0 )
         std::printf( "  %-24s %d / %d MiB\n", "VRAM:", *vramUsed, *vramTotal );
       if ( pstate && *pstate >= 0 )
@@ -1397,7 +1397,7 @@ static int cmdGpuInfo( ucc::UccdClient &c )
   {
     std::puts( "\n--- NVIDIA Extended Metrics ---" );
     printVal( "GPU load:",            computeUtil, "%" );
-    printVal( "Memory load:",         memUtil, "%" );
+    printVal( "VRAM bus load:",       memUtil, "%" );
     if ( vramUsed && *vramUsed >= 0 && vramTotal && *vramTotal > 0 )
       std::printf( "  %-24s %d / %d MiB\n", "VRAM usage:", *vramUsed, *vramTotal );
     else

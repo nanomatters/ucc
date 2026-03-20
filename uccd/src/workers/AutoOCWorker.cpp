@@ -222,6 +222,10 @@ void AutoOCWorker::enterBaseline()
   m_vramDeepPhase       = false;
   m_vramCoarsePeakOffset = 0;
 
+  // Reset crash detection state
+  m_noFpsTicks  = 0;
+  m_hadFpsData  = false;
+
   log( "AutoOC: Phase 0 — Baseline (" + std::to_string( m_config.baselineMs / 1000 ) + " s)"
        + ( m_activeClk == AutoOCComponent::Vram ? " [VRAM ramp mode]"
            : " [max-offset mode]" ) );
@@ -379,6 +383,36 @@ void AutoOCWorker::enterValidation()
   saveCheckpoint( true );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Crash suspend — save state and stop without clearing the checkpoint so
+// the scan can be resumed when the application is relaunched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AutoOCWorker::enterCrashSuspend( const std::string &msg )
+{
+  m_pollTimer->stop();
+
+  log( "AutoOC: crash detected — " + msg );
+  saveCheckpoint( true, "crash_detected" );  // persist with reason for resume strategy
+
+  // Restore GPU to safe defaults but don't clear the checkpoint.
+  resetOffset();
+  if ( m_fpsServer ) m_fpsServer->stop();
+
+  AutoOCResult result;
+  result.coreOffsetMHz = 0;
+  result.vramOffsetMHz = 0;
+  result.success = false;
+  result.message = "Suspended: " + msg
+    + ". Progress has been saved — restart the application and resume the scan.";
+
+  m_phase = AutoOCPhase::Done;
+
+  emitProgress( result.message );
+  OverlayShmWriter::instance().setInactive();
+  emit finished( result );
+}
+
 void AutoOCWorker::enterDone( bool success, const std::string &msg )
 {
   m_pollTimer->stop();
@@ -435,6 +469,32 @@ void AutoOCWorker::onPollTick()
 
   // ── Sample current GPU state ──
   StabilityResult sample = sampleStability();
+
+  // ── Crash detection: track FPS availability ──
+  if ( m_fpsServer )
+  {
+    double fps = m_fpsServer->currentFps();
+    if ( fps > 0.0 )
+    {
+      m_hadFpsData = true;
+      m_noFpsTicks = 0;
+    }
+    else if ( m_hadFpsData )
+    {
+      ++m_noFpsTicks;
+    }
+  }
+
+  if ( m_hadFpsData && m_noFpsTicks >= kCrashNoFpsTicks )
+  {
+    const bool processGone = m_fpsServer && m_fpsServer->clientPid() == 0;
+    std::string reason = processGone
+      ? "Application process disappeared (likely crashed)"
+      : "FPS data stopped for " + std::to_string( m_noFpsTicks * m_config.pollIntervalMs / 1000 )
+        + " seconds (application may have crashed or exited)";
+    enterCrashSuspend( reason );
+    return;
+  }
 
   // ── Phase dispatch ──
   switch ( m_phase )
@@ -1154,12 +1214,9 @@ StabilityResult AutoOCWorker::sampleStabilityMaxOffset()
 
 void AutoOCWorker::applyOffset( int offsetMHz )
 {
-  auto clockType = ( m_activeClk == AutoOCComponent::Vram )
-                     ? nvml::NVML_CLOCK_MEM
-                     : nvml::NVML_CLOCK_GRAPHICS;
+  const auto clockType = ( m_activeClk == AutoOCComponent::Vram ) ? nvml::NVML_CLOCK_MEM : nvml::NVML_CLOCK_GRAPHICS;
 
-  bool ok = m_nvml->setClockOffset( m_deviceIndex, clockType, nvml::NVML_PSTATE_0, offsetMHz );
-  if ( !ok )
+  if ( not m_nvml->setClockOffset( m_deviceIndex, clockType, nvml::NVML_PSTATE_0, offsetMHz ) )
     log( "AutoOC: WARNING — failed to apply offset " + std::to_string( offsetMHz ) + " MHz" );
 }
 
@@ -1168,6 +1225,7 @@ void AutoOCWorker::resetOffset()
   // Reset whichever component(s) we were scanning
   if ( m_component == AutoOCComponent::Core || m_component == AutoOCComponent::Both )
     m_nvml->setClockOffset( m_deviceIndex, nvml::NVML_CLOCK_GRAPHICS, nvml::NVML_PSTATE_0, 0 );
+
   if ( m_component == AutoOCComponent::Vram || m_component == AutoOCComponent::Both )
     m_nvml->setClockOffset( m_deviceIndex, nvml::NVML_CLOCK_MEM, nvml::NVML_PSTATE_0, 0 );
 }
@@ -1177,34 +1235,21 @@ void AutoOCWorker::resetOffset()
 // ─────────────────────────────────────────────────────────────────────────────
 
 int AutoOCWorker::maxOffsetForComponent() const
-{
-  return ( m_activeClk == AutoOCComponent::Vram )
-           ? NvmlOffsetCaps::VRAM_MAX_OFFSET
-           : NvmlOffsetCaps::GPU_MAX_OFFSET;
-}
+{ return ( m_activeClk == AutoOCComponent::Vram ) ? NvmlOffsetCaps::VRAM_MAX_OFFSET : NvmlOffsetCaps::GPU_MAX_OFFSET; }
 
 int AutoOCWorker::safetyMarginForComponent() const
-{
-  return ( m_activeClk == AutoOCComponent::Vram )
-           ? m_config.safetyMarginVramMHz
-           : m_config.safetyMarginCoreMHz;
-}
+{ return ( m_activeClk == AutoOCComponent::Vram ) ? m_config.safetyMarginVramMHz : m_config.safetyMarginCoreMHz; }
 
 int AutoOCWorker::ceilToResolution( int value ) const
-{
-  int r = m_config.resolutionMHz;
-  return ( ( value + r - 1 ) / r ) * r;
-}
+{ const int r = m_config.resolutionMHz; return ( ( value + r - 1 ) / r ) * r; }
 
 int AutoOCWorker::floorToResolution( int value ) const
-{
-  int r = m_config.resolutionMHz;
-  return ( value / r ) * r;
-}
+{ const int r = m_config.resolutionMHz; return ( value / r ) * r; } 
 
 void AutoOCWorker::log( const std::string &msg )
 {
   syslog( LOG_INFO, "%s", msg.c_str() );
+
   if ( m_logFn )
     m_logFn( msg );
 }
@@ -1236,32 +1281,31 @@ void AutoOCWorker::emitProgress( const std::string &msg )
   prog.fps = m_fpsServer ? m_fpsServer->currentFps() : -1.0;
 
   // Update in-game overlay via shared memory
-  {
-    UccOverlayData od{};
-    od.active          = 1;
-    od.mode            = 0; // Auto-OC
-    od.phase           = static_cast<uint8_t>( prog.phase );
-    od.iteration       = prog.iteration;
-    od.maxIterations   = prog.maxIterations;
-    od.currentOffsetMHz = prog.currentOffsetMHz;
-    od.bestStableMHz   = prog.bestStableMHz;
-    od.gpuClockMHz     = prog.gpuClockMHz;
-    od.vramClockMHz    = prog.vramClockMHz;
-    od.tempC           = prog.tempC;
-    od.gpuUtilPct      = prog.gpuUtilPct;
-    od.fps             = prog.fps;
-    od.lastResult      = static_cast<uint8_t>( prog.lastResult );
-    if ( !msg.empty() )
-      std::strncpy( od.message, msg.c_str(), sizeof( od.message ) - 1 );
-    OverlayShmWriter::instance().update( od );
-  }
+  UccOverlayData od{};
+  od.active           = 1;
+  od.mode             = 0; // Auto-OC
+  od.phase            = static_cast<uint8_t>( prog.phase );
+  od.iteration        = prog.iteration;
+  od.maxIterations    = prog.maxIterations;
+  od.currentOffsetMHz = prog.currentOffsetMHz;
+  od.bestStableMHz    = prog.bestStableMHz;
+  od.gpuClockMHz      = prog.gpuClockMHz;
+  od.vramClockMHz     = prog.vramClockMHz;
+  od.tempC            = prog.tempC;
+  od.gpuUtilPct       = prog.gpuUtilPct;
+  od.fps              = prog.fps;
+  od.lastResult       = static_cast<uint8_t>( prog.lastResult );
+
+  if ( not msg.empty() )
+    std::strncpy( od.message, msg.c_str(), sizeof( od.message ) - 1 );
+
+  OverlayShmWriter::instance().update( od );
 
   emit progress( prog );
-
   saveCheckpoint( false );
 }
 
-void AutoOCWorker::saveCheckpoint( bool force )
+void AutoOCWorker::saveCheckpoint( bool force, const std::string &suspendReason )
 {
   if ( m_phase == AutoOCPhase::Idle || m_phase == AutoOCPhase::Done )
     return;
@@ -1283,6 +1327,9 @@ void AutoOCWorker::saveCheckpoint( bool force )
     j["deviceIndex"] = m_deviceIndex;
     j["component"] = autoOcCompToString( m_component );
     j["activeComponent"] = autoOcCompToString( m_activeClk );
+
+    if ( !suspendReason.empty() )
+      j["suspendReason"] = suspendReason;
 
     j["config"] = {
       { "mode", static_cast< int >( m_config.mode ) },
@@ -1443,14 +1490,14 @@ bool AutoOCWorker::tryResumeFromCheckpoint( AutoOCComponent requestedComponent,
       return true;
 
     case AutoOCPhase::Searching:
-      // If interruption happened while testing a higher core offset than the
-      // last stable one, consider that candidate failed and finalize search
-      // at the last stable point.
-      if ( m_activeClk != AutoOCComponent::Vram
-           && m_bestStable > 0
-           && m_mid > m_bestStable )
+      // StepBack: If interruption happened while testing a higher core offset
+      // than the last stable one, consider that candidate failed and finalize
+      // search at the last stable point.
+      // RepeatStep: User quit voluntarily — just repeat the same step.
+      if ( m_resumeMode == ResumeMode::StepBack
+           && m_activeClk != AutoOCComponent::Vram && m_bestStable > 0 && m_mid > m_bestStable )
       {
-        log( "AutoOC: resume detected interrupted core step (+"
+        log( "AutoOC: resume (step-back) detected interrupted core step (+"
              + std::to_string( m_mid ) + " MHz); using last stable +"
              + std::to_string( m_bestStable ) + " MHz" );
 
@@ -1461,10 +1508,15 @@ bool AutoOCWorker::tryResumeFromCheckpoint( AutoOCComponent requestedComponent,
         return true;
       }
 
-      m_phase = AutoOCPhase::Searching;
+      if ( m_resumeMode == ResumeMode::RepeatStep )
+        log( "AutoOC: resume (repeat-step) — retrying last step" );
+
       if ( m_mid <= 0 )
         m_mid = std::max( m_config.resolutionMHz, m_vramRampOffset );
+      
       applyOffset( m_mid );
+
+      m_phase = AutoOCPhase::Searching;
       m_stepStart = std::chrono::steady_clock::now();
       m_sampleCount = 0;
       m_stableSampleCount = 0;
@@ -1479,6 +1531,7 @@ bool AutoOCWorker::tryResumeFromCheckpoint( AutoOCComponent requestedComponent,
       m_slidingRefClockMHz = 0;
       m_rampFpsSum = 0.0;
       m_rampSampleCount = 0;
+
       emitProgress( "Resuming search — start the game/application now so workload/FPS signals are available." );
       m_pollTimer->start( m_config.pollIntervalMs );
       saveCheckpoint( true );

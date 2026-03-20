@@ -3577,6 +3577,28 @@ bool UccDBusInterfaceAdaptor::StartAutoOC( const QString &component, int deviceI
   return m_service->m_autoOCWorker->start( comp, static_cast< unsigned int >( deviceIndex ), config );
 }
 
+bool UccDBusInterfaceAdaptor::ResumeAutoOC( const QString &mode,
+                                            const QString &component,
+                                            int deviceIndex )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoOCWorker ) return false;
+
+  AutoOCComponent comp = AutoOCComponent::Both;
+  if ( component == "core" ) comp = AutoOCComponent::Core;
+  else if ( component == "vram" ) comp = AutoOCComponent::Vram;
+
+  if ( mode == QStringLiteral( "repeat_step" ) )
+    m_service->m_autoOCWorker->setResumeMode( AutoOCWorker::ResumeMode::RepeatStep );
+  else
+    m_service->m_autoOCWorker->setResumeMode( AutoOCWorker::ResumeMode::StepBack );
+
+  AutoOCConfig config;
+  config.mode = AutoOCMode::MaxOffset;
+
+  return m_service->m_autoOCWorker->start( comp, static_cast< unsigned int >( deviceIndex ), config );
+}
+
 bool UccDBusInterfaceAdaptor::StopAutoOC()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
@@ -3605,12 +3627,43 @@ QString UccDBusInterfaceAdaptor::GetAutoOCProgress()
   const bool resumeAvailable = std::filesystem::exists( AUTO_OC_CHECKPOINT_PATH );
   if ( resumeAvailable )
   {
-    return QStringLiteral(
-      "{\"running\":false,\"resumeAvailable\":true,"
-      "\"message\":\"Resume available. Start the game/application and start Auto-OC to continue from the saved step.\"}" );
+    QString suspendReason;
+    try
+    {
+      std::ifstream in( AUTO_OC_CHECKPOINT_PATH );
+      if ( in.is_open() )
+      {
+        nlohmann::json j;
+        in >> j;
+        suspendReason = QString::fromStdString( j.value( "suspendReason", std::string() ) );
+      }
+    }
+    catch ( ... ) {}
+
+    QJsonObject obj;
+    obj[ "running" ] = false;
+    obj[ "resumeAvailable" ] = true;
+    obj[ "message" ] = QStringLiteral( "Resume available. Start the game/application and click Resume to continue from the saved step." );
+    if ( !suspendReason.isEmpty() )
+      obj[ "suspendReason" ] = suspendReason;
+    return QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) );
   }
 
   return QStringLiteral( "{\"running\":false,\"resumeAvailable\":false}" );
+}
+
+bool UccDBusInterfaceAdaptor::HasAutoOCCheckpoint()
+{
+  return std::filesystem::exists( AUTO_OC_CHECKPOINT_PATH );
+}
+
+bool UccDBusInterfaceAdaptor::ClearAutoOCCheckpoint()
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( m_service && m_service->m_autoOCWorker && m_service->m_autoOCWorker->isRunning() )
+    return false; // don't clear while running
+  try { std::filesystem::remove( AUTO_OC_CHECKPOINT_PATH ); } catch ( ... ) {}
+  return true;
 }
 
 // ─── Auto-Undervolt D-Bus methods ───────────────────────────────────────────
@@ -3626,6 +3679,32 @@ bool UccDBusInterfaceAdaptor::StartAutoUndervolt( int deviceIndex,
 
   // Build config with target-FPS settings and pass it into start(),
   // which replaces the worker's m_config.
+  UndervoltConfig cfg;
+  cfg.targetFpsEnabled = targetFpsEnabled;
+  cfg.targetFpsValue   = ( targetFpsEnabled && targetFps > 0 )
+                         ? static_cast< double >( targetFps ) : 0.0;
+  cfg.extendedValidation = extendedValidation;
+  cfg.powerLimitMode     = powerLimitMode;
+
+  return m_service->m_autoUndervoltWorker->start(
+    static_cast< unsigned int >( deviceIndex ), cfg );
+}
+
+bool UccDBusInterfaceAdaptor::ResumeAutoUndervolt( const QString &mode,
+                                                   int deviceIndex,
+                                                   bool targetFpsEnabled,
+                                                   int targetFps,
+                                                   bool extendedValidation,
+                                                   bool powerLimitMode )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
+
+  if ( mode == QStringLiteral( "repeat_step" ) )
+    m_service->m_autoUndervoltWorker->setResumeMode( AutoUndervoltWorker::ResumeMode::RepeatStep );
+  else
+    m_service->m_autoUndervoltWorker->setResumeMode( AutoUndervoltWorker::ResumeMode::StepBack );
+
   UndervoltConfig cfg;
   cfg.targetFpsEnabled = targetFpsEnabled;
   cfg.targetFpsValue   = ( targetFpsEnabled && targetFps > 0 )
@@ -3663,12 +3742,52 @@ QString UccDBusInterfaceAdaptor::GetAutoUndervoltProgress()
   const bool resumeAvailable = std::filesystem::exists( AUTO_UV_CHECKPOINT_PATH );
   if ( resumeAvailable )
   {
-    return QStringLiteral(
-      "{\"running\":false,\"resumeAvailable\":true,"
-      "\"message\":\"Resume available. Start the game/application and start Auto-Undervolt to continue from the saved step.\"}" );
+    QString checkpointApp;
+    QString suspendReason;
+    try
+    {
+      std::ifstream in( AUTO_UV_CHECKPOINT_PATH );
+      if ( in.is_open() )
+      {
+        nlohmann::json j;
+        in >> j;
+        checkpointApp = QString::fromStdString( j.value( "appName", std::string() ) );
+        suspendReason = QString::fromStdString( j.value( "suspendReason", std::string() ) );
+      }
+    }
+    catch ( ... ) {}
+
+    QString msg = QStringLiteral( "Resume available." );
+    if ( !checkpointApp.isEmpty() )
+      msg += QStringLiteral( " Expected application: " ) + checkpointApp + '.';
+    msg += QStringLiteral( " Start the application, then click Resume to continue." );
+
+    QJsonObject obj;
+    obj[ "running" ] = false;
+    obj[ "resumeAvailable" ] = true;
+    obj[ "message" ] = msg;
+    if ( !checkpointApp.isEmpty() )
+      obj[ "checkpointApp" ] = checkpointApp;
+    if ( !suspendReason.isEmpty() )
+      obj[ "suspendReason" ] = suspendReason;
+    return QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) );
   }
 
   return QStringLiteral( "{\"running\":false,\"resumeAvailable\":false}" );
+}
+
+bool UccDBusInterfaceAdaptor::HasAutoUndervoltCheckpoint()
+{
+  return std::filesystem::exists( AUTO_UV_CHECKPOINT_PATH );
+}
+
+bool UccDBusInterfaceAdaptor::ClearAutoUndervoltCheckpoint()
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( m_service && m_service->m_autoUndervoltWorker && m_service->m_autoUndervoltWorker->isRunning() )
+    return false; // don't clear while running
+  try { std::filesystem::remove( AUTO_UV_CHECKPOINT_PATH ); } catch ( ... ) {}
+  return true;
 }
 
 QString UccDBusInterfaceAdaptor::GetAutoUndervoltProfiles()

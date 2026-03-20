@@ -425,17 +425,25 @@ public slots:
 
   // NVIDIA Auto-OC methods
   bool StartAutoOC( const QString &component, int deviceIndex );
+  bool ResumeAutoOC( const QString &mode, const QString &component, int deviceIndex );
   bool StopAutoOC();
   bool GetAutoOCRunning();
   QString GetAutoOCProgress();
+  bool HasAutoOCCheckpoint();
+  bool ClearAutoOCCheckpoint();
 
   // NVIDIA Auto-Undervolt methods
   bool StartAutoUndervolt( int deviceIndex, bool targetFpsEnabled, int targetFps,
                            bool extendedValidation, bool powerLimitMode );
+  bool ResumeAutoUndervolt( const QString &mode, int deviceIndex,
+                            bool targetFpsEnabled, int targetFps,
+                            bool extendedValidation, bool powerLimitMode );
   bool StopAutoUndervolt();
   bool GetAutoUndervoltRunning();
   QString GetAutoUndervoltProgress();
   QString GetAutoUndervoltProfiles();
+  bool HasAutoUndervoltCheckpoint();
+  bool ClearAutoUndervoltCheckpoint();
 
   // water cooler methods
   bool GetWaterCoolerAvailable();

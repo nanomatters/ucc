@@ -16,6 +16,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QPushButton>
@@ -106,6 +107,20 @@ private:
   bool showOverclockWarningDialog();
   void showAutoOCDialog();
   void showAutoUndervoltDialog();
+
+  std::string askResumeMode( QWidget *parent, const QString &title,
+                             const QString &suspendReason ) const;
+  void handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
+                           QPushButton *startBtn, QPushButton *resumeBtn,
+                           QPushButton *stopBtn, QLabel *statusLabel,
+                           QLabel *coreValueLabel, QLabel *vramValueLabel,
+                           QProgressBar *progressBar );
+  void handleResumeAutoUV( QDialog *dlg,
+                           QPushButton *startBtn, QPushButton *resumeBtn,
+                           QPushButton *stopBtn, QLabel *statusLabel,
+                           QLabel *capValueLabel, QProgressBar *progressBar,
+                           QCheckBox *targetFpsCheck, QSpinBox *targetFpsSpin,
+                           QCheckBox *extendedValCheck, QCheckBox *powerLimitCheck );
 
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;

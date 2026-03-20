@@ -965,6 +965,14 @@ bool UccdClient::startAutoOC( const std::string &component, int deviceIndex )
       QString::fromStdString( component ), deviceIndex ).value_or( false );
 }
 
+bool UccdClient::resumeAutoOC( const std::string &mode,
+                                const std::string &component, int deviceIndex )
+{
+  return callMethod< bool, QString, QString, int >( "ResumeAutoOC",
+      QString::fromStdString( mode ),
+      QString::fromStdString( component ), deviceIndex ).value_or( false );
+}
+
 bool UccdClient::stopAutoOC()
 {
   return callMethod< bool >( "StopAutoOC" ).value_or( false );
@@ -980,6 +988,16 @@ std::optional< std::string > UccdClient::getAutoOCProgress()
   if ( auto result = callMethod< QString >( "GetAutoOCProgress" ) )
     return result->toStdString();
   return std::nullopt;
+}
+
+bool UccdClient::hasAutoOCCheckpoint()
+{
+  return callMethod< bool >( "HasAutoOCCheckpoint" ).value_or( false );
+}
+
+bool UccdClient::clearAutoOCCheckpoint()
+{
+  return callMethod< bool >( "ClearAutoOCCheckpoint" ).value_or( false );
 }
 
 void UccdClient::subscribeAutoOCProgress( AutoOCProgressCallback callback )
@@ -1017,6 +1035,19 @@ bool UccdClient::startAutoUndervolt( int deviceIndex,
     extendedValidation, powerLimitMode ).value_or( false );
 }
 
+bool UccdClient::resumeAutoUndervolt( const std::string &mode,
+                                       int deviceIndex,
+                                       bool targetFpsEnabled,
+                                       int  targetFps,
+                                       bool extendedValidation,
+                                       bool powerLimitMode )
+{
+  return callMethod< bool, QString, int, bool, int, bool, bool >(
+    "ResumeAutoUndervolt", QString::fromStdString( mode ),
+    deviceIndex, targetFpsEnabled, targetFps,
+    extendedValidation, powerLimitMode ).value_or( false );
+}
+
 bool UccdClient::stopAutoUndervolt()
 {
   return callMethod< bool >( "StopAutoUndervolt" ).value_or( false );
@@ -1039,6 +1070,16 @@ std::optional< std::string > UccdClient::getAutoUndervoltProfiles()
   if ( auto result = callMethod< QString >( "GetAutoUndervoltProfiles" ) )
     return result->toStdString();
   return std::nullopt;
+}
+
+bool UccdClient::hasAutoUndervoltCheckpoint()
+{
+  return callMethod< bool >( "HasAutoUndervoltCheckpoint" ).value_or( false );
+}
+
+bool UccdClient::clearAutoUndervoltCheckpoint()
+{
+  return callMethod< bool >( "ClearAutoUndervoltCheckpoint" ).value_or( false );
 }
 
 void UccdClient::subscribeAutoUndervoltProgress( AutoUndervoltProgressCallback callback )

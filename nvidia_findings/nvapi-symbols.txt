@@ -1,1 +1,0 @@
-nvapi_QueryInterface
