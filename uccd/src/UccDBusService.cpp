@@ -3562,7 +3562,8 @@ bool UccDBusInterfaceAdaptor::ResetNvidiaGpuOCAll( int deviceIndex )
 
 // ── Auto-OC ─────────────────────────────────────────────────────────────────
 
-bool UccDBusInterfaceAdaptor::StartAutoOC( const QString &component, int deviceIndex )
+bool UccDBusInterfaceAdaptor::StartAutoOC( const QString &component, int deviceIndex,
+                                           int stepSizeMHz, int maxOffsetMHz, int stabilityMs )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_autoOCWorker ) return false;
@@ -3573,13 +3574,17 @@ bool UccDBusInterfaceAdaptor::StartAutoOC( const QString &component, int deviceI
 
   AutoOCConfig config;
   config.mode = AutoOCMode::MaxOffset;
+  if ( stepSizeMHz > 0 )   config.resolutionMHz    = stepSizeMHz;
+  if ( maxOffsetMHz > 0 )  { config.maxGpuOffsetMHz = maxOffsetMHz; config.maxVramOffsetMHz = maxOffsetMHz; }
+  if ( stabilityMs > 0 )   config.searchTestMs     = stabilityMs;
 
   return m_service->m_autoOCWorker->start( comp, static_cast< unsigned int >( deviceIndex ), config );
 }
 
 bool UccDBusInterfaceAdaptor::ResumeAutoOC( const QString &mode,
                                             const QString &component,
-                                            int deviceIndex )
+                                            int deviceIndex,
+                                            int stepSizeMHz, int maxOffsetMHz, int stabilityMs )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_autoOCWorker ) return false;
@@ -3595,8 +3600,19 @@ bool UccDBusInterfaceAdaptor::ResumeAutoOC( const QString &mode,
 
   AutoOCConfig config;
   config.mode = AutoOCMode::MaxOffset;
+  if ( stepSizeMHz > 0 )   config.resolutionMHz    = stepSizeMHz;
+  if ( maxOffsetMHz > 0 )  { config.maxGpuOffsetMHz = maxOffsetMHz; config.maxVramOffsetMHz = maxOffsetMHz; }
+  if ( stabilityMs > 0 )   config.searchTestMs     = stabilityMs;
 
   return m_service->m_autoOCWorker->start( comp, static_cast< unsigned int >( deviceIndex ), config );
+}
+
+bool UccDBusInterfaceAdaptor::PauseAutoOC()
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoOCWorker ) return false;
+  m_service->m_autoOCWorker->pause();
+  return true;
 }
 
 bool UccDBusInterfaceAdaptor::StopAutoOC()
@@ -3672,19 +3688,23 @@ bool UccDBusInterfaceAdaptor::StartAutoUndervolt( int deviceIndex,
                                                   bool targetFpsEnabled,
                                                   int targetFps,
                                                   bool extendedValidation,
-                                                  bool powerLimitMode )
+                                                  bool powerLimitMode,
+                                                  int stepSizeMHz,
+                                                  int maxOffsetMHz,
+                                                  int stabilityMs )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
 
-  // Build config with target-FPS settings and pass it into start(),
-  // which replaces the worker's m_config.
   UndervoltConfig cfg;
   cfg.targetFpsEnabled = targetFpsEnabled;
   cfg.targetFpsValue   = ( targetFpsEnabled && targetFps > 0 )
                          ? static_cast< double >( targetFps ) : 0.0;
   cfg.extendedValidation = extendedValidation;
   cfg.powerLimitMode     = powerLimitMode;
+  if ( stepSizeMHz > 0 )   cfg.offsetStepMHz    = stepSizeMHz;
+  if ( maxOffsetMHz > 0 )  cfg.maxCoreOffsetMHz = maxOffsetMHz;
+  if ( stabilityMs > 0 )   cfg.searchTestMs     = stabilityMs;
 
   return m_service->m_autoUndervoltWorker->start(
     static_cast< unsigned int >( deviceIndex ), cfg );
@@ -3695,7 +3715,10 @@ bool UccDBusInterfaceAdaptor::ResumeAutoUndervolt( const QString &mode,
                                                    bool targetFpsEnabled,
                                                    int targetFps,
                                                    bool extendedValidation,
-                                                   bool powerLimitMode )
+                                                   bool powerLimitMode,
+                                                   int stepSizeMHz,
+                                                   int maxOffsetMHz,
+                                                   int stabilityMs )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
@@ -3711,9 +3734,20 @@ bool UccDBusInterfaceAdaptor::ResumeAutoUndervolt( const QString &mode,
                          ? static_cast< double >( targetFps ) : 0.0;
   cfg.extendedValidation = extendedValidation;
   cfg.powerLimitMode     = powerLimitMode;
+  if ( stepSizeMHz > 0 )   cfg.offsetStepMHz    = stepSizeMHz;
+  if ( maxOffsetMHz > 0 )  cfg.maxCoreOffsetMHz = maxOffsetMHz;
+  if ( stabilityMs > 0 )   cfg.searchTestMs     = stabilityMs;
 
   return m_service->m_autoUndervoltWorker->start(
     static_cast< unsigned int >( deviceIndex ), cfg );
+}
+
+bool UccDBusInterfaceAdaptor::PauseAutoUndervolt()
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_autoUndervoltWorker ) return false;
+  m_service->m_autoUndervoltWorker->pause();
+  return true;
 }
 
 bool UccDBusInterfaceAdaptor::StopAutoUndervolt()

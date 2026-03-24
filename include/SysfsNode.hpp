@@ -51,9 +51,7 @@ public:
    * @brief Check if the sysfs node exists and is accessible
    */
   [[nodiscard]] bool isAvailable() const noexcept
-  {
-    return std::filesystem::exists( m_path );
-  }
+  { return std::filesystem::exists( m_path ); }
 
   /**
    * @brief Read value from sysfs node
@@ -283,15 +281,14 @@ private:
   bool writeImpl( std::ofstream &file, const T &value ) const
     requires std::is_same_v< T, std::vector< std::string > >
   {
+    if ( value.empty() )
+      return true;
+
     const char delim = m_delimiter.empty() ? ' ' : m_delimiter[ 0 ];
+    file << value[ 0 ];
 
-    for ( size_t i = 0; i < value.size(); ++i )
-    {
-      if ( i > 0 )
-        file << delim;
-
-      file << value[ i ];
-    }
+    for ( size_t i = 1; i < value.size(); ++i )
+      file << delim << value[ i ];
 
     return not file.fail();
   }

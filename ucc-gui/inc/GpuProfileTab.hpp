@@ -112,15 +112,21 @@ private:
                              const QString &suspendReason ) const;
   void handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
                            QPushButton *startBtn, QPushButton *resumeBtn,
-                           QPushButton *stopBtn, QLabel *statusLabel,
+                           QPushButton *pauseBtn, QPushButton *stopBtn,
+                           QLabel *statusLabel,
                            QLabel *coreValueLabel, QLabel *vramValueLabel,
-                           QProgressBar *progressBar );
+                           QProgressBar *progressBar,
+                           QSpinBox *stepSizeSpin, QSpinBox *maxOffsetSpin,
+                           QSpinBox *stabilitySpin );
   void handleResumeAutoUV( QDialog *dlg,
                            QPushButton *startBtn, QPushButton *resumeBtn,
-                           QPushButton *stopBtn, QLabel *statusLabel,
+                           QPushButton *pauseBtn, QPushButton *stopBtn,
+                           QLabel *statusLabel,
                            QLabel *capValueLabel, QProgressBar *progressBar,
                            QCheckBox *targetFpsCheck, QSpinBox *targetFpsSpin,
-                           QCheckBox *extendedValCheck, QCheckBox *powerLimitCheck );
+                           QCheckBox *extendedValCheck, QCheckBox *powerLimitCheck,
+                           QSpinBox *stepSizeSpin, QSpinBox *maxOffsetSpin,
+                           QSpinBox *stabilitySpin );
 
   UccdClient *m_uccdClient;
   ProfileManager *m_profileManager;

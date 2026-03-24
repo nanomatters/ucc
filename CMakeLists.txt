@@ -107,6 +107,11 @@ option( BUILD_GNOME "Install the GNOME Shell extension" ON )
 option( BUILD_TESTS "Build the unit test suite" OFF )
 option( BUILD_FPS_LAYER "Build the Vulkan/GLX FPS measurement layer" ON )
 
+# Use CTest so dashboard metadata (e.g. DartConfiguration.tcl) is generated.
+# Mirror the project's BUILD_TESTS toggle into CTest's BUILD_TESTING switch.
+set( BUILD_TESTING ${BUILD_TESTS} CACHE BOOL "Enable CTest-based testing" FORCE )
+include( CTest )
+
 # Conditionally find Qt6::Test if tests are enabled
 if( BUILD_TESTS )
   find_package( Qt6 REQUIRED COMPONENTS Test )
@@ -132,8 +137,7 @@ if( BUILD_TRAY )
   add_subdirectory( ucc-tray )
 endif()
 
-if( BUILD_TESTS )
-  enable_testing()
+if( BUILD_TESTING )
   add_subdirectory( tests )
 endif()
 

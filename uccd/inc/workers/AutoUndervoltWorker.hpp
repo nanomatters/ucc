@@ -254,6 +254,9 @@ public:
   /// Request cancellation.
   void stop();
 
+  /// Request pause/suspend (saves checkpoint and allows resume later).
+  void pause();
+
   /// @return true if a scan is in progress.
   [[nodiscard]] bool isRunning() const;
 
@@ -307,6 +310,7 @@ private:
   void enterPowerLimitSweep();
   void enterDone( bool success, const std::string &msg );
   void enterCrashSuspend( const std::string &msg );
+  void enterPauseSuspend();
   void resetStepMetrics();
   bool evaluateStep( double &avgFpsOut,
                      bool &validWorkloadOut,
@@ -347,6 +351,7 @@ private:
   unsigned int    m_deviceIndex = 0;
   UVPhase         m_phase       = UVPhase::Idle;
   std::atomic_bool m_stopRequested{ false };
+  std::atomic_bool m_pauseRequested{ false };
 
   // FPS server (non-owning)
   FpsServer *m_fpsServer = nullptr;

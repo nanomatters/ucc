@@ -644,24 +644,29 @@ bool NvmlWrapper::setClockOffset( unsigned int deviceIndex,
                   << "; marking as not writable" << std::endl;
         return offsetMHz == 0;
       }
-    }
 
-    if ( isResetRequired( ret ) )
+      // P0 readback mismatch — fall through to VfOffset fallback below.
+    }
+    else
     {
-      std::cerr << "[NvmlWrapper] setClockOffset: GPU requires reset (error " << ret
-                << ") for type=" << clockType << " pstate=" << pstate
-                << " offset=" << offsetMHz << std::endl;
-      m_resetRequiredCache[deviceIndex] = true;
-      return false;
+      // ClockOffsets API returned a real error (not SUCCESS).
+      if ( isResetRequired( ret ) )
+      {
+        std::cerr << "[NvmlWrapper] setClockOffset: GPU requires reset (error " << ret
+                  << ") for type=" << clockType << " pstate=" << pstate
+                  << " offset=" << offsetMHz << std::endl;
+        m_resetRequiredCache[deviceIndex] = true;
+        return false;
+      }
+
+      if ( isExpectedOcWriteRejection( ret ) )
+        return offsetMHz == 0;
+
+      std::cerr << "[NvmlWrapper] setClockOffset (ClockOffsets API) failed for type=" << clockType
+                << " pstate=" << pstate << " offset=" << offsetMHz
+                << " error=" << ret << std::endl;
+      // Fall through to VfOffset fallback.
     }
-
-    if ( isExpectedOcWriteRejection( ret ) )
-      return offsetMHz == 0;
-
-    std::cerr << "[NvmlWrapper] setClockOffset (ClockOffsets API) failed for type=" << clockType
-              << " pstate=" << pstate << " offset=" << offsetMHz
-              << " error=" << ret << std::endl;
-    return false;
   }
 
   // Fallback: VfOffset APIs (global, not per-pstate — only P0 meaningful)

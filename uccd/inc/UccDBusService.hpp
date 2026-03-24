@@ -424,8 +424,11 @@ public slots:
   bool ResetNvidiaGpuOCAll( int deviceIndex );
 
   // NVIDIA Auto-OC methods
-  bool StartAutoOC( const QString &component, int deviceIndex );
-  bool ResumeAutoOC( const QString &mode, const QString &component, int deviceIndex );
+  bool StartAutoOC( const QString &component, int deviceIndex,
+                    int stepSizeMHz, int maxOffsetMHz, int stabilityMs );
+  bool ResumeAutoOC( const QString &mode, const QString &component, int deviceIndex,
+                     int stepSizeMHz, int maxOffsetMHz, int stabilityMs );
+  bool PauseAutoOC();
   bool StopAutoOC();
   bool GetAutoOCRunning();
   QString GetAutoOCProgress();
@@ -434,10 +437,13 @@ public slots:
 
   // NVIDIA Auto-Undervolt methods
   bool StartAutoUndervolt( int deviceIndex, bool targetFpsEnabled, int targetFps,
-                           bool extendedValidation, bool powerLimitMode );
+                           bool extendedValidation, bool powerLimitMode,
+                           int stepSizeMHz, int maxOffsetMHz, int stabilityMs );
   bool ResumeAutoUndervolt( const QString &mode, int deviceIndex,
                             bool targetFpsEnabled, int targetFps,
-                            bool extendedValidation, bool powerLimitMode );
+                            bool extendedValidation, bool powerLimitMode,
+                            int stepSizeMHz, int maxOffsetMHz, int stabilityMs );
+  bool PauseAutoUndervolt();
   bool StopAutoUndervolt();
   bool GetAutoUndervoltRunning();
   QString GetAutoUndervoltProgress();

@@ -144,6 +144,7 @@ bool AutoOCWorker::start( AutoOCComponent component,
   m_component    = component;
   m_deviceIndex  = deviceIndex;
   m_stopRequested = false;
+  m_pauseRequested = false;
   m_finalCoreOffset = 0;
   m_finalVramOffset = 0;
 
@@ -175,6 +176,14 @@ void AutoOCWorker::stop()
     return;
   m_stopRequested = true;
   log( "AutoOC: stop requested" );
+}
+
+void AutoOCWorker::pause()
+{
+  if ( !isRunning() )
+    return;
+  m_pauseRequested = true;
+  log( "AutoOC: pause requested" );
 }
 
 bool AutoOCWorker::isRunning() const
@@ -413,6 +422,30 @@ void AutoOCWorker::enterCrashSuspend( const std::string &msg )
   emit finished( result );
 }
 
+void AutoOCWorker::enterPauseSuspend()
+{
+  m_pollTimer->stop();
+
+  log( "AutoOC: paused by user" );
+  saveCheckpoint( true, "paused_by_user" );
+
+  // Restore GPU to safe defaults but keep checkpoint for resume.
+  resetOffset();
+  if ( m_fpsServer ) m_fpsServer->stop();
+
+  AutoOCResult result;
+  result.coreOffsetMHz = 0;
+  result.vramOffsetMHz = 0;
+  result.success = false;
+  result.message = "Suspended: Paused by user. Progress has been saved — click Resume to continue.";
+
+  m_phase = AutoOCPhase::Done;
+
+  emitProgress( result.message );
+  OverlayShmWriter::instance().setInactive();
+  emit finished( result );
+}
+
 void AutoOCWorker::enterDone( bool success, const std::string &msg )
 {
   m_pollTimer->stop();
@@ -455,6 +488,12 @@ void AutoOCWorker::onPollTick()
 {
   // Drain any pending FPS data from the layer socket.
   if ( m_fpsServer ) m_fpsServer->poll();
+
+  if ( m_pauseRequested )
+  {
+    enterPauseSuspend();
+    return;
+  }
 
   if ( m_stopRequested )
   {
@@ -1235,7 +1274,11 @@ void AutoOCWorker::resetOffset()
 // ─────────────────────────────────────────────────────────────────────────────
 
 int AutoOCWorker::maxOffsetForComponent() const
-{ return ( m_activeClk == AutoOCComponent::Vram ) ? NvmlOffsetCaps::VRAM_MAX_OFFSET : NvmlOffsetCaps::GPU_MAX_OFFSET; }
+{
+  if ( m_activeClk == AutoOCComponent::Vram )
+    return ( m_config.maxVramOffsetMHz > 0 ) ? m_config.maxVramOffsetMHz : NvmlOffsetCaps::VRAM_MAX_OFFSET;
+  return ( m_config.maxGpuOffsetMHz > 0 ) ? m_config.maxGpuOffsetMHz : NvmlOffsetCaps::GPU_MAX_OFFSET;
+}
 
 int AutoOCWorker::safetyMarginForComponent() const
 { return ( m_activeClk == AutoOCComponent::Vram ) ? m_config.safetyMarginVramMHz : m_config.safetyMarginCoreMHz; }

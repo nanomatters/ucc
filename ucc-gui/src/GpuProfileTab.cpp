@@ -43,6 +43,11 @@
 namespace ucc
 {
 
+// Local phase enums — mirror the daemon's phase strings for progress display.
+enum class OCPhase  { Idle, Baseline, Searching, Validating, Done };
+enum class UVPhase  { Idle, Baseline, CapReduction, Searching,
+                      Validating, PowerLimitSweep, Done };
+
 GpuProfileTab::GpuProfileTab( UccdClient *client,
                                 ProfileManager *profileManager,
                                 QWidget *parent )
@@ -1200,6 +1205,7 @@ void GpuProfileTab::showAutoOCDialog()
   componentCombo->addItem( "Core + VRAM", "both" );
   componentCombo->addItem( "Core only", "core" );
   componentCombo->addItem( "VRAM only", "vram" );
+  componentCombo->setToolTip( "Choose which clock domain(s) to tune during auto overclock" );
   selectRow->addWidget( componentCombo, 1 );
   layout->addLayout( selectRow );
 
@@ -1208,6 +1214,7 @@ void GpuProfileTab::showAutoOCDialog()
     "<b>Note:</b> Run a GPU-intensive workload (game, benchmark, compute) "
     "during the scan for accurate results." );
   infoLabel->setWordWrap( true );
+  infoLabel->setToolTip( "Auto overclock requires sustained GPU load and FPS telemetry" );
   layout->addWidget( infoLabel );
 
   // ── Progress section ──
@@ -1216,6 +1223,7 @@ void GpuProfileTab::showAutoOCDialog()
   progressBar->setValue( 0 );
   progressBar->setTextVisible( true );
   progressBar->setFormat( "Idle" );
+  progressBar->setToolTip( "Shows scan progress for baseline, search, and validation phases" );
   layout->addWidget( progressBar );
 
   // ── Metrics grid ──
@@ -1259,6 +1267,7 @@ void GpuProfileTab::showAutoOCDialog()
   // ── Status label ──
   QLabel *statusLabel = new QLabel( "Ready to start." );
   statusLabel->setWordWrap( true );
+  statusLabel->setToolTip( "Live status messages from the daemon" );
   layout->addWidget( statusLabel );
 
   if ( auto ocProgress = m_uccdClient->getAutoOCProgress(); ocProgress.has_value() )
@@ -1275,18 +1284,80 @@ void GpuProfileTab::showAutoOCDialog()
     }
   }
 
+  // ── Advanced settings ──
+  QGridLayout *advGrid = new QGridLayout();
+  advGrid->setHorizontalSpacing( 12 );
+
+  advGrid->addWidget( new QLabel( "Step size:" ), 0, 0 );
+  QSpinBox *stepSizeSpin = new QSpinBox();
+  stepSizeSpin->setRange( 1, 100 );
+  stepSizeSpin->setValue( 5 );
+  stepSizeSpin->setSuffix( " MHz" );
+  stepSizeSpin->setToolTip( "Binary search granularity (resolution)" );
+  advGrid->addWidget( stepSizeSpin, 0, 1 );
+
+  advGrid->addWidget( new QLabel( "Max offset:" ), 0, 2 );
+  QSpinBox *maxOffsetSpin = new QSpinBox();
+  maxOffsetSpin->setRange( 10, 2000 );
+  maxOffsetSpin->setValue( 700 );
+  maxOffsetSpin->setSuffix( " MHz" );
+  maxOffsetSpin->setToolTip( "Upper limit for the offset search" );
+  advGrid->addWidget( maxOffsetSpin, 0, 3 );
+
+  advGrid->addWidget( new QLabel( "Stability period:" ), 1, 0 );
+  QSpinBox *stabilitySpin = new QSpinBox();
+  stabilitySpin->setRange( 1, 120 );
+  stabilitySpin->setValue( 15 );
+  stabilitySpin->setSuffix( " s" );
+  stabilitySpin->setSingleStep( 1 );
+  stabilitySpin->setToolTip( "Per-step stability test duration in seconds" );
+  advGrid->addWidget( stabilitySpin, 1, 1 );
+
+  layout->addLayout( advGrid );
+
+  // Load saved OC advanced settings from uccrc
+  {
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    stepSizeSpin->setValue( settings.value( "gpu/ocStepSizeMHz", 5 ).toInt() );
+    maxOffsetSpin->setValue( settings.value( "gpu/ocMaxOffsetMHz", 700 ).toInt() );
+    const int stabilitySec = settings.contains( "gpu/ocStabilitySec" )
+                           ? settings.value( "gpu/ocStabilitySec", 15 ).toInt()
+                           : ( settings.value( "gpu/ocStabilityMs", 15000 ).toInt() / 1000 );
+    stabilitySpin->setValue( stabilitySec > 0 ? stabilitySec : 15 );
+  }
+
+  auto saveOCAdvanced = [stepSizeSpin, maxOffsetSpin, stabilitySpin]() {
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    settings.setValue( "gpu/ocStepSizeMHz", stepSizeSpin->value() );
+    settings.setValue( "gpu/ocMaxOffsetMHz", maxOffsetSpin->value() );
+    settings.setValue( "gpu/ocStabilitySec", stabilitySpin->value() );
+    settings.setValue( "gpu/ocStabilityMs", stabilitySpin->value() * 1000 );
+    settings.sync();
+  };
+  connect( stepSizeSpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveOCAdvanced );
+  connect( maxOffsetSpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveOCAdvanced );
+  connect( stabilitySpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveOCAdvanced );
+
   // ── Buttons ──
   const bool ocHasCheckpoint = m_uccdClient->hasAutoOCCheckpoint();
   QHBoxLayout *btnRow = new QHBoxLayout();
   QPushButton *startBtn = new QPushButton( "Start" );
   QPushButton *resumeBtn = new QPushButton( "Resume" );
+  QPushButton *pauseBtn = new QPushButton( "Pause" );
   QPushButton *stopBtn = new QPushButton( "Stop" );
   QPushButton *closeBtn = new QPushButton( "Close" );
+  startBtn->setToolTip( "Start a new overclock scan with the current settings" );
+  resumeBtn->setToolTip( "Resume from a saved checkpoint" );
+  pauseBtn->setToolTip( "Pause scan and save progress for resume" );
+  stopBtn->setToolTip( "Request a safe stop after the current step" );
+  closeBtn->setToolTip( "Close this dialog" );
+  pauseBtn->setEnabled( false );
   stopBtn->setEnabled( false );
   resumeBtn->setEnabled( ocHasCheckpoint );
   btnRow->addStretch();
   btnRow->addWidget( startBtn );
   btnRow->addWidget( resumeBtn );
+  btnRow->addWidget( pauseBtn );
   btnRow->addWidget( stopBtn );
   btnRow->addWidget( closeBtn );
   layout->addLayout( btnRow );
@@ -1303,15 +1374,14 @@ void GpuProfileTab::showAutoOCDialog()
 
       // Phase name (daemon sends string: "idle","baseline","searching","validating","done")
       QString phaseStr = obj["phase"].toString( "idle" );
-      int phase = 0; // idle
-      if ( phaseStr == "baseline" )        phase = 1;
-      else if ( phaseStr == "searching" )  phase = 2;
-      else if ( phaseStr == "validating" ) phase = 3;
-      else if ( phaseStr == "done" )       phase = 4;
+      auto phase = ( phaseStr == "baseline" )   ? OCPhase::Baseline
+                  : ( phaseStr == "searching" )  ? OCPhase::Searching
+                  : ( phaseStr == "validating" ) ? OCPhase::Validating
+                  : ( phaseStr == "done" )       ? OCPhase::Done
+                                                  : OCPhase::Idle;
 
       static const char *phaseNames[] = { "Idle", "Baseline", "Searching", "Validating", "Done" };
-      if ( phase >= 0 && phase <= 4 )
-        phaseValueLabel->setText( phaseNames[phase] );
+      phaseValueLabel->setText( phaseNames[static_cast< int >( phase )] );
 
       // Component (daemon sends string: "core" or "vram")
       QString compStr = obj["component"].toString( "core" );
@@ -1349,18 +1419,18 @@ void GpuProfileTab::showAutoOCDialog()
       // Progress bar
       int iter = obj["iteration"].toInt( 0 );
       int maxIter = obj["maxIterations"].toInt( 1 );
-      if ( phase == 1 ) // Baseline
+      if ( phase == OCPhase::Baseline )
       {
-        progressBar->setRange( 0, 0 ); // indeterminate
+        progressBar->setRange( 0, 0 );
         progressBar->setFormat( "Baseline..." );
       }
-      else if ( phase == 2 ) // Searching
+      else if ( phase == OCPhase::Searching )
       {
         progressBar->setRange( 0, maxIter );
         progressBar->setValue( iter );
         progressBar->setFormat( compName + " — step %v/%m" );
       }
-      else if ( phase == 3 ) // Validating
+      else if ( phase == OCPhase::Validating )
       {
         progressBar->setRange( 0, 100 );
         progressBar->setValue( 100 );
@@ -1375,9 +1445,10 @@ void GpuProfileTab::showAutoOCDialog()
 
   QMetaObject::Connection finishedConn = connect(
     m_uccdClient, &UccdClient::autoOCFinished,
-    dlg, [this, startBtn, resumeBtn, stopBtn, componentCombo, progressBar, coreValueLabel, vramValueLabel, statusLabel, dlg]( int coreOff, int vramOff, bool success, const QString &message )
+    dlg, [this, startBtn, resumeBtn, pauseBtn, stopBtn, componentCombo, progressBar, coreValueLabel, vramValueLabel, statusLabel, dlg]( int coreOff, int vramOff, bool success, const QString &message )
     {
       startBtn->setEnabled( true );
+      pauseBtn->setEnabled( false );
       stopBtn->setEnabled( false );
       componentCombo->setEnabled( true );
 
@@ -1422,13 +1493,15 @@ void GpuProfileTab::showAutoOCDialog()
   } );
 
   // ── Button handlers ──
-  auto launchOC = [this, componentCombo, startBtn, resumeBtn, stopBtn, statusLabel, coreValueLabel, vramValueLabel, progressBar]() {
+  auto launchOC = [this, componentCombo, startBtn, resumeBtn, pauseBtn, stopBtn, statusLabel, coreValueLabel, vramValueLabel, progressBar, stepSizeSpin, maxOffsetSpin, stabilitySpin]() {
     QString comp = componentCombo->currentData().toString();
-    bool ok = m_uccdClient->startAutoOC( comp.toStdString(), 0 );
+    bool ok = m_uccdClient->startAutoOC( comp.toStdString(), 0,
+      stepSizeSpin->value(), maxOffsetSpin->value(), stabilitySpin->value() * 1000 );
     if ( ok )
     {
       startBtn->setEnabled( false );
       resumeBtn->setEnabled( false );
+      pauseBtn->setEnabled( true );
       stopBtn->setEnabled( true );
       componentCombo->setEnabled( false );
       statusLabel->setText( "Starting auto overclock scan..." );
@@ -1444,27 +1517,38 @@ void GpuProfileTab::showAutoOCDialog()
     }
   };
 
-  connect( startBtn, &QPushButton::clicked, dlg, [this, dlg, launchOC]() {
+  connect( startBtn, &QPushButton::clicked, dlg, [this, dlg, launchOC](){
     if ( m_uccdClient->hasAutoOCCheckpoint() )
     {
       auto reply = QMessageBox::question( dlg, "Start New Overclock Scan",
         "A suspended overclock process exists. Starting a new scan will discard "
         "the saved progress.\n\nAre you sure you want to start from scratch?",
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
-      if ( reply != QMessageBox::Yes )
+
+      if ( reply == QMessageBox::No )
         return;
+
       m_uccdClient->clearAutoOCCheckpoint();
     }
+
     launchOC();
   } );
 
   connect( resumeBtn, &QPushButton::clicked, dlg,
-    [this, dlg, componentCombo, startBtn, resumeBtn, stopBtn, statusLabel,
-     coreValueLabel, vramValueLabel, progressBar]()
+    [this, dlg, componentCombo, startBtn, resumeBtn, pauseBtn, stopBtn, statusLabel,
+     coreValueLabel, vramValueLabel, progressBar, stepSizeSpin, maxOffsetSpin, stabilitySpin]()
     {
-      handleResumeAutoOC( dlg, componentCombo, startBtn, resumeBtn, stopBtn,
-                          statusLabel, coreValueLabel, vramValueLabel, progressBar );
+      handleResumeAutoOC( dlg, componentCombo, startBtn, resumeBtn, pauseBtn, stopBtn,
+                          statusLabel, coreValueLabel, vramValueLabel, progressBar,
+                          stepSizeSpin, maxOffsetSpin, stabilitySpin );
     } );
+
+  connect( pauseBtn, &QPushButton::clicked, dlg, [this, pauseBtn, stopBtn, statusLabel]() {
+    m_uccdClient->pauseAutoOC();
+    pauseBtn->setEnabled( false );
+    stopBtn->setEnabled( false );
+    statusLabel->setText( "Pause requested..." );
+  } );
 
   connect( stopBtn, &QPushButton::clicked, dlg, [this, stopBtn, statusLabel]() {
     m_uccdClient->stopAutoOC();
@@ -1480,7 +1564,7 @@ void GpuProfileTab::showAutoOCDialog()
 void GpuProfileTab::showAutoUndervoltDialog()
 {
   // Check if already running
-  if ( auto running = m_uccdClient->getAutoUndervoltRunning(); running && *running )
+  if ( m_uccdClient->getAutoUndervoltRunning())
   {
     QMessageBox::information( this, "Auto Undervolt",
       "An auto undervolt scan is already in progress." );
@@ -1505,6 +1589,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
     "process (FPS data must be streaming).<br><br>"
     "The result is stored per-application based on the process name." );
   infoLabel->setWordWrap( true );
+  infoLabel->setToolTip( "Run your game/benchmark with FPS layer enabled before starting" );
   layout->addWidget( infoLabel );
 
   // ── Progress section ──
@@ -1513,6 +1598,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
   progressBar->setValue( 0 );
   progressBar->setTextVisible( true );
   progressBar->setFormat( "Idle" );
+  progressBar->setToolTip( "Shows baseline, search, and validation progress" );
   layout->addWidget( progressBar );
 
   // ── Metrics grid ──
@@ -1567,6 +1653,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
   // ── Status label ──
   QLabel *statusLabel = new QLabel( "Ready — start a GPU workload and click Start." );
   statusLabel->setWordWrap( true );
+  statusLabel->setToolTip( "Live status messages from the daemon" );
   layout->addWidget( statusLabel );
 
   if ( auto uvProgress = m_uccdClient->getAutoUndervoltProgress(); uvProgress.has_value() )
@@ -1584,43 +1671,39 @@ void GpuProfileTab::showAutoUndervoltDialog()
   }
 
   // ── Target FPS controls ──
-  QHBoxLayout *targetFpsRow = new QHBoxLayout();
-  QCheckBox *targetFpsCheck = new QCheckBox( "Target frame rate" );
+  QCheckBox *targetFpsCheck = new QCheckBox( "Target FPS" );
   QSpinBox *targetFpsSpin = new QSpinBox();
   targetFpsSpin->setRange( 10, 999 );
   targetFpsSpin->setSuffix( " FPS" );
   targetFpsSpin->setEnabled( false );
-  targetFpsRow->addWidget( targetFpsCheck );
-  targetFpsRow->addWidget( targetFpsSpin );
-  targetFpsRow->addStretch();
-  layout->addLayout( targetFpsRow );
+  targetFpsCheck->setToolTip( "Reduce clocks until FPS reaches this target" );
+  targetFpsSpin->setToolTip( "Desired FPS threshold used by target mode" );
 
   // Load saved target FPS settings from uccrc
-  {
-    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-    targetFpsCheck->setChecked( settings.value( "gpu/undervoltTargetFpsEnabled", false ).toBool() );
-    targetFpsSpin->setValue( settings.value( "gpu/undervoltTargetFps", 60 ).toInt() );
-    targetFpsSpin->setEnabled( targetFpsCheck->isChecked() );
-  }
+  QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+  targetFpsCheck->setChecked( settings.value( "gpu/undervoltTargetFpsEnabled", false ).toBool() );
+  targetFpsSpin->setValue( settings.value( "gpu/undervoltTargetFps", 60 ).toInt() );
+  targetFpsSpin->setEnabled( targetFpsCheck->isChecked() );
 
   connect( targetFpsCheck, &QCheckBox::toggled, dlg, [targetFpsSpin]( bool checked ) {
     targetFpsSpin->setEnabled( checked );
   } );
 
   // ── Extended validation checkbox ──
-  QCheckBox *extendedValCheck = new QCheckBox( "Extended validation (5 min)" );
-  layout->addWidget( extendedValCheck );
-
-  // ── Power limit mode checkbox ──
+  QCheckBox *extendedValCheck = new QCheckBox( "Extended validation" );
   QCheckBox *powerLimitCheck = new QCheckBox( "Power limit mode" );
-  layout->addWidget( powerLimitCheck );
+  extendedValCheck->setToolTip( "Run a longer final stability validation pass" );
+  powerLimitCheck->setToolTip( "Use power-limit sweep instead of core-offset sweep" );
+  QHBoxLayout *modeRow = new QHBoxLayout();
+  modeRow->addWidget( targetFpsCheck );
+  modeRow->addWidget( targetFpsSpin );
+  modeRow->addWidget( extendedValCheck );
+  modeRow->addWidget( powerLimitCheck );
+  layout->addLayout( modeRow );
 
   // Load advanced settings from uccrc
-  {
-    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
-    extendedValCheck->setChecked( settings.value( "gpu/undervoltExtendedValidation", false ).toBool() );
-    powerLimitCheck->setChecked( settings.value( "gpu/undervoltPowerLimitMode", false ).toBool() );
-  }
+  extendedValCheck->setChecked( settings.value( "gpu/undervoltExtendedValidation", false ).toBool() );
+  powerLimitCheck->setChecked( settings.value( "gpu/undervoltPowerLimitMode", false ).toBool() );
 
   // Save target FPS settings when changed
   auto saveTargetFps = [targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]() {
@@ -1631,23 +1714,84 @@ void GpuProfileTab::showAutoUndervoltDialog()
     settings.setValue( "gpu/undervoltPowerLimitMode", powerLimitCheck->isChecked() );
     settings.sync();
   };
+
   connect( targetFpsCheck, &QCheckBox::toggled, dlg, saveTargetFps );
   connect( targetFpsSpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveTargetFps );
   connect( extendedValCheck, &QCheckBox::toggled, dlg, saveTargetFps );
   connect( powerLimitCheck, &QCheckBox::toggled, dlg, saveTargetFps );
+
+  // ── Advanced settings ──
+  QGridLayout *uvAdvGrid = new QGridLayout();
+  uvAdvGrid->setHorizontalSpacing( 12 );
+
+  uvAdvGrid->addWidget( new QLabel( "Offset step:" ), 0, 0 );
+  QSpinBox *stepSizeSpin = new QSpinBox();
+  stepSizeSpin->setRange( 1, 200 );
+  stepSizeSpin->setValue( 25 );
+  stepSizeSpin->setSuffix( " MHz" );
+  stepSizeSpin->setToolTip( "Core-offset search granularity" );
+  uvAdvGrid->addWidget( stepSizeSpin, 0, 1 );
+
+  uvAdvGrid->addWidget( new QLabel( "Max offset:" ), 0, 2 );
+  QSpinBox *maxOffsetSpin = new QSpinBox();
+  maxOffsetSpin->setRange( 10, 1000 );
+  maxOffsetSpin->setValue( 500 );
+  maxOffsetSpin->setSuffix( " MHz" );
+  maxOffsetSpin->setToolTip( "Upper limit for the core-offset search" );
+  uvAdvGrid->addWidget( maxOffsetSpin, 0, 3 );
+
+  uvAdvGrid->addWidget( new QLabel( "Stability period:" ), 0, 4 );
+  QSpinBox *stabilitySpin = new QSpinBox();
+  stabilitySpin->setRange( 1, 120 );
+  stabilitySpin->setValue( 20 );
+  stabilitySpin->setSuffix( " s" );
+  stabilitySpin->setSingleStep( 1 );
+  stabilitySpin->setToolTip( "Per-step stability test duration in seconds" );
+  uvAdvGrid->addWidget( stabilitySpin, 0, 5 );
+
+  layout->addLayout( uvAdvGrid );
+
+  // Load saved UV advanced settings from uccrc
+  stepSizeSpin->setValue( settings.value( "gpu/uvStepSizeMHz", 25 ).toInt() );
+  maxOffsetSpin->setValue( settings.value( "gpu/uvMaxOffsetMHz", 500 ).toInt() );
+  const int stabilitySec = settings.contains( "gpu/uvStabilitySec" )
+                          ? settings.value( "gpu/uvStabilitySec", 20 ).toInt()
+                          : ( settings.value( "gpu/uvStabilityMs", 20000 ).toInt() / 1000 );
+  stabilitySpin->setValue( stabilitySec > 0 ? stabilitySec : 20 );
+
+  auto saveUVAdvanced = [stepSizeSpin, maxOffsetSpin, stabilitySpin]() {
+    QSettings settings( QDir::homePath() + "/.config/uccrc", QSettings::IniFormat );
+    settings.setValue( "gpu/uvStepSizeMHz", stepSizeSpin->value() );
+    settings.setValue( "gpu/uvMaxOffsetMHz", maxOffsetSpin->value() );
+    settings.setValue( "gpu/uvStabilitySec", stabilitySpin->value() );
+    settings.setValue( "gpu/uvStabilityMs", stabilitySpin->value() * 1000 );
+    settings.sync();
+  };
+
+  connect( stepSizeSpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveUVAdvanced );
+  connect( maxOffsetSpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveUVAdvanced );
+  connect( stabilitySpin, QOverload< int >::of( &QSpinBox::valueChanged ), dlg, saveUVAdvanced );
 
   // ── Buttons ──
   const bool uvHasCheckpoint = m_uccdClient->hasAutoUndervoltCheckpoint();
   QHBoxLayout *btnRow = new QHBoxLayout();
   QPushButton *startBtn = new QPushButton( "Start" );
   QPushButton *resumeBtn = new QPushButton( "Resume" );
+  QPushButton *pauseBtn = new QPushButton( "Pause" );
   QPushButton *stopBtn = new QPushButton( "Stop" );
   QPushButton *closeBtn = new QPushButton( "Close" );
+  startBtn->setToolTip( "Start a new undervolt scan for the current app" );
+  resumeBtn->setToolTip( "Resume from a saved checkpoint" );
+  pauseBtn->setToolTip( "Pause scan and save progress for resume" );
+  stopBtn->setToolTip( "Request a safe stop after the current step" );
+  closeBtn->setToolTip( "Close this dialog" );
+  pauseBtn->setEnabled( false );
   stopBtn->setEnabled( false );
   resumeBtn->setEnabled( uvHasCheckpoint );
   btnRow->addStretch();
   btnRow->addWidget( startBtn );
   btnRow->addWidget( resumeBtn );
+  btnRow->addWidget( pauseBtn );
   btnRow->addWidget( stopBtn );
   btnRow->addWidget( closeBtn );
   layout->addLayout( btnRow );
@@ -1663,19 +1807,18 @@ void GpuProfileTab::showAutoUndervoltDialog()
       QJsonObject obj = doc.object();
 
       QString phaseStr = obj["phase"].toString( "idle" );
-      int phase = 0;
-      if ( phaseStr == "baseline" )           phase = 1;
-      else if ( phaseStr == "capReduction" )  phase = 2;
-      else if ( phaseStr == "searching" )     phase = 3;
-      else if ( phaseStr == "validating" )    phase = 4;
-      else if ( phaseStr == "powerLimitSweep" ) phase = 5;
-      else if ( phaseStr == "done" )          phase = 6;
+      auto phase = ( phaseStr == "baseline" )         ? UVPhase::Baseline
+                  : ( phaseStr == "capReduction" )    ? UVPhase::CapReduction
+                  : ( phaseStr == "searching" )       ? UVPhase::Searching
+                  : ( phaseStr == "validating" )      ? UVPhase::Validating
+                  : ( phaseStr == "powerLimitSweep" ) ? UVPhase::PowerLimitSweep
+                  : ( phaseStr == "done" )            ? UVPhase::Done
+                                                        : UVPhase::Idle;
 
       static const char *phaseNames[] = {
         "Idle", "Baseline", "Cap Reduction", "Searching", "Validating",
         "Power Limit Sweep", "Done" };
-      if ( phase >= 0 && phase <= 6 )
-        phaseValueLabel->setText( phaseNames[phase] );
+      phaseValueLabel->setText( phaseNames[static_cast< int >( phase )] );
 
       QString app = obj["app"].toString();
       if ( !app.isEmpty() )
@@ -1684,12 +1827,11 @@ void GpuProfileTab::showAutoUndervoltDialog()
       int currentCap = obj["currentCapMHz"].toInt( 0 );
       int bestCap = obj["bestCapMHz"].toInt( 0 );
       int plW = obj["currentPowerLimitW"].toInt( 0 );
-      if ( plW > 0 && currentCap > 0 )
-        capValueLabel->setText( QString( "%1 MHz (best: %2) / %3 W" ).arg( currentCap ).arg( bestCap ).arg( plW ) );
-      else if ( plW > 0 )
-        capValueLabel->setText( QString( "%1 W (power limit)" ).arg( plW ) );
-      else if ( currentCap > 0 )
-        capValueLabel->setText( QString( "%1 MHz (best: %2)" ).arg( currentCap ).arg( bestCap ) );
+      capValueLabel->setText(
+        ( plW > 0 && currentCap > 0 ) ? QString( "%1 MHz (best: %2) / %3 W" ).arg( currentCap ).arg( bestCap ).arg( plW )
+        : ( plW > 0 )                  ? QString( "%1 W (power limit)" ).arg( plW )
+        : ( currentCap > 0 )            ? QString( "%1 MHz (best: %2)" ).arg( currentCap ).arg( bestCap )
+                                        : capValueLabel->text() );
 
       int tempC = obj["temp"].toInt( 0 );
       int gpuClk = obj["gpuClock"].toInt( 0 );
@@ -1722,29 +1864,29 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
       int iter = obj["iteration"].toInt( 0 );
       int maxIter = obj["maxIterations"].toInt( 1 );
-      if ( phase == 1 )
+      if ( phase == UVPhase::Baseline )
       {
         progressBar->setRange( 0, 0 );
         progressBar->setFormat( "Baseline..." );
       }
-      else if ( phase == 2 )
+      else if ( phase == UVPhase::CapReduction )
       {
         progressBar->setRange( 0, 0 );
         progressBar->setFormat( "Cap Reduction..." );
       }
-      else if ( phase == 3 )
+      else if ( phase == UVPhase::Searching )
       {
         progressBar->setRange( 0, maxIter );
         progressBar->setValue( iter );
         progressBar->setFormat( "Searching — step %v/%m" );
       }
-      else if ( phase == 4 )
+      else if ( phase == UVPhase::Validating )
       {
         progressBar->setRange( 0, 100 );
         progressBar->setValue( 100 );
         progressBar->setFormat( "Validating..." );
       }
-      else if ( phase == 5 )
+      else if ( phase == UVPhase::PowerLimitSweep )
       {
         progressBar->setRange( 0, maxIter );
         progressBar->setValue( iter );
@@ -1758,10 +1900,11 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
   QMetaObject::Connection finishedConn = connect(
     m_uccdClient, &UccdClient::autoUndervoltFinished,
-    dlg, [this, startBtn, resumeBtn, stopBtn, progressBar, capValueLabel, statusLabel, dlg](
+    dlg, [this, startBtn, resumeBtn, pauseBtn, stopBtn, progressBar, capValueLabel, statusLabel, dlg](
       int gpuFreqCapMHz, bool success, const QString &message, const QString &appName )
     {
       startBtn->setEnabled( true );
+      pauseBtn->setEnabled( false );
       stopBtn->setEnabled( false );
 
       const bool suspended = message.startsWith( QStringLiteral( "Suspended:" ) );
@@ -1807,16 +1950,19 @@ void GpuProfileTab::showAutoUndervoltDialog()
   } );
 
   // ── Button handlers ──
-  auto launchUV = [this, startBtn, resumeBtn, stopBtn, statusLabel, capValueLabel, progressBar,
-     targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]()
+  auto launchUV = [this, startBtn, resumeBtn, pauseBtn, stopBtn, statusLabel, capValueLabel, progressBar,
+     targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck,
+     stepSizeSpin, maxOffsetSpin, stabilitySpin]()
     {
       bool ok = m_uccdClient->startAutoUndervolt(
         0, targetFpsCheck->isChecked(), targetFpsSpin->value(),
-        extendedValCheck->isChecked(), powerLimitCheck->isChecked() );
+        extendedValCheck->isChecked(), powerLimitCheck->isChecked(),
+        stepSizeSpin->value(), maxOffsetSpin->value(), stabilitySpin->value() * 1000 );
       if ( ok )
       {
         startBtn->setEnabled( false );
         resumeBtn->setEnabled( false );
+        pauseBtn->setEnabled( true );
         stopBtn->setEnabled( true );
         statusLabel->setText( "Starting auto undervolt scan..." );
         capValueLabel->setText( "—" );
@@ -1848,14 +1994,23 @@ void GpuProfileTab::showAutoUndervoltDialog()
     } );
 
   connect( resumeBtn, &QPushButton::clicked, dlg,
-    [this, dlg, startBtn, resumeBtn, stopBtn, statusLabel, capValueLabel, progressBar,
-     targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck]()
+    [this, dlg, startBtn, resumeBtn, pauseBtn, stopBtn, statusLabel, capValueLabel, progressBar,
+     targetFpsCheck, targetFpsSpin, extendedValCheck, powerLimitCheck,
+     stepSizeSpin, maxOffsetSpin, stabilitySpin]()
     {
-      handleResumeAutoUV( dlg, startBtn, resumeBtn, stopBtn, statusLabel,
+      handleResumeAutoUV( dlg, startBtn, resumeBtn, pauseBtn, stopBtn, statusLabel,
                           capValueLabel, progressBar,
                           targetFpsCheck, targetFpsSpin,
-                          extendedValCheck, powerLimitCheck );
+                          extendedValCheck, powerLimitCheck,
+                          stepSizeSpin, maxOffsetSpin, stabilitySpin );
     } );
+
+  connect( pauseBtn, &QPushButton::clicked, dlg, [this, pauseBtn, stopBtn, statusLabel]() {
+    m_uccdClient->pauseAutoUndervolt();
+    pauseBtn->setEnabled( false );
+    stopBtn->setEnabled( false );
+    statusLabel->setText( "Pause requested..." );
+  } );
 
   connect( stopBtn, &QPushButton::clicked, dlg, [this, stopBtn, statusLabel]() {
     m_uccdClient->stopAutoUndervolt();
@@ -1892,9 +2047,12 @@ std::string GpuProfileTab::askResumeMode( QWidget *parent, const QString &title,
 
 void GpuProfileTab::handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
                                         QPushButton *startBtn, QPushButton *resumeBtn,
-                                        QPushButton *stopBtn, QLabel *statusLabel,
+                                        QPushButton *pauseBtn, QPushButton *stopBtn,
+                                        QLabel *statusLabel,
                                         QLabel *coreValueLabel, QLabel *vramValueLabel,
-                                        QProgressBar *progressBar )
+                                        QProgressBar *progressBar,
+                                        QSpinBox *stepSizeSpin, QSpinBox *maxOffsetSpin,
+                                        QSpinBox *stabilitySpin )
 {
   // Determine resume mode from checkpoint's suspendReason
   QString suspendReason;
@@ -1925,10 +2083,12 @@ void GpuProfileTab::handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
   }
 
   QString comp = componentCombo->currentData().toString();
-  if ( m_uccdClient->resumeAutoOC( resumeMode, comp.toStdString(), 0 ) )
+  if ( m_uccdClient->resumeAutoOC( resumeMode, comp.toStdString(), 0,
+      stepSizeSpin->value(), maxOffsetSpin->value(), stabilitySpin->value() * 1000 ) )
   {
     startBtn->setEnabled( false );
     resumeBtn->setEnabled( false );
+    pauseBtn->setEnabled( true );
     stopBtn->setEnabled( true );
     componentCombo->setEnabled( false );
     statusLabel->setText( "Resuming auto overclock scan..." );
@@ -1945,10 +2105,13 @@ void GpuProfileTab::handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
 
 void GpuProfileTab::handleResumeAutoUV( QDialog *dlg,
                                         QPushButton *startBtn, QPushButton *resumeBtn,
-                                        QPushButton *stopBtn, QLabel *statusLabel,
+                                        QPushButton *pauseBtn, QPushButton *stopBtn,
+                                        QLabel *statusLabel,
                                         QLabel *capValueLabel, QProgressBar *progressBar,
                                         QCheckBox *targetFpsCheck, QSpinBox *targetFpsSpin,
-                                        QCheckBox *extendedValCheck, QCheckBox *powerLimitCheck )
+                                        QCheckBox *extendedValCheck, QCheckBox *powerLimitCheck,
+                                        QSpinBox *stepSizeSpin, QSpinBox *maxOffsetSpin,
+                                        QSpinBox *stabilitySpin )
 {
   // Read checkpoint metadata
   QString expectedApp;
@@ -1996,10 +2159,12 @@ void GpuProfileTab::handleResumeAutoUV( QDialog *dlg,
 
   if ( m_uccdClient->resumeAutoUndervolt(
          resumeMode, 0, targetFpsCheck->isChecked(), targetFpsSpin->value(),
-         extendedValCheck->isChecked(), powerLimitCheck->isChecked() ) )
+         extendedValCheck->isChecked(), powerLimitCheck->isChecked(),
+      stepSizeSpin->value(), maxOffsetSpin->value(), stabilitySpin->value() * 1000 ) )
   {
     startBtn->setEnabled( false );
     resumeBtn->setEnabled( false );
+    pauseBtn->setEnabled( true );
     stopBtn->setEnabled( true );
     statusLabel->setText( "Resuming auto undervolt scan..." );
     capValueLabel->setText( "\u2014" );

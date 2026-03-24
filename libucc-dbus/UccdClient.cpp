@@ -959,18 +959,27 @@ bool UccdClient::resetNvidiaGpuOCAll( int deviceIndex )
 // Auto-OC
 // ---------------------------------------------------------------------------
 
-bool UccdClient::startAutoOC( const std::string &component, int deviceIndex )
+bool UccdClient::startAutoOC( const std::string &component, int deviceIndex,
+                              int stepSizeMHz, int maxOffsetMHz, int stabilityMs )
 {
-  return callMethod< bool, QString, int >( "StartAutoOC",
-      QString::fromStdString( component ), deviceIndex ).value_or( false );
+  return callMethod< bool, QString, int, int, int, int >( "StartAutoOC",
+      QString::fromStdString( component ), deviceIndex,
+      stepSizeMHz, maxOffsetMHz, stabilityMs ).value_or( false );
 }
 
 bool UccdClient::resumeAutoOC( const std::string &mode,
-                                const std::string &component, int deviceIndex )
+                                const std::string &component, int deviceIndex,
+                                int stepSizeMHz, int maxOffsetMHz, int stabilityMs )
 {
-  return callMethod< bool, QString, QString, int >( "ResumeAutoOC",
+  return callMethod< bool, QString, QString, int, int, int, int >( "ResumeAutoOC",
       QString::fromStdString( mode ),
-      QString::fromStdString( component ), deviceIndex ).value_or( false );
+      QString::fromStdString( component ), deviceIndex,
+      stepSizeMHz, maxOffsetMHz, stabilityMs ).value_or( false );
+}
+
+bool UccdClient::pauseAutoOC()
+{
+  return callMethod< bool >( "PauseAutoOC" ).value_or( false );
 }
 
 bool UccdClient::stopAutoOC()
@@ -1028,11 +1037,14 @@ bool UccdClient::startAutoUndervolt( int deviceIndex,
                                      bool targetFpsEnabled,
                                      int  targetFps,
                                      bool extendedValidation,
-                                     bool powerLimitMode )
+                                     bool powerLimitMode,
+                                     int  stepSizeMHz,
+                                     int  maxOffsetMHz,
+                                     int  stabilityMs )
 {
-  return callMethod< bool, int, bool, int, bool, bool >(
+  return callMethod< bool, int, bool, int, bool, bool, int, int, int >(
     "StartAutoUndervolt", deviceIndex, targetFpsEnabled, targetFps,
-    extendedValidation, powerLimitMode ).value_or( false );
+    extendedValidation, powerLimitMode, stepSizeMHz, maxOffsetMHz, stabilityMs ).value_or( false );
 }
 
 bool UccdClient::resumeAutoUndervolt( const std::string &mode,
@@ -1040,22 +1052,15 @@ bool UccdClient::resumeAutoUndervolt( const std::string &mode,
                                        bool targetFpsEnabled,
                                        int  targetFps,
                                        bool extendedValidation,
-                                       bool powerLimitMode )
+                                       bool powerLimitMode,
+                                       int  stepSizeMHz,
+                                       int  maxOffsetMHz,
+                                       int  stabilityMs )
 {
-  return callMethod< bool, QString, int, bool, int, bool, bool >(
+  return callMethod< bool, QString, int, bool, int, bool, bool, int, int, int >(
     "ResumeAutoUndervolt", QString::fromStdString( mode ),
     deviceIndex, targetFpsEnabled, targetFps,
-    extendedValidation, powerLimitMode ).value_or( false );
-}
-
-bool UccdClient::stopAutoUndervolt()
-{
-  return callMethod< bool >( "StopAutoUndervolt" ).value_or( false );
-}
-
-std::optional< bool > UccdClient::getAutoUndervoltRunning()
-{
-  return callMethod< bool >( "GetAutoUndervoltRunning" );
+    extendedValidation, powerLimitMode, stepSizeMHz, maxOffsetMHz, stabilityMs ).value_or( false );
 }
 
 std::optional< std::string > UccdClient::getAutoUndervoltProgress()

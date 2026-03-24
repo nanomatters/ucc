@@ -80,6 +80,8 @@ struct AutoOCConfig
 {
   AutoOCMode mode          = AutoOCMode::MaxOffset; ///< Algorithm mode
   int  resolutionMHz       = 5;     ///< Binary search step granularity
+  int  maxGpuOffsetMHz     = 0;     ///< Override GPU max offset (0 = use NvmlOffsetCaps)
+  int  maxVramOffsetMHz    = 0;     ///< Override VRAM max offset (0 = use NvmlOffsetCaps)
   int  safetyMarginCoreMHz = 15;    ///< Subtracted from max stable core offset
   int  safetyMarginVramMHz = 25;    ///< Subtracted from max stable VRAM offset
   int  searchTestMs        = 15000; ///< Per-step stability test duration (ms)
@@ -193,6 +195,9 @@ public:
   /// Request cancellation (the current step finishes, then stops).
   void stop();
 
+  /// Request pause/suspend (saves checkpoint and allows resume later).
+  void pause();
+
   /// @return true if a scan is in progress.
   [[nodiscard]] bool isRunning() const;
 
@@ -220,6 +225,7 @@ private:
   void enterValidation();
   void enterDone( bool success, const std::string &msg );
   void enterCrashSuspend( const std::string &msg );
+  void enterPauseSuspend();
 
   // ── Stability testing ──
   StabilityResult sampleStability();
@@ -253,6 +259,7 @@ private:
 
   AutoOCPhase     m_phase      = AutoOCPhase::Idle;
   std::atomic_bool m_stopRequested{ false };
+  std::atomic_bool m_pauseRequested{ false };
 
   // Binary search state
   int m_lo = 0;

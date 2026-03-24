@@ -365,6 +365,7 @@ bool AutoUndervoltWorker::start( unsigned int deviceIndex,
   m_config      = config;
   m_deviceIndex = deviceIndex;
   m_stopRequested = false;
+  m_pauseRequested = false;
 
   m_appName = m_fpsServer->clientAppName();
   if ( m_appName.empty() )
@@ -382,14 +383,21 @@ bool AutoUndervoltWorker::start( unsigned int deviceIndex,
   // Platform-adaptive offset search defaults:
   // desktop GPUs get a larger sweep (700 MHz max, 35 MHz steps), while
   // mobile-tagged GPUs keep their configured values.
+  // Only override when the user hasn't explicitly set custom values
+  // (i.e. the values still match the struct defaults).
   if ( auto ocState = m_nvml->getOCState( deviceIndex ); ocState.has_value() )
   {
     if ( isLikelyDesktopNvidiaGpu( *ocState ) )
     {
-      m_config.maxCoreOffsetMHz = 700;
-      m_config.offsetStepMHz = 35;
+      const UndervoltConfig defaults;
+      if ( m_config.maxCoreOffsetMHz == defaults.maxCoreOffsetMHz )
+        m_config.maxCoreOffsetMHz = 700;
+      if ( m_config.offsetStepMHz == defaults.offsetStepMHz )
+        m_config.offsetStepMHz = 35;
       log( "AutoUV: desktop GPU detected ('" + ocState->gpuName
-           + "') — using offset sweep max=700 MHz, step=35 MHz" );
+           + "') — using offset sweep max="
+           + std::to_string( m_config.maxCoreOffsetMHz ) + " MHz, step="
+           + std::to_string( m_config.offsetStepMHz ) + " MHz" );
     }
     else
     {
@@ -410,6 +418,14 @@ void AutoUndervoltWorker::stop()
     return;
   m_stopRequested = true;
   log( "AutoUV: stop requested" );
+}
+
+void AutoUndervoltWorker::pause()
+{
+  if ( !isRunning() )
+    return;
+  m_pauseRequested = true;
+  log( "AutoUV: pause requested" );
 }
 
 bool AutoUndervoltWorker::isRunning() const
@@ -804,6 +820,35 @@ void AutoUndervoltWorker::enterCrashSuspend( const std::string &msg )
   emit finished( result );
 }
 
+void AutoUndervoltWorker::enterPauseSuspend()
+{
+  m_pollTimer->stop();
+
+  log( "AutoUV: paused by user" );
+  saveCheckpoint( true, "paused_by_user" );
+
+  // Restore GPU to safe defaults but keep checkpoint for resume.
+  restoreOriginalState( false );
+
+  UndervoltResult result;
+  result.gpuFreqCapMHz  = 0;
+  result.coreOffsetMHz  = 0;
+  result.baselineClkMHz = m_baselineClockMHz;
+  result.baselineFps    = m_baselineFps;
+  result.finalFps       = 0.0;
+  result.finalPowerW    = 0.0;
+  result.powerSavedPct  = 0.0;
+  result.success        = false;
+  result.appName        = m_appName;
+  result.message        = "Suspended: Paused by user. Progress has been saved — click Resume to continue.";
+
+  m_phase = UVPhase::Done;
+
+  emitProgress( result.message );
+  OverlayShmWriter::instance().setInactive();
+  emit finished( result );
+}
+
 void AutoUndervoltWorker::enterDone( bool success, const std::string &msg )
 {
   m_pollTimer->stop();
@@ -903,6 +948,12 @@ void AutoUndervoltWorker::onPollTick()
 {
   // Drain any pending FPS data.
   if ( m_fpsServer ) m_fpsServer->poll();
+
+  if ( m_pauseRequested )
+  {
+    enterPauseSuspend();
+    return;
+  }
 
   if ( m_stopRequested )
   {

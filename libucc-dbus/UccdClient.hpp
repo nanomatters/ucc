@@ -177,9 +177,12 @@ public:
   bool resetNvidiaGpuOCAll( int deviceIndex = 0 );
 
   // NVIDIA Auto-OC
-  bool startAutoOC( const std::string &component = "both", int deviceIndex = 0 );
+  bool startAutoOC( const std::string &component = "both", int deviceIndex = 0,
+                    int stepSizeMHz = 0, int maxOffsetMHz = 0, int stabilityMs = 0 );
   bool resumeAutoOC( const std::string &mode,
-                     const std::string &component = "both", int deviceIndex = 0 );
+                     const std::string &component = "both", int deviceIndex = 0,
+                     int stepSizeMHz = 0, int maxOffsetMHz = 0, int stabilityMs = 0 );
+  bool pauseAutoOC();
   bool stopAutoOC();
   std::optional< bool > getAutoOCRunning();
   std::optional< std::string > getAutoOCProgress();
@@ -191,15 +194,29 @@ public:
                            bool targetFpsEnabled = false,
                            int  targetFps = 0,
                            bool extendedValidation = false,
-                           bool powerLimitMode = false );
+                           bool powerLimitMode = false,
+                           int  stepSizeMHz = 0,
+                           int  maxOffsetMHz = 0,
+                           int  stabilityMs = 0 );
   bool resumeAutoUndervolt( const std::string &mode,
                             int deviceIndex = 0,
                             bool targetFpsEnabled = false,
                             int  targetFps = 0,
                             bool extendedValidation = false,
-                            bool powerLimitMode = false );
-  bool stopAutoUndervolt();
-  std::optional< bool > getAutoUndervoltRunning();
+                            bool powerLimitMode = false,
+                            int  stepSizeMHz = 0,
+                            int  maxOffsetMHz = 0,
+                            int  stabilityMs = 0 );
+
+  bool pauseAutoUndervolt() const
+  { return callMethod< bool >( "PauseAutoUndervolt" ).value_or( false ); }
+
+  bool stopAutoUndervolt() const
+  { return callMethod< bool >( "StopAutoUndervolt" ).value_or( false ); }
+
+  bool getAutoUndervoltRunning() const
+  { return callMethod< bool >( "GetAutoUndervoltRunning" ).value_or( false ); }
+
   std::optional< std::string > getAutoUndervoltProgress();
   std::optional< std::string > getAutoUndervoltProfiles();
   bool hasAutoUndervoltCheckpoint();
