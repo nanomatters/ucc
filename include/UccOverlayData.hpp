@@ -51,7 +51,6 @@ struct UccOverlayData
   uint8_t  _pad1[7];
 };
 
-static_assert( sizeof(UccOverlayData) <= 4096,
-               "UccOverlayData must fit in one page" );
+static_assert( sizeof(UccOverlayData) <= 4096, "UccOverlayData must fit in one page" );
 
 inline constexpr const char *kUccOverlayShmName = "/ucc-overlay";

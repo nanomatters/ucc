@@ -2114,6 +2114,16 @@ void AutoUndervoltWorker::restoreOriginalState( bool keepCurrentCap )
 {
   if ( !keepCurrentCap )
   {
+    // IMPORTANT: Reset the core offset BEFORE removing the frequency cap.
+    // If locked clocks are removed first, the GPU momentarily runs at
+    // full boost + the still-active search offset, which can exceed the
+    // silicon's stability limit and crash the running application.
+    const int restoreOffset = m_originalCoreOffsetMHz.value_or( 0 );
+    (void) m_nvml->setClockOffset( m_deviceIndex,
+                                   nvml::NVML_CLOCK_GRAPHICS,
+                                   nvml::NVML_PSTATE_0,
+                                   restoreOffset );
+
     if ( m_originalGpuLockedClocks.has_value() )
     {
       m_nvml->setGpuLockedClocks( m_deviceIndex,
@@ -2124,12 +2134,6 @@ void AutoUndervoltWorker::restoreOriginalState( bool keepCurrentCap )
     {
       m_nvml->resetGpuLockedClocks( m_deviceIndex );
     }
-
-    const int restoreOffset = m_originalCoreOffsetMHz.value_or( 0 );
-    (void) m_nvml->setClockOffset( m_deviceIndex,
-                                   nvml::NVML_CLOCK_GRAPHICS,
-                                   nvml::NVML_PSTATE_0,
-                                   restoreOffset );
   }
 
   // In power-limit mode on success, keep the reduced power limit.
