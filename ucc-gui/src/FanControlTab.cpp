@@ -2310,30 +2310,22 @@ void FanControlTab::setThermalSourceForZone( const QString &zoneId, const QStrin
 
 void FanControlTab::pollSensorReadings()
 {
-  auto json = m_uccdClient->getSensorReadingsJSON();
-  if ( !json )
+  auto readings = m_uccdClient->getSensorReadings();
+  if ( !readings )
     return;
 
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-  if ( !doc.isObject() )
-    return;
-
-  m_sensorReadings = doc.object();
+  m_sensorReadings = *readings;
   updateSensorTreeValues();
   updateDeviceTreeValues();
   updateSourceTableValues();
   updateZoneTableValues();
 
   // Also poll zone telemetry
-  auto telemetryJson = m_uccdClient->getFanZoneTelemetryJSON();
-  if ( telemetryJson )
+  auto telemetry = m_uccdClient->getFanZoneTelemetry();
+  if ( telemetry )
   {
-    QJsonDocument telemetryDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *telemetryJson ) );
-    if ( telemetryDoc.isObject() )
-    {
-      m_zoneTelemetry = telemetryDoc.object();
-      updateZoneTableValues();
-    }
+    m_zoneTelemetry = *telemetry;
+    updateZoneTableValues();
   }
 }
 
@@ -2350,7 +2342,7 @@ void FanControlTab::updateSensorTreeValues()
     if ( !sid.isEmpty() )
     {
       auto val = m_sensorReadings.value( sid );
-      if ( val.isDouble() )
+      if ( val.isValid() && !val.isNull() )
         item->setText( 1, QString::number( val.toInt() ) );
       else
         item->setText( 1, QStringLiteral( "--" ) );
@@ -2373,7 +2365,7 @@ void FanControlTab::updateDeviceTreeValues()
     {
       const QString key = QStringLiteral( "fan:" ) + did;
       auto val = m_sensorReadings.value( key );
-      if ( val.isDouble() )
+      if ( val.isValid() && !val.isNull() )
         item->setText( 1, QString::number( val.toInt() ) + QStringLiteral( " RPM" ) );
       else
         item->setText( 1, QStringLiteral( "--" ) );
@@ -2403,7 +2395,7 @@ void FanControlTab::updateSourceTableValues()
     }
 
     auto val = m_sensorReadings.value( key );
-    if ( val.isDouble() )
+    if ( val.isValid() && !val.isNull() )
       valueItem->setText( QString::number( val.toInt() ) + QStringLiteral( " °C" ) );
     else
       valueItem->setText( QStringLiteral( "--" ) );
@@ -2431,9 +2423,10 @@ void FanControlTab::updateSourceTableValues()
       }
 
       auto telemetry = m_zoneTelemetry.value( zoneId );
-      if ( telemetry.isObject() )
+      if ( telemetry.canConvert< QVariantMap >() )
       {
-        int temp = telemetry.toObject()[QStringLiteral( "temp" )].toInt( -1 );
+        QVariantMap tobj = telemetry.toMap();
+        int temp = tobj.value( QStringLiteral( "temp" ), -1 ).toInt();
         if ( temp >= 0 )
           tempItem->setText( QString::number( temp ) );
         else
@@ -2454,10 +2447,10 @@ void FanControlTab::updateSourceTableValues()
         m_zoneTable->setItem( row, 5, dutyItem );
       }
 
-      if ( telemetry.isObject() )
+      if ( telemetry.canConvert< QVariantMap >() )
       {
-        const QJsonObject tobj = telemetry.toObject();
-        int duty = tobj[QStringLiteral( "duty" )].toInt( -1 );
+        const QVariantMap tobj = telemetry.toMap();
+        int duty = tobj.value( QStringLiteral( "duty" ), -1 ).toInt();
         if ( duty >= 0 )
           dutyItem->setText( QString::number( duty ) + QStringLiteral( "%" ) );
         else

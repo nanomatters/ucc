@@ -27,6 +27,7 @@
 #include <functional>
 #include <vector>
 #include <map>
+#include <chrono>
 
 namespace ucc
 {
@@ -56,11 +57,11 @@ public:
   // Profile Management — unified API (profiles have "editable" flag)
   std::optional< std::string > getProfilesJSON();       // All profiles with editable flag
   std::optional< std::string > getDefaultProfilesJSON(); // Backward-compat: built-in only
-  std::optional< std::string > getCpuFrequencyLimitsJSON();
+  std::optional< QVariantMap > getCpuFrequencyLimits();
   std::optional< std::string > getDefaultValuesProfileJSON();
   std::optional< std::string > getCustomProfilesJSON();  // Backward-compat: custom only
   std::optional< std::string > getActiveProfileJSON();
-  std::optional< std::string > getAppliedProfilesJSON();
+  std::optional< QVariantMap > getAppliedProfiles();
   std::optional< std::string > getSettingsJSON();
   std::optional< std::string > getPowerState();
   bool setStateMap( const std::string &state, const std::string &profileId );
@@ -73,14 +74,14 @@ public:
   bool deleteCustomProfile( const std::string &profileId );   // Backward-compat → deleteProfile
 
   // Hardware zone model
-  std::optional< std::string > getHardwareFanDevicesJSON();
+  std::optional< QVariantList > getHardwareFanDevices();
   std::optional< std::string > getHardwareSensorsJSON();
-  std::optional< std::string > getThermalSourcesJSON();
-  std::optional< std::string > getSensorReadingsJSON();
-  std::optional< std::string > getFanZonesJSON();
+  std::optional< QVariantList > getThermalSources();
+  std::optional< QVariantMap > getSensorReadings();
+  std::optional< QVariantList > getFanZones();
 
   // Fan sub-profiles (built-in + custom, with editable flag)
-  std::optional< std::string > getFanProfilesJSON();
+  std::optional< QVariantList > getFanProfiles();
   std::optional< std::string > getFanProfileJSON( const std::string &fanProfileId );
   bool saveFanProfile( const std::string &id, const std::string &name, const std::string &json );
   bool deleteFanProfile( const std::string &id );
@@ -121,13 +122,13 @@ public:
   // Fan Control
   bool applyFanProfiles( const std::string &fanProfilesJSON );
   bool revertFanProfiles();
-  std::optional< std::string > getFanZoneTelemetryJSON();
+  std::optional< QVariantMap > getFanZoneTelemetry();
   std::optional< std::string > getCurrentFanSpeed();
   std::optional< std::string > getFanTemperatures();
 
   // Power Management
   bool setODMPowerLimits( const std::vector< int > &limits );
-  std::optional< std::vector< int > > getODMPowerLimits();
+  std::optional< QVariantList > getODMPowerLimits();
 
   // Charging Profile (firmware-level charging modes)
   std::optional< std::string > getChargingProfilesAvailable();
@@ -185,7 +186,7 @@ public:
   bool pauseAutoOC();
   bool stopAutoOC();
   std::optional< bool > getAutoOCRunning();
-  std::optional< std::string > getAutoOCProgress();
+  std::optional< QVariantMap > getAutoOCProgress();
   bool hasAutoOCCheckpoint();
   bool clearAutoOCCheckpoint();
 
@@ -217,7 +218,7 @@ public:
   bool getAutoUndervoltRunning() const
   { return callMethod< bool >( "GetAutoUndervoltRunning" ).value_or( false ); }
 
-  std::optional< std::string > getAutoUndervoltProgress();
+  std::optional< QVariantMap > getAutoUndervoltProgress();
   std::optional< std::string > getAutoUndervoltProfiles();
   bool hasAutoUndervoltCheckpoint();
   bool clearAutoUndervoltCheckpoint();
@@ -286,8 +287,8 @@ public:
   bool setMonitorHistoryHorizon( int seconds );
   std::optional< int > getMonitorHistoryHorizon();
   std::optional< std::string > getMonitorSourcesJSON();
-  std::optional< std::string > getFpsSourcesJSON();
-  std::optional< std::string > getAutoUvAutoApplyStatusJSON();
+  std::optional< QVariantMap > getFpsSources();
+  std::optional< QVariantMap > getAutoUvAutoApplyStatus();
   bool setFpsSourceApp( const std::string &appName );
   std::optional< std::string > getFpsSourceApp();
 
@@ -299,14 +300,14 @@ public:
   void subscribePowerStateChanged( PowerStateChangedCallback callback );
 
   // Auto-OC signal subscription
-  using AutoOCProgressCallback = std::function< void( const std::string &progressJSON ) >;
+  using AutoOCProgressCallback = std::function< void( const QVariantMap &progress ) >;
   using AutoOCFinishedCallback = std::function< void( int coreOffset, int vramOffset, bool success, const std::string &msg ) >;
 
   void subscribeAutoOCProgress( AutoOCProgressCallback callback );
   void subscribeAutoOCFinished( AutoOCFinishedCallback callback );
 
   // Auto-Undervolt signal subscription
-  using AutoUndervoltProgressCallback = std::function< void( const std::string &progressJSON ) >;
+  using AutoUndervoltProgressCallback = std::function< void( const QVariantMap &progress ) >;
   using AutoUndervoltFinishedCallback = std::function< void( int gpuFreqCapMHz, bool success, const std::string &msg, const std::string &appName ) >;
 
   void subscribeAutoUndervoltProgress( AutoUndervoltProgressCallback callback );
@@ -323,10 +324,10 @@ signals:
   void profilesListChanged();
   void powerStateChanged( const QString &state );
   void connectionStatusChanged( bool connected );
-  void autoOCProgressChanged( const QString &progressJSON );
+  void autoOCProgressChanged( const QVariantMap &progress );
   void autoOCFinished( int coreOffsetMHz, int vramOffsetMHz,
                        bool success, const QString &message );
-  void autoUndervoltProgressChanged( const QString &progressJSON );
+  void autoUndervoltProgressChanged( const QVariantMap &progress );
   void autoUndervoltFinished( int gpuFreqCapMHz, bool success,
                               const QString &message, const QString &appName );
 
@@ -363,6 +364,53 @@ private:
 
   template< typename... Args >
   bool callVoidMethod( const QString &method, const Args &...args ) const;
+
+  // ── JSON snapshot caches (one D-Bus call per poll cycle) ──
+  struct DGpuSnapshot
+  {
+    std::chrono::steady_clock::time_point ts{};
+    bool valid = false;
+    int temp = -1;
+    int coreFrequency = -1;
+    int vramFrequency = -1;
+    double powerDraw = -1.0;
+    int computeUtilPct = -1;
+    int memoryUtilPct = -1;
+    int vramUsedMiB = -1;
+    int vramTotalMiB = -1;
+    std::string perfLimitReason;
+    int encoderUtilPct = -1;
+    int decoderUtilPct = -1;
+    int currentPstate = -1;
+    int grClockOffsetMHz = -999;
+    int memClockOffsetMHz = -999;
+    int coreVoltageMv = -1;
+    int fanSpeedPct = -1;
+  };
+
+  struct IGpuSnapshot
+  {
+    std::chrono::steady_clock::time_point ts{};
+    bool valid = false;
+    int temp = -1;
+    int coreFrequency = -1;
+    double powerDraw = -1.0;
+  };
+
+  struct CpuPowerSnapshot
+  {
+    std::chrono::steady_clock::time_point ts{};
+    bool valid = false;
+    double powerDraw = -1.0;
+  };
+
+  static constexpr int SNAPSHOT_TTL_MS = 100;
+  DGpuSnapshot m_dGpuSnap;
+  IGpuSnapshot m_iGpuSnap;
+  CpuPowerSnapshot m_cpuPowerSnap;
+  void refreshDGpuSnapshot();
+  void refreshIGpuSnapshot();
+  void refreshCpuPowerSnapshot();
 
   AutoOCProgressCallback m_autoOCProgressCallback;
   AutoOCFinishedCallback m_autoOCFinishedCallback;

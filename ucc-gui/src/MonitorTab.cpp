@@ -174,7 +174,7 @@ void MonitorTab::initializeMaxPowerFromHardware()
     if ( auto tdpLimits = m_client->getODMPowerLimits() )
     {
         if ( tdpLimits->size() > 1 )
-            maxBoostTdp = ( *tdpLimits )[1];
+            maxBoostTdp = ( *tdpLimits )[1].toMap().value( "max" ).toInt();
     }
 
     if ( m_maxPowerW = std::max( maxGpuTgp, maxBoostTdp ); m_maxPowerW <= 0 )
@@ -471,18 +471,14 @@ void MonitorTab::refreshFpsSourceControls()
     if ( !m_client || !m_fpsSourceCombo || !m_fpsCurrentAppLabel )
         return;
 
-    auto jsonOpt = m_client->getFpsSourcesJSON();
-    if ( !jsonOpt.has_value() )
+    auto fpsOpt = m_client->getFpsSources();
+    if ( !fpsOpt.has_value() )
         return;
 
-    const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
-    if ( !doc.isObject() )
-        return;
-
-    const QJsonObject root = doc.object();
-    const QString selected = root.value( "selectedApp" ).toString( "auto" );
+    const QVariantMap &root = *fpsOpt;
+    const QString selected = root.value( "selectedApp" ).toString();
     const QString currentApp = root.value( "currentApp" ).toString();
-    const qint64 currentPid = root.value( "currentPid" ).toInteger( 0 );
+    const qint64 currentPid = root.value( "currentPid" ).toLongLong();
 
     // Keep the source chooser focused on live state.
     // Daemon `apps` is a historical set, so old app names (e.g. a closed benchmark)

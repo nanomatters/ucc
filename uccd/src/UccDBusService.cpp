@@ -810,21 +810,21 @@ UccDBusInterfaceAdaptor::GetFanDataGPU2()
   return {};
 }
 
-QString
-UccDBusInterfaceAdaptor::GetFanZoneTelemetryJSON()
+QVariantMap
+UccDBusInterfaceAdaptor::GetFanZoneTelemetry()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  QJsonObject root;
+  QVariantMap root;
   for ( const auto &[zoneId, zt] : m_data.zoneTelemetry )
   {
-    QJsonObject obj;
-    obj["temp"] = zt.temp;
-    obj["duty"] = zt.duty;
+    QVariantMap obj;
+    obj[ "temp" ] = zt.temp;
+    obj[ "duty" ] = zt.duty;
     if ( zt.rpm >= 0 )
-      obj["rpm"] = zt.rpm;
-    root[QString::fromStdString( zoneId )] = obj;
+      obj[ "rpm" ] = zt.rpm;
+    root[ QString::fromStdString( zoneId ) ] = obj;
   }
-  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+  return root;
 }
 
 // webcam and display methods
@@ -937,15 +937,13 @@ QString UccDBusInterfaceAdaptor::GetActiveProfileJSON()
   return QString::fromStdString( m_data.activeProfileJSON );
 }
 
-QString UccDBusInterfaceAdaptor::GetAppliedProfilesJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetAppliedProfiles()
 {
-  QJsonObject root;
+  QVariantMap root;
 
   if ( !m_service )
-    return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+    return root;
 
-  // Applied profile view for live UI consumers (tray).
-  // Keep GetActiveProfileJSON() as persisted profile source of truth.
   root[ "profileId" ] = QString::fromStdString( m_service->m_activeProfile.id );
   root[ "profileName" ] = QString::fromStdString( m_service->m_activeProfile.name );
   root[ "fanProfileId" ] = QString::fromStdString( m_service->m_activeProfile.fan.fanProfile );
@@ -961,7 +959,7 @@ QString UccDBusInterfaceAdaptor::GetAppliedProfilesJSON()
   root[ "appliedByApp" ] = QString::fromStdString( m_lastAutoAppliedApp );
   root[ "appliedByPid" ] = static_cast< qlonglong >( m_lastAutoAppliedPid );
 
-  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+  return root;
 }
 
 bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq )
@@ -1185,14 +1183,9 @@ QString UccDBusInterfaceAdaptor::GetDefaultProfilesJSON()
   return QString::fromStdString( m_data.defaultProfilesJSON );
 }
 
-QString UccDBusInterfaceAdaptor::GetCpuFrequencyLimitsJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetCpuFrequencyLimits()
 {
-  const int32_t minFreq = getCpuMinFrequency();
-  const int32_t maxFreq = getCpuMaxFrequency();
-
-  std::ostringstream json;
-  json << "{\"min\":" << minFreq << ",\"max\":" << maxFreq << "}";
-  return QString::fromStdString( json.str() );
+  return { { "min", getCpuMinFrequency() }, { "max", getCpuMaxFrequency() } };
 }
 
 QString UccDBusInterfaceAdaptor::GetDefaultValuesProfileJSON()
@@ -1471,87 +1464,61 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
 // Unified fan profile methods (new API)
 // ---------------------------------------------------------------------------
 
-QString UccDBusInterfaceAdaptor::GetFanProfilesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetFanProfiles()
 {
-  // Returns all fan profiles: built-in (editable=false) + custom (editable=true)
-  std::string json = "[";
-  size_t idx = 0;
-
+  QVariantList list;
   if ( m_service )
   {
     for ( const auto &fp : m_service->m_builtinFanProfiles )
-    {
-      if ( idx > 0 ) json += ",";
-      json += "{\"id\":\"" + fp.id + "\","
-              "\"name\":\"" + fp.name + "\","
-              "\"editable\":false}";
-      ++idx;
-    }
-  }
-
-  if ( m_service )
-  {
+      list.append( QVariantMap{ { "id", QString::fromStdString( fp.id ) },
+                                { "name", QString::fromStdString( fp.name ) },
+                                { "editable", false } } );
     for ( const auto &fp : m_service->m_customFanProfiles )
-    {
-      if ( idx > 0 ) json += ",";
-      json += "{\"id\":\"" + fp.id + "\","
-              "\"name\":\"" + fp.name + "\","
-              "\"editable\":true}";
-      ++idx;
-    }
+      list.append( QVariantMap{ { "id", QString::fromStdString( fp.id ) },
+                                { "name", QString::fromStdString( fp.name ) },
+                                { "editable", true } } );
   }
-
-  json += "]";
-  return QString::fromStdString( json );
+  return list;
 }
 
-QString UccDBusInterfaceAdaptor::GetThermalSourcesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetThermalSources()
 {
+  QVariantList list;
   if ( !m_service )
-    return QStringLiteral( "[]" );
+    return list;
 
-  const auto &sources = m_service->m_hw.thermalSources();
-  std::string json = "[";
-  for ( size_t i = 0; i < sources.size(); ++i )
+  for ( const auto &ts : m_service->m_hw.thermalSources() )
   {
-    const auto &ts = sources[i];
-    if ( i > 0 ) json += ',';
-    json += "{\"id\":\"" + ts.id + "\"";
-    json += ",\"label\":\"" + ts.label + "\"";
-    json += ",\"strategy\":\"" + ucc::hal::thermalStrategyToString( ts.strategy ) + "\"";
-    json += ",\"sensorIds\":[";
-    for ( size_t s = 0; s < ts.sensorIds.size(); ++s )
-    {
-      if ( s > 0 ) json += ',';
-      json += "\"" + ts.sensorIds[s] + "\"";
-    }
-    json += "]";
-    json += ",\"weights\":[";
-    for ( size_t w = 0; w < ts.weights.size(); ++w )
-    {
-      if ( w > 0 ) json += ',';
-      json += std::to_string( ts.weights[w] );
-    }
-    json += "]";
-    json += "}";
+    QStringList sensorIds;
+    for ( const auto &sid : ts.sensorIds )
+      sensorIds.append( QString::fromStdString( sid ) );
+
+    QVariantList weights;
+    for ( double w : ts.weights )
+      weights.append( w );
+
+    list.append( QVariantMap{ { "id", QString::fromStdString( ts.id ) },
+                              { "label", QString::fromStdString( ts.label ) },
+                              { "strategy", QString::fromStdString( ucc::hal::thermalStrategyToString( ts.strategy ) ) },
+                              { "sensorIds", QVariant::fromValue( sensorIds ) },
+                              { "weights", QVariant::fromValue( weights ) } } );
   }
-  json += "]";
-  return QString::fromStdString( json );
+  return list;
 }
 
-QString UccDBusInterfaceAdaptor::GetSensorReadingsJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetSensorReadings()
 {
   if ( !m_service )
-    return QStringLiteral( "{}" );
+    return {};
 
-  QJsonObject root;
+  QVariantMap root;
 
   // Individual sensor readings
   for ( const auto &sensor : m_service->m_hw.tempSensors() )
   {
     auto val = m_service->m_hw.readTemp( sensor );
     if ( val.has_value() )
-      root[QString::fromStdString( sensor.id )] = static_cast< int >( std::round( val.value() ) );
+      root[ QString::fromStdString( sensor.id ) ] = static_cast< int >( std::round( val.value() ) );
   }
 
   // Resolved thermal source readings (prefixed with "_source:")
@@ -1560,7 +1527,7 @@ QString UccDBusInterfaceAdaptor::GetSensorReadingsJSON()
     auto val = m_service->m_hw.readThermalSource( ts );
     if ( val.has_value() )
     {
-      root[QStringLiteral( "_source:" ) + QString::fromStdString( ts.id )] =
+      root[ QStringLiteral( "_source:" ) + QString::fromStdString( ts.id ) ] =
         static_cast< int >( std::round( val.value() ) );
     }
   }
@@ -1574,38 +1541,33 @@ QString UccDBusInterfaceAdaptor::GetSensorReadingsJSON()
       {
         auto rpm = fp->getFanRPM( fan );
         if ( rpm.has_value() )
-          root[QStringLiteral( "fan:" ) + QString::fromStdString( fan.id )] =
+          root[ QStringLiteral( "fan:" ) + QString::fromStdString( fan.id ) ] =
             static_cast< int >( *rpm );
       }
     }
   }
 
-  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+  return root;
 }
 
-QString UccDBusInterfaceAdaptor::GetHardwareFanDevicesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetHardwareFanDevices()
 {
+  QVariantList list;
   if ( !m_service )
-    return QStringLiteral( "[]" );
+    return list;
 
-  const auto &fans = m_service->m_hw.fans();
-  std::string json = "[";
-  for ( size_t i = 0; i < fans.size(); ++i )
+  for ( const auto &f : m_service->m_hw.fans() )
   {
-    const auto &f = fans[i];
-    if ( i > 0 ) json += ',';
-    json += "{\"id\":\"" + f.id + "\"";
-    json += ",\"label\":\"" + f.label + "\"";
-    json += ",\"sourceName\":\"" + jsonEscape( f.sourceName ) + "\"";
-    json += ",\"hwmonPath\":\"" + f.hwmonPath + "\"";
-    json += ",\"index\":" + std::to_string( f.index );
-    json += ",\"canRead\":" + std::string( f.canRead ? "true" : "false" );
-    json += ",\"canControl\":" + std::string( f.canControl ? "true" : "false" );
-    json += ",\"deviceType\":\"" + ucc::hal::fanDeviceTypeToString( f.deviceType ) + "\"";
-    json += "}";
+    list.append( QVariantMap{ { "id", QString::fromStdString( f.id ) },
+                              { "label", QString::fromStdString( f.label ) },
+                              { "sourceName", QString::fromStdString( f.sourceName ) },
+                              { "hwmonPath", QString::fromStdString( f.hwmonPath ) },
+                              { "index", f.index },
+                              { "canRead", f.canRead },
+                              { "canControl", f.canControl },
+                              { "deviceType", QString::fromStdString( ucc::hal::fanDeviceTypeToString( f.deviceType ) ) } } );
   }
-  json += "]";
-  return QString::fromStdString( json );
+  return list;
 }
 
 QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
@@ -2063,32 +2025,25 @@ QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
   return QString::fromStdString( json );
 }
 
-QString UccDBusInterfaceAdaptor::GetFanZonesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetFanZones()
 {
+  QVariantList list;
   if ( !m_service )
-    return QStringLiteral( "[]" );
+    return list;
 
-  const auto &zones = m_service->m_hw.defaultFanZones();
-  std::string json = "[";
-  for ( size_t i = 0; i < zones.size(); ++i )
+  for ( const auto &z : m_service->m_hw.defaultFanZones() )
   {
-    const auto &z = zones[i];
-    if ( i > 0 ) json += ',';
-    json += "{\"id\":\"" + z.id + "\"";
-    json += ",\"name\":\"" + z.name + "\"";
-    json += ",\"deviceType\":\"" + ucc::hal::fanDeviceTypeToString( z.defaultType ) + "\"";
-    json += ",\"thermalSourceId\":\"" + z.thermalSourceId + "\"";
-    json += ",\"fanIds\":[";
-    for ( size_t f = 0; f < z.fanIds.size(); ++f )
-    {
-      if ( f > 0 ) json += ',';
-      json += "\"" + z.fanIds[f] + "\"";
-    }
-    json += "]";
-    json += "}";
+    QStringList fanIds;
+    for ( const auto &fid : z.fanIds )
+      fanIds.append( QString::fromStdString( fid ) );
+
+    list.append( QVariantMap{ { "id", QString::fromStdString( z.id ) },
+                              { "name", QString::fromStdString( z.name ) },
+                              { "deviceType", QString::fromStdString( ucc::hal::fanDeviceTypeToString( z.defaultType ) ) },
+                              { "thermalSourceId", QString::fromStdString( z.thermalSourceId ) },
+                              { "fanIds", QVariant::fromValue( fanIds ) } } );
   }
-  json += "]";
-  return QString::fromStdString( json );
+  return list;
 }
 
 QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
@@ -2447,7 +2402,7 @@ QString UccDBusInterfaceAdaptor::GetFanProfile( const QString &name )
 
 QString UccDBusInterfaceAdaptor::GetFanProfileNames()
 {
-  return GetFanProfilesJSON();
+  return QString::fromUtf8( QJsonDocument( QJsonArray::fromVariantList( GetFanProfiles() ) ).toJson( QJsonDocument::Compact ) );
 }
 
 QString UccDBusInterfaceAdaptor::GetGpuProfile( const QString &id )
@@ -2643,40 +2598,24 @@ QStringList UccDBusInterfaceAdaptor::ODMProfilesAvailable()
   return result;
 }
 
-QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
+QVariantList UccDBusInterfaceAdaptor::ODMPowerLimits()
 {
+  QVariantList list;
   if ( !m_service )
-    return QStringLiteral( "[]" );
+    return list;
 
   auto *platform = m_service->m_hw.tdpProvider();
   if ( !platform )
-    return QStringLiteral( "[]" );
+    return list;
 
   const int nrTDPs = platform->getNumberTDPs();
-  if ( nrTDPs <= 0 )
-    return QStringLiteral( "[]" );
-
-  std::ostringstream jsonStream;
-  jsonStream << "[";
-
   for ( int i = 0; i < nrTDPs; ++i )
   {
-    const int current = platform->getTDP( i ).value_or( 0 );
-    const int min     = platform->getTDPMin( i ).value_or( 0 );
-    const int max     = platform->getTDPMax( i ).value_or( 0 );
-
-    if ( i > 0 )
-      jsonStream << ",";
-
-    jsonStream << "{"
-               << "\"current\":" << current << ","
-               << "\"min\":" << min << ","
-               << "\"max\":" << max
-               << "}";
+    list.append( QVariantMap{ { "current", platform->getTDP( i ).value_or( 0 ) },
+                              { "min", platform->getTDPMin( i ).value_or( 0 ) },
+                              { "max", platform->getTDPMax( i ).value_or( 0 ) } } );
   }
-
-  jsonStream << "]";
-  return QString::fromStdString( jsonStream.str() );
+  return list;
 }
 
 // keyboard backlight methods
@@ -3324,25 +3263,25 @@ int UccDBusInterfaceAdaptor::GetCpuFrequencyMHz()
   return m_data.cpuFrequencyMHz.load();
 }
 
-QString UccDBusInterfaceAdaptor::GetFpsSourcesJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetFpsSources()
 {
-  QJsonObject root;
+  QVariantMap root;
   root[ "selectedApp" ] = QString::fromStdString( m_selectedFpsApp.empty() ? std::string( "auto" ) : m_selectedFpsApp );
   root[ "currentApp" ] = QString::fromStdString( m_fpsServer.clientAppName() );
   root[ "currentPid" ] = static_cast< qlonglong >( m_fpsServer.clientPid() );
 
-  QJsonArray apps;
+  QStringList apps;
   apps.append( QStringLiteral( "auto" ) );
   for ( const auto &app : m_seenFpsApps )
     apps.append( QString::fromStdString( app ) );
-  root[ "apps" ] = apps;
+  root[ "apps" ] = QVariant::fromValue( apps );
 
-  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+  return root;
 }
 
-QString UccDBusInterfaceAdaptor::GetAutoUvAutoApplyStatusJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetAutoUvAutoApplyStatus()
 {
-  QJsonObject root;
+  QVariantMap root;
   root[ "lastApp" ] = QString::fromStdString( m_lastAutoAppliedApp );
   root[ "lastPid" ] = static_cast< qlonglong >( m_lastAutoAppliedPid );
   root[ "lastGpuProfileId" ] = QString::fromStdString( m_lastAutoAppliedGpuProfileId );
@@ -3360,7 +3299,7 @@ QString UccDBusInterfaceAdaptor::GetAutoUvAutoApplyStatusJSON()
   }
   root[ "mappedGpuProfileId" ] = QString::fromStdString( mapped );
 
-  return QString::fromUtf8( QJsonDocument( root ).toJson( QJsonDocument::Compact ) );
+  return root;
 }
 
 bool UccDBusInterfaceAdaptor::SetFpsSourceApp( const QString &appName )
@@ -3629,16 +3568,13 @@ bool UccDBusInterfaceAdaptor::GetAutoOCRunning()
   return m_service->m_autoOCWorker->isRunning();
 }
 
-QString UccDBusInterfaceAdaptor::GetAutoOCProgress()
+QVariantMap UccDBusInterfaceAdaptor::GetAutoOCProgress()
 {
-  // Progress is pushed via the AutoOCProgressChanged signal; this method
-  // returns the current running state as a simple JSON for polling clients.
   if ( !m_service || !m_service->m_autoOCWorker )
-    return QStringLiteral( "{\"running\":false}" );
+    return { { "running", false } };
 
-  bool running = m_service->m_autoOCWorker->isRunning();
-  if ( running )
-    return QStringLiteral( "{\"running\":true,\"resumeAvailable\":false}" );
+  if ( m_service->m_autoOCWorker->isRunning() )
+    return { { "running", true }, { "resumeAvailable", false } };
 
   const bool resumeAvailable = std::filesystem::exists( AUTO_OC_CHECKPOINT_PATH );
   if ( resumeAvailable )
@@ -3656,16 +3592,16 @@ QString UccDBusInterfaceAdaptor::GetAutoOCProgress()
     }
     catch ( ... ) {}
 
-    QJsonObject obj;
-    obj[ "running" ] = false;
-    obj[ "resumeAvailable" ] = true;
-    obj[ "message" ] = QStringLiteral( "Resume available. Start the game/application and click Resume to continue from the saved step." );
+    QVariantMap result;
+    result[ "running" ] = false;
+    result[ "resumeAvailable" ] = true;
+    result[ "message" ] = QStringLiteral( "Resume available. Start the game/application and click Resume to continue from the saved step." );
     if ( !suspendReason.isEmpty() )
-      obj[ "suspendReason" ] = suspendReason;
-    return QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) );
+      result[ "suspendReason" ] = suspendReason;
+    return result;
   }
 
-  return QStringLiteral( "{\"running\":false,\"resumeAvailable\":false}" );
+  return { { "running", false }, { "resumeAvailable", false } };
 }
 
 bool UccDBusInterfaceAdaptor::HasAutoOCCheckpoint()
@@ -3764,14 +3700,13 @@ bool UccDBusInterfaceAdaptor::GetAutoUndervoltRunning()
   return m_service->m_autoUndervoltWorker->isRunning();
 }
 
-QString UccDBusInterfaceAdaptor::GetAutoUndervoltProgress()
+QVariantMap UccDBusInterfaceAdaptor::GetAutoUndervoltProgress()
 {
   if ( !m_service || !m_service->m_autoUndervoltWorker )
-    return QStringLiteral( "{\"running\":false}" );
+    return { { "running", false } };
 
-  bool running = m_service->m_autoUndervoltWorker->isRunning();
-  if ( running )
-    return QStringLiteral( "{\"running\":true,\"resumeAvailable\":false}" );
+  if ( m_service->m_autoUndervoltWorker->isRunning() )
+    return { { "running", true }, { "resumeAvailable", false } };
 
   const bool resumeAvailable = std::filesystem::exists( AUTO_UV_CHECKPOINT_PATH );
   if ( resumeAvailable )
@@ -3796,18 +3731,18 @@ QString UccDBusInterfaceAdaptor::GetAutoUndervoltProgress()
       msg += QStringLiteral( " Expected application: " ) + checkpointApp + '.';
     msg += QStringLiteral( " Start the application, then click Resume to continue." );
 
-    QJsonObject obj;
-    obj[ "running" ] = false;
-    obj[ "resumeAvailable" ] = true;
-    obj[ "message" ] = msg;
+    QVariantMap result;
+    result[ "running" ] = false;
+    result[ "resumeAvailable" ] = true;
+    result[ "message" ] = msg;
     if ( !checkpointApp.isEmpty() )
-      obj[ "checkpointApp" ] = checkpointApp;
+      result[ "checkpointApp" ] = checkpointApp;
     if ( !suspendReason.isEmpty() )
-      obj[ "suspendReason" ] = suspendReason;
-    return QString::fromUtf8( QJsonDocument( obj ).toJson( QJsonDocument::Compact ) );
+      result[ "suspendReason" ] = suspendReason;
+    return result;
   }
 
-  return QStringLiteral( "{\"running\":false,\"resumeAvailable\":false}" );
+  return { { "running", false }, { "resumeAvailable", false } };
 }
 
 bool UccDBusInterfaceAdaptor::HasAutoUndervoltCheckpoint()
@@ -4897,29 +4832,27 @@ bool UccDBusService::initDBus()
       QObject::connect( m_autoOCWorker.get(), &AutoOCWorker::progress,
         m_adaptor.get(), [this]( const AutoOCProgress &prog )
       {
-        QString json = QStringLiteral(
-          "{\"phase\":\"%1\",\"component\":\"%2\",\"iteration\":%3,"
-          "\"maxIterations\":%4,\"currentOffset\":%5,\"bestStable\":%6,"
-          "\"temp\":%7,\"gpuClock\":%8,\"vramClock\":%9,"
-          "\"gpuUtil\":%10,\"fps\":%11,\"message\":\"%12\"}" )
-          .arg( prog.phase == AutoOCPhase::Baseline    ? "baseline"
-                : prog.phase == AutoOCPhase::Searching  ? "searching"
-                : prog.phase == AutoOCPhase::Validating ? "validating"
-                : prog.phase == AutoOCPhase::Done       ? "done"
-                : "idle" )
-          .arg( prog.component == AutoOCComponent::Vram ? "vram" : "core" )
-          .arg( prog.iteration )
-          .arg( prog.maxIterations )
-          .arg( prog.currentOffsetMHz )
-          .arg( prog.bestStableMHz )
-          .arg( prog.tempC )
-          .arg( prog.gpuClockMHz )
-          .arg( prog.vramClockMHz )
-          .arg( prog.gpuUtilPct )
-          .arg( prog.fps, 0, 'f', 1 )
-          .arg( QString::fromStdString( prog.message ) );
+        QString phaseStr = prog.phase == AutoOCPhase::Baseline    ? QStringLiteral( "baseline" )
+                         : prog.phase == AutoOCPhase::Searching   ? QStringLiteral( "searching" )
+                         : prog.phase == AutoOCPhase::Validating  ? QStringLiteral( "validating" )
+                         : prog.phase == AutoOCPhase::Done        ? QStringLiteral( "done" )
+                                                                  : QStringLiteral( "idle" );
 
-        emit m_adaptor->AutoOCProgressChanged( json );
+        QVariantMap p;
+        p[ "phase" ]          = phaseStr;
+        p[ "component" ]      = ( prog.component == AutoOCComponent::Vram ) ? QStringLiteral( "vram" ) : QStringLiteral( "core" );
+        p[ "iteration" ]      = prog.iteration;
+        p[ "maxIterations" ]  = prog.maxIterations;
+        p[ "currentOffset" ]  = prog.currentOffsetMHz;
+        p[ "bestStable" ]     = prog.bestStableMHz;
+        p[ "temp" ]           = prog.tempC;
+        p[ "gpuClock" ]       = prog.gpuClockMHz;
+        p[ "vramClock" ]      = prog.vramClockMHz;
+        p[ "gpuUtil" ]        = prog.gpuUtilPct;
+        p[ "fps" ]            = prog.fps;
+        p[ "message" ]        = QString::fromStdString( prog.message );
+
+        emit m_adaptor->AutoOCProgressChanged( p );
       } );
 
       QObject::connect( m_autoOCWorker.get(), &AutoOCWorker::finished,
@@ -4941,44 +4874,37 @@ bool UccDBusService::initDBus()
       QObject::connect( m_autoUndervoltWorker.get(), &AutoUndervoltWorker::progress,
         m_adaptor.get(), [this]( const UndervoltProgress &prog )
       {
-        QString json = QStringLiteral(
-          "{\"phase\":\"%1\",\"iteration\":%2,\"maxIterations\":%3,"
-            "\"currentCapMHz\":%4,\"bestCapMHz\":%5,"
-            "\"currentOffsetMHz\":%6,\"bestOffsetMHz\":%7,"
-            "\"temp\":%8,\"gpuClock\":%9,\"powerDraw\":%10,"
-            "\"gpuUtil\":%11,\"fps\":%12,\"baselineFps\":%13,"
-            "\"targetFps\":%14,"
-            "\"fpsPerWatt\":%15,\"baselineFpsPerWatt\":%16,"
-            "\"currentPowerLimitW\":%17,"
-            "\"app\":\"%18\",\"message\":\"%19\"}" )
-          .arg( prog.phase == UVPhase::Baseline    ? "baseline"
-                : prog.phase == UVPhase::CapReduction ? "capReduction"
-                : prog.phase == UVPhase::Searching  ? "searching"
-              : prog.phase == UVPhase::OffsetSearching ? "offset_searching"
-                : prog.phase == UVPhase::Validating ? "validating"
-                : prog.phase == UVPhase::PowerLimitSweep ? "powerLimitSweep"
-                : prog.phase == UVPhase::Done       ? "done"
-                : "idle" )
-          .arg( prog.iteration )
-          .arg( prog.maxIterations )
-          .arg( prog.currentCapMHz )
-          .arg( prog.bestCapMHz )
-            .arg( prog.currentOffsetMHz )
-            .arg( prog.bestOffsetMHz )
-          .arg( prog.tempC )
-          .arg( prog.gpuClockMHz )
-          .arg( prog.powerDrawW )
-          .arg( prog.gpuUtilPct )
-          .arg( prog.fps, 0, 'f', 1 )
-          .arg( prog.baselineFps, 0, 'f', 1 )
-          .arg( prog.targetFps, 0, 'f', 1 )
-          .arg( prog.fpsPerWatt, 0, 'f', 2 )
-          .arg( prog.baselineFpsPerWatt, 0, 'f', 2 )
-          .arg( prog.currentPowerLimitW )
-          .arg( QString::fromStdString( prog.appName ) )
-          .arg( QString::fromStdString( prog.message ) );
+        QString phaseStr = prog.phase == UVPhase::Baseline         ? QStringLiteral( "baseline" )
+                         : prog.phase == UVPhase::CapReduction     ? QStringLiteral( "capReduction" )
+                         : prog.phase == UVPhase::Searching        ? QStringLiteral( "searching" )
+                         : prog.phase == UVPhase::OffsetSearching  ? QStringLiteral( "offset_searching" )
+                         : prog.phase == UVPhase::Validating       ? QStringLiteral( "validating" )
+                         : prog.phase == UVPhase::PowerLimitSweep  ? QStringLiteral( "powerLimitSweep" )
+                         : prog.phase == UVPhase::Done             ? QStringLiteral( "done" )
+                                                                   : QStringLiteral( "idle" );
 
-        emit m_adaptor->AutoUndervoltProgressChanged( json );
+        QVariantMap p;
+        p[ "phase" ]              = phaseStr;
+        p[ "iteration" ]          = prog.iteration;
+        p[ "maxIterations" ]      = prog.maxIterations;
+        p[ "currentCapMHz" ]      = prog.currentCapMHz;
+        p[ "bestCapMHz" ]         = prog.bestCapMHz;
+        p[ "currentOffsetMHz" ]   = prog.currentOffsetMHz;
+        p[ "bestOffsetMHz" ]      = prog.bestOffsetMHz;
+        p[ "temp" ]               = prog.tempC;
+        p[ "gpuClock" ]           = prog.gpuClockMHz;
+        p[ "powerDraw" ]          = prog.powerDrawW;
+        p[ "gpuUtil" ]            = prog.gpuUtilPct;
+        p[ "fps" ]                = prog.fps;
+        p[ "baselineFps" ]        = prog.baselineFps;
+        p[ "targetFps" ]          = prog.targetFps;
+        p[ "fpsPerWatt" ]         = prog.fpsPerWatt;
+        p[ "baselineFpsPerWatt" ] = prog.baselineFpsPerWatt;
+        p[ "currentPowerLimitW" ] = prog.currentPowerLimitW;
+        p[ "app" ]                = QString::fromStdString( prog.appName );
+        p[ "message" ]            = QString::fromStdString( prog.message );
+
+        emit m_adaptor->AutoUndervoltProgressChanged( p );
       } );
 
       QObject::connect( m_autoUndervoltWorker.get(), &AutoUndervoltWorker::finished,

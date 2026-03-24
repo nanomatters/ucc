@@ -82,14 +82,14 @@ void UccdClient::subscribeDbusSignals()
   // Auto-OC signals
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "AutoOCProgressChanged", this,
-                  SIGNAL( autoOCProgressChanged( QString ) ) );
+                  SIGNAL( autoOCProgressChanged( QVariantMap ) ) );
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "AutoOCFinished", this,
                   SIGNAL( autoOCFinished( int, int, bool, QString ) ) );
 
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "AutoOCProgressChanged", this,
-               SIGNAL( autoOCProgressChanged( QString ) ) );
+               SIGNAL( autoOCProgressChanged( QVariantMap ) ) );
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "AutoOCFinished", this,
                SIGNAL( autoOCFinished( int, int, bool, QString ) ) );
@@ -97,14 +97,14 @@ void UccdClient::subscribeDbusSignals()
   // Auto-Undervolt signals
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "AutoUndervoltProgressChanged", this,
-                  SIGNAL( autoUndervoltProgressChanged( QString ) ) );
+                  SIGNAL( autoUndervoltProgressChanged( QVariantMap ) ) );
   QDBusConnection::systemBus().disconnect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                   "AutoUndervoltFinished", this,
                   SIGNAL( autoUndervoltFinished( int, bool, QString, QString ) ) );
 
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "AutoUndervoltProgressChanged", this,
-               SIGNAL( autoUndervoltProgressChanged( QString ) ) );
+               SIGNAL( autoUndervoltProgressChanged( QVariantMap ) ) );
   QDBusConnection::systemBus().connect( DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
                "AutoUndervoltFinished", this,
                SIGNAL( autoUndervoltFinished( int, bool, QString, QString ) ) );
@@ -305,11 +305,9 @@ std::optional< std::string > UccdClient::getDefaultProfilesJSON()
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getCpuFrequencyLimitsJSON()
+std::optional< QVariantMap > UccdClient::getCpuFrequencyLimits()
 {
-  if ( auto result = callMethod< QString >( "GetCpuFrequencyLimitsJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetCpuFrequencyLimits" );
 }
 
 std::optional< std::string > UccdClient::getDefaultValuesProfileJSON()
@@ -333,11 +331,9 @@ std::optional< std::string > UccdClient::getActiveProfileJSON()
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getAppliedProfilesJSON()
+std::optional< QVariantMap > UccdClient::getAppliedProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetAppliedProfilesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetAppliedProfiles" );
 }
 
 std::optional< std::string > UccdClient::getSettingsJSON()
@@ -398,32 +394,26 @@ bool UccdClient::deleteCustomProfile( const std::string &profileId ) { return de
 // Fan sub-profiles
 // ---------------------------------------------------------------------------
 
-std::optional< std::string > UccdClient::getFanProfilesJSON()
+std::optional< QVariantList > UccdClient::getFanProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetFanProfilesJSON" ) )
-    return result->toStdString();
+  return callMethod< QVariantList >( "GetFanProfiles" );
+}
+
+std::optional< QVariantList > UccdClient::getThermalSources()
+{
+  return callMethod< QVariantList >( "GetThermalSources" );
+}
+
+std::optional< QVariantMap > UccdClient::getSensorReadings()
+{
+  if ( auto result = callMethod< QVariantMap >( "GetSensorReadings" ) )
+    return *result;
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getThermalSourcesJSON()
+std::optional< QVariantList > UccdClient::getHardwareFanDevices()
 {
-  if ( auto result = callMethod< QString >( "GetThermalSourcesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
-}
-
-std::optional< std::string > UccdClient::getSensorReadingsJSON()
-{
-  if ( auto result = callMethod< QString >( "GetSensorReadingsJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
-}
-
-std::optional< std::string > UccdClient::getHardwareFanDevicesJSON()
-{
-  if ( auto result = callMethod< QString >( "GetHardwareFanDevicesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetHardwareFanDevices" );
 }
 
 std::optional< std::string > UccdClient::getHardwareSensorsJSON()
@@ -433,11 +423,9 @@ std::optional< std::string > UccdClient::getHardwareSensorsJSON()
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getFanZonesJSON()
+std::optional< QVariantList > UccdClient::getFanZones()
 {
-  if ( auto result = callMethod< QString >( "GetFanZonesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetFanZones" );
 }
 
 std::optional< std::string > UccdClient::getFanProfileJSON( const std::string &fanProfileId )
@@ -699,11 +687,10 @@ bool UccdClient::revertFanProfiles()
   return callMethod< bool >( "RevertFanProfiles" ).value_or( false );
 }
 
-std::optional< std::string > UccdClient::getFanZoneTelemetryJSON()
+std::optional< QVariantMap > UccdClient::getFanZoneTelemetry()
 {
-  auto result = callMethod< QString >( "GetFanZoneTelemetryJSON" );
-  if ( result )
-    return result->toStdString();
+  if ( auto result = callMethod< QVariantMap >( "GetFanZoneTelemetry" ) )
+    return *result;
   return std::nullopt;
 }
 
@@ -722,30 +709,9 @@ bool UccdClient::setODMPowerLimits( [[maybe_unused]] const std::vector< int > &l
   return false;
 }
 
-std::optional< std::vector< int > > UccdClient::getODMPowerLimits()
+std::optional< QVariantList > UccdClient::getODMPowerLimits()
 {
-  auto jsonStr = callMethod< QString >( "ODMPowerLimitsJSON" );
-  if ( !jsonStr )
-    return std::nullopt;
-
-  QJsonDocument doc = QJsonDocument::fromJson( jsonStr->toUtf8() );
-  if ( !doc.isArray() )
-    return std::nullopt;
-
-  QJsonArray array = doc.array();
-  std::vector< int > limits;
-  for ( const QJsonValue &value : array )
-  {
-    if ( value.isObject() )
-    {
-      QJsonObject obj = value.toObject();
-      if ( obj.contains( "max" ) && obj["max"].isDouble() )
-      {
-        limits.push_back( obj["max"].toInt() );
-      }
-    }
-  }
-  return limits;
+  return callMethod< QVariantList >( "ODMPowerLimits" );
 }
 
 bool UccdClient::setChargingProfile( const std::string &profileDescriptor )
@@ -992,11 +958,9 @@ std::optional< bool > UccdClient::getAutoOCRunning()
   return callMethod< bool >( "GetAutoOCRunning" );
 }
 
-std::optional< std::string > UccdClient::getAutoOCProgress()
+std::optional< QVariantMap > UccdClient::getAutoOCProgress()
 {
-  if ( auto result = callMethod< QString >( "GetAutoOCProgress" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetAutoOCProgress" );
 }
 
 bool UccdClient::hasAutoOCCheckpoint()
@@ -1013,9 +977,9 @@ void UccdClient::subscribeAutoOCProgress( AutoOCProgressCallback callback )
 {
   m_autoOCProgressCallback = std::move( callback );
   connect( this, &UccdClient::autoOCProgressChanged, this,
-    [this]( const QString &json ) {
+    [this]( const QVariantMap &progress ) {
       if ( m_autoOCProgressCallback )
-        m_autoOCProgressCallback( json.toStdString() );
+        m_autoOCProgressCallback( progress );
     } );
 }
 
@@ -1063,11 +1027,9 @@ bool UccdClient::resumeAutoUndervolt( const std::string &mode,
     extendedValidation, powerLimitMode, stepSizeMHz, maxOffsetMHz, stabilityMs ).value_or( false );
 }
 
-std::optional< std::string > UccdClient::getAutoUndervoltProgress()
+std::optional< QVariantMap > UccdClient::getAutoUndervoltProgress()
 {
-  if ( auto result = callMethod< QString >( "GetAutoUndervoltProgress" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetAutoUndervoltProgress" );
 }
 
 std::optional< std::string > UccdClient::getAutoUndervoltProfiles()
@@ -1091,9 +1053,9 @@ void UccdClient::subscribeAutoUndervoltProgress( AutoUndervoltProgressCallback c
 {
   m_autoUndervoltProgressCallback = std::move( callback );
   connect( this, &UccdClient::autoUndervoltProgressChanged, this,
-    [this]( const QString &json ) {
+    [this]( const QVariantMap &progress ) {
       if ( m_autoUndervoltProgressCallback )
-        m_autoUndervoltProgressCallback( json.toStdString() );
+        m_autoUndervoltProgressCallback( progress );
     } );
 }
 
@@ -1198,97 +1160,112 @@ std::optional< int > readFanDataValue( QDBusInterface *iface, const QString &met
   return std::nullopt;
 }
 
-std::optional< int > readJsonInt( QDBusInterface *iface, const QString &method, const QString &key )
-{
-  if ( !iface )
-  {
-    return std::nullopt;
-  }
-
-  QDBusMessage reply = iface->call( method );
-  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
-  {
-    return std::nullopt;
-  }
-
-  const QString json = reply.arguments().at( 0 ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
-  if ( doc.isNull() || !doc.isObject() )
-  {
-    return std::nullopt;
-  }
-
-  QJsonObject obj = doc.object();
-  if ( !obj.contains( key ) )
-  {
-    return std::nullopt;
-  }
-
-  int val = obj[ key ].toInt();
-  return ( val >= 0 ) ? std::optional< int >( val ) : std::nullopt;
-}
-
-std::optional< double > readJsonDouble( QDBusInterface *iface, const QString &method, const QString &key )
-{
-  if ( !iface )
-  {
-    return std::nullopt;
-  }
-
-  QDBusMessage reply = iface->call( method );
-  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
-  {
-    return std::nullopt;
-  }
-
-  const QString json = reply.arguments().at( 0 ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
-  if ( doc.isNull() || !doc.isObject() )
-  {
-    return std::nullopt;
-  }
-
-  QJsonObject obj = doc.object();
-  if ( !obj.contains( key ) )
-  {
-    return std::nullopt;
-  }
-
-  double val = obj[ key ].toDouble();
-  return ( val >= 0.0 ) ? std::optional< double >( val ) : std::nullopt;
-}
-
-std::optional< std::string > readJsonString( QDBusInterface *iface, const QString &method, const QString &key )
-{
-  if ( !iface )
-  {
-    return std::nullopt;
-  }
-
-  QDBusMessage reply = iface->call( method );
-  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
-  {
-    return std::nullopt;
-  }
-
-  const QString json = reply.arguments().at( 0 ).toString();
-  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
-  if ( doc.isNull() || !doc.isObject() )
-  {
-    return std::nullopt;
-  }
-
-  QJsonObject obj = doc.object();
-  if ( !obj.contains( key ) || !obj[ key ].isString() )
-  {
-    return std::nullopt;
-  }
-
-  return obj[ key ].toString().toStdString();
-}
 } // namespace
 
-// System Monitoring implementations
+// ---------------------------------------------------------------------------
+// JSON snapshot caches — one D-Bus round-trip per poll cycle instead of N
+// ---------------------------------------------------------------------------
+
+void UccdClient::refreshDGpuSnapshot()
+{
+  using clock = std::chrono::steady_clock;
+  auto now = clock::now();
+  if ( m_dGpuSnap.valid &&
+       std::chrono::duration_cast< std::chrono::milliseconds >( now - m_dGpuSnap.ts ).count() < SNAPSHOT_TTL_MS )
+    return;
+
+  m_dGpuSnap = {};
+  if ( !m_interface )
+    return;
+
+  QDBusMessage reply = m_interface->call( QStringLiteral( "GetDGpuInfoValuesJSON" ) );
+  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson( reply.arguments().at( 0 ).toString().toUtf8() );
+  if ( doc.isNull() || !doc.isObject() )
+    return;
+
+  const QJsonObject obj = doc.object();
+  m_dGpuSnap.ts    = now;
+  m_dGpuSnap.valid = true;
+  m_dGpuSnap.temp            = obj[ "temp" ].toInt( -1 );
+  m_dGpuSnap.coreFrequency   = obj.contains( "coreFrequency" ) ? obj[ "coreFrequency" ].toInt( -1 )
+                                                                 : obj[ "coreFreq" ].toInt( -1 );
+  m_dGpuSnap.vramFrequency   = obj[ "vramFrequency" ].toInt( -1 );
+  m_dGpuSnap.powerDraw       = obj[ "powerDraw" ].toDouble( -1.0 );
+  m_dGpuSnap.computeUtilPct  = obj[ "computeUtilPct" ].toInt( -1 );
+  m_dGpuSnap.memoryUtilPct   = obj[ "memoryUtilPct" ].toInt( -1 );
+  m_dGpuSnap.vramUsedMiB     = obj[ "vramUsedMiB" ].toInt( -1 );
+  m_dGpuSnap.vramTotalMiB    = obj[ "vramTotalMiB" ].toInt( -1 );
+  m_dGpuSnap.perfLimitReason = obj[ "perfLimitReason" ].toString().toStdString();
+  m_dGpuSnap.encoderUtilPct  = obj[ "encoderUtilPct" ].toInt( -1 );
+  m_dGpuSnap.decoderUtilPct  = obj[ "decoderUtilPct" ].toInt( -1 );
+  m_dGpuSnap.currentPstate   = obj[ "currentPstate" ].toInt( -1 );
+  m_dGpuSnap.grClockOffsetMHz  = obj[ "grClockOffsetMHz" ].toInt( -999 );
+  m_dGpuSnap.memClockOffsetMHz = obj[ "memClockOffsetMHz" ].toInt( -999 );
+  m_dGpuSnap.coreVoltageMv   = obj[ "coreVoltageMv" ].toInt( -1 );
+  m_dGpuSnap.fanSpeedPct     = obj[ "fanSpeedPct" ].toInt( -1 );
+}
+
+void UccdClient::refreshIGpuSnapshot()
+{
+  using clock = std::chrono::steady_clock;
+  auto now = clock::now();
+  if ( m_iGpuSnap.valid &&
+       std::chrono::duration_cast< std::chrono::milliseconds >( now - m_iGpuSnap.ts ).count() < SNAPSHOT_TTL_MS )
+    return;
+
+  m_iGpuSnap = {};
+  if ( !m_interface )
+    return;
+
+  QDBusMessage reply = m_interface->call( QStringLiteral( "GetIGpuInfoValuesJSON" ) );
+  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson( reply.arguments().at( 0 ).toString().toUtf8() );
+  if ( doc.isNull() || !doc.isObject() )
+    return;
+
+  const QJsonObject obj = doc.object();
+  m_iGpuSnap.ts    = now;
+  m_iGpuSnap.valid = true;
+  m_iGpuSnap.temp          = obj[ "temp" ].toInt( -1 );
+  m_iGpuSnap.coreFrequency = obj[ "coreFrequency" ].toInt( -1 );
+  m_iGpuSnap.powerDraw     = obj[ "powerDraw" ].toDouble( -1.0 );
+}
+
+void UccdClient::refreshCpuPowerSnapshot()
+{
+  using clock = std::chrono::steady_clock;
+  auto now = clock::now();
+  if ( m_cpuPowerSnap.valid &&
+       std::chrono::duration_cast< std::chrono::milliseconds >( now - m_cpuPowerSnap.ts ).count() < SNAPSHOT_TTL_MS )
+    return;
+
+  m_cpuPowerSnap = {};
+  if ( !m_interface )
+    return;
+
+  QDBusMessage reply = m_interface->call( QStringLiteral( "GetCpuPowerValuesJSON" ) );
+  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson( reply.arguments().at( 0 ).toString().toUtf8() );
+  if ( doc.isNull() || !doc.isObject() )
+    return;
+
+  const QJsonObject obj = doc.object();
+  m_cpuPowerSnap.ts    = now;
+  m_cpuPowerSnap.valid = true;
+  m_cpuPowerSnap.powerDraw = obj[ "powerDraw" ].toDouble( -1.0 );
+}
+
+// ---------------------------------------------------------------------------
+// System Monitoring implementations (using snapshot caches)
+// ---------------------------------------------------------------------------
+
 std::optional< int > UccdClient::getCpuTemperature()
 {
   return readFanDataValue( m_interface.get(), "GetFanDataCPU", "temp" );
@@ -1296,128 +1273,150 @@ std::optional< int > UccdClient::getCpuTemperature()
 
 std::optional< int > UccdClient::getGpuTemperature()
 {
-  if ( auto temp = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "temp" ) )
-    return temp;
+  refreshDGpuSnapshot();
+  if ( m_dGpuSnap.valid && m_dGpuSnap.temp >= 0 )
+    return m_dGpuSnap.temp;
 
-  return readJsonInt( m_interface.get(), "GetIGpuInfoValuesJSON", "temp" );
+  refreshIGpuSnapshot();
+  return ( m_iGpuSnap.valid && m_iGpuSnap.temp >= 0 )
+    ? std::optional< int >( m_iGpuSnap.temp ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getIGpuTemperature()
 {
-  return readJsonInt( m_interface.get(), "GetIGpuInfoValuesJSON", "temp" );
+  refreshIGpuSnapshot();
+  return ( m_iGpuSnap.valid && m_iGpuSnap.temp >= 0 )
+    ? std::optional< int >( m_iGpuSnap.temp ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getCpuFrequency()
 {
-  // Read from daemon (sysfs reading moved to HardwareMonitorWorker)
   return callMethod< int >( "GetCpuFrequencyMHz" );
 }
 
 std::optional< int > UccdClient::getGpuFrequency()
 {
-  if ( auto freq = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "coreFrequency" ) )
-  {
-    return freq;
-  }
-  return readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "coreFreq" );
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.coreFrequency >= 0 )
+    ? std::optional< int >( m_dGpuSnap.coreFrequency ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getIGpuFrequency()
 {
-  return readJsonInt( m_interface.get(), "GetIGpuInfoValuesJSON", "coreFrequency" );
+  refreshIGpuSnapshot();
+  return ( m_iGpuSnap.valid && m_iGpuSnap.coreFrequency >= 0 )
+    ? std::optional< int >( m_iGpuSnap.coreFrequency ) : std::nullopt;
 }
 
 std::optional< double > UccdClient::getCpuPower()
 {
-  return readJsonDouble( m_interface.get(), "GetCpuPowerValuesJSON", "powerDraw" );
+  refreshCpuPowerSnapshot();
+  return ( m_cpuPowerSnap.valid && m_cpuPowerSnap.powerDraw >= 0.0 )
+    ? std::optional< double >( m_cpuPowerSnap.powerDraw ) : std::nullopt;
 }
 
 std::optional< double > UccdClient::getGpuPower()
 {
-  if ( auto power = readJsonDouble( m_interface.get(), "GetDGpuInfoValuesJSON", "powerDraw" ) )
-  {
-    return power;
-  }
-  return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
+  refreshDGpuSnapshot();
+  if ( m_dGpuSnap.valid && m_dGpuSnap.powerDraw >= 0.0 )
+    return m_dGpuSnap.powerDraw;
+
+  refreshIGpuSnapshot();
+  return ( m_iGpuSnap.valid && m_iGpuSnap.powerDraw >= 0.0 )
+    ? std::optional< double >( m_iGpuSnap.powerDraw ) : std::nullopt;
 }
 
 std::optional< double > UccdClient::getIGpuPower()
 {
-  return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
+  refreshIGpuSnapshot();
+  return ( m_iGpuSnap.valid && m_iGpuSnap.powerDraw >= 0.0 )
+    ? std::optional< double >( m_iGpuSnap.powerDraw ) : std::nullopt;
 }
 
-// ---- Extended discrete GPU metrics ----
+// ---- Extended discrete GPU metrics (all from cached dGPU snapshot) ----
 
 std::optional< int > UccdClient::getDGpuComputeUtilPct()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "computeUtilPct" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.computeUtilPct >= 0 )
+    ? std::optional< int >( m_dGpuSnap.computeUtilPct ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuMemoryUtilPct()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "memoryUtilPct" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.memoryUtilPct >= 0 )
+    ? std::optional< int >( m_dGpuSnap.memoryUtilPct ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuVramUsedMiB()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "vramUsedMiB" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.vramUsedMiB >= 0 )
+    ? std::optional< int >( m_dGpuSnap.vramUsedMiB ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuVramTotalMiB()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "vramTotalMiB" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.vramTotalMiB >= 0 )
+    ? std::optional< int >( m_dGpuSnap.vramTotalMiB ) : std::nullopt;
 }
 
 std::optional< std::string > UccdClient::getDGpuPerfLimitReason()
 {
-  auto v = readJsonString( m_interface.get(), "GetDGpuInfoValuesJSON", "perfLimitReason" );
-  return ( v && !v->empty() ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && !m_dGpuSnap.perfLimitReason.empty() )
+    ? std::optional< std::string >( m_dGpuSnap.perfLimitReason ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuEncoderUtilPct()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "encoderUtilPct" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.encoderUtilPct >= 0 )
+    ? std::optional< int >( m_dGpuSnap.encoderUtilPct ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuDecoderUtilPct()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "decoderUtilPct" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.decoderUtilPct >= 0 )
+    ? std::optional< int >( m_dGpuSnap.decoderUtilPct ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuCurrentPstate()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "currentPstate" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.currentPstate >= 0 )
+    ? std::optional< int >( m_dGpuSnap.currentPstate ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuGrClockOffsetMHz()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "grClockOffsetMHz" );
-  return ( v && *v != -999 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.grClockOffsetMHz != -999 )
+    ? std::optional< int >( m_dGpuSnap.grClockOffsetMHz ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuMemClockOffsetMHz()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "memClockOffsetMHz" );
-  return ( v && *v != -999 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.memClockOffsetMHz != -999 )
+    ? std::optional< int >( m_dGpuSnap.memClockOffsetMHz ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuVramFrequencyMHz()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "vramFrequency" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.vramFrequency >= 0 )
+    ? std::optional< int >( m_dGpuSnap.vramFrequency ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getDGpuCoreVoltageMv()
 {
-  auto v = readJsonInt( m_interface.get(), "GetDGpuInfoValuesJSON", "coreVoltageMv" );
-  return ( v && *v >= 0 ) ? v : std::nullopt;
+  refreshDGpuSnapshot();
+  return ( m_dGpuSnap.valid && m_dGpuSnap.coreVoltageMv >= 0 )
+    ? std::optional< int >( m_dGpuSnap.coreVoltageMv ) : std::nullopt;
 }
 
 std::optional< int > UccdClient::getFanSpeedRPM()
@@ -1531,18 +1530,14 @@ std::optional< std::string > UccdClient::getMonitorSourcesJSON()
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getFpsSourcesJSON()
+std::optional< QVariantMap > UccdClient::getFpsSources()
 {
-  if ( auto result = callMethod< QString >( "GetFpsSourcesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetFpsSources" );
 }
 
-std::optional< std::string > UccdClient::getAutoUvAutoApplyStatusJSON()
+std::optional< QVariantMap > UccdClient::getAutoUvAutoApplyStatus()
 {
-  if ( auto result = callMethod< QString >( "GetAutoUvAutoApplyStatusJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetAutoUvAutoApplyStatus" );
 }
 
 bool UccdClient::setFpsSourceApp( const std::string &appName )
@@ -1566,5 +1561,27 @@ void UccdClient::subscribePowerStateChanged( [[maybe_unused]] PowerStateChangedC
 {
   // Already handled via Qt signal connection
 }
+
+// Explicit template instantiations — required because the template bodies are
+// defined in this .cpp file rather than the header.  The linker (especially
+// with LTO) needs these to satisfy external callers that invoke the methods
+// via inline wrappers declared in UccdClient.hpp.
+template std::optional< bool >    UccdClient::callMethod< bool >( const QString & ) const;
+template std::optional< int >     UccdClient::callMethod< int  >( const QString & ) const;
+template std::optional< QString > UccdClient::callMethod< QString >( const QString & ) const;
+template std::optional< QVariantMap > UccdClient::callMethod< QVariantMap >( const QString & ) const;
+template std::optional< QVariantList > UccdClient::callMethod< QVariantList >( const QString & ) const;
+
+template std::optional< bool > UccdClient::callMethod< bool, QString >( const QString &, const QString & ) const;
+template std::optional< bool > UccdClient::callMethod< bool, QString, QString >( const QString &, const QString &, const QString & ) const;
+template std::optional< bool > UccdClient::callMethod< bool, QString, QString, QString >( const QString &, const QString &, const QString &, const QString & ) const;
+template std::optional< bool > UccdClient::callMethod< bool, int >( const QString &, const int & ) const;
+template std::optional< QString > UccdClient::callMethod< QString, QString >( const QString &, const QString & ) const;
+
+template bool UccdClient::callVoidMethod< QString >( const QString &, const QString & ) const;
+template bool UccdClient::callVoidMethod< int >( const QString &, const int & ) const;
+template bool UccdClient::callVoidMethod< bool >( const QString &, const bool & ) const;
+template bool UccdClient::callVoidMethod< QString, QString >( const QString &, const QString &, const QString & ) const;
+template bool UccdClient::callVoidMethod< QString, QString, QString >( const QString &, const QString &, const QString &, const QString & ) const;
 
 } // namespace ucc

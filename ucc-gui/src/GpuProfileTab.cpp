@@ -1272,15 +1272,9 @@ void GpuProfileTab::showAutoOCDialog()
 
   if ( auto ocProgress = m_uccdClient->getAutoOCProgress(); ocProgress.has_value() )
   {
-    const QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *ocProgress ).toUtf8() );
-    if ( doc.isObject() )
+    if ( !ocProgress->value( "running" ).toBool() && ocProgress->value( "resumeAvailable" ).toBool() )
     {
-      const QJsonObject obj = doc.object();
-      if ( !obj.value( "running" ).toBool( false ) && obj.value( "resumeAvailable" ).toBool( false ) )
-      {
-        statusLabel->setText( obj.value( "message" ).toString(
-          "Resume available. Start the game/application, then click Resume to continue." ) );
-      }
+      statusLabel->setText( ocProgress->value( "message" ).toString() );
     }
   }
 
@@ -1365,15 +1359,10 @@ void GpuProfileTab::showAutoOCDialog()
   // ── D-Bus signal connections (cleaned up on dialog close) ──
   QMetaObject::Connection progressConn = connect(
     m_uccdClient, &UccdClient::autoOCProgressChanged,
-    dlg, [=]( const QString &json )
+    dlg, [=]( const QVariantMap &p )
     {
-      QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
-      if ( !doc.isObject() )
-        return;
-      QJsonObject obj = doc.object();
-
       // Phase name (daemon sends string: "idle","baseline","searching","validating","done")
-      QString phaseStr = obj["phase"].toString( "idle" );
+      QString phaseStr = p.value( "phase", "idle" ).toString();
       auto phase = ( phaseStr == "baseline" )   ? OCPhase::Baseline
                   : ( phaseStr == "searching" )  ? OCPhase::Searching
                   : ( phaseStr == "validating" ) ? OCPhase::Validating
@@ -1384,13 +1373,13 @@ void GpuProfileTab::showAutoOCDialog()
       phaseValueLabel->setText( phaseNames[static_cast< int >( phase )] );
 
       // Component (daemon sends string: "core" or "vram")
-      QString compStr = obj["component"].toString( "core" );
+      QString compStr = p.value( "component", "core" ).toString();
       bool isVram = ( compStr == "vram" );
       QString compName = isVram ? "VRAM" : "Core";
 
       // Offsets (daemon keys: "currentOffset", "bestStable")
-      int currentOff = obj["currentOffset"].toInt( 0 );
-      int bestStable = obj["bestStable"].toInt( 0 );
+      int currentOff = p.value( "currentOffset", 0 ).toInt();
+      int bestStable = p.value( "bestStable", 0 ).toInt();
 
       if ( isVram )
       {
@@ -1404,11 +1393,11 @@ void GpuProfileTab::showAutoOCDialog()
       }
 
       // Live metrics (daemon keys: "temp", "gpuClock", "vramClock", "gpuUtil", "fps")
-      int tempC = obj["temp"].toInt( 0 );
-      int gpuClk = obj["gpuClock"].toInt( 0 );
-      int vramClk = obj["vramClock"].toInt( 0 );
-      int gpuUtil = obj["gpuUtil"].toInt( 0 );
-      double fps = obj["fps"].toDouble( -1.0 );
+      int tempC = p.value( "temp", 0 ).toInt();
+      int gpuClk = p.value( "gpuClock", 0 ).toInt();
+      int vramClk = p.value( "vramClock", 0 ).toInt();
+      int gpuUtil = p.value( "gpuUtil", 0 ).toInt();
+      double fps = p.value( "fps", -1.0 ).toDouble();
 
       tempValueLabel->setText( tempC > 0 ? QString( "%1 °C" ).arg( tempC ) : "—" );
       clockValueLabel->setText( gpuClk > 0 ? QString( "%1 MHz" ).arg( gpuClk ) : "—" );
@@ -1417,8 +1406,8 @@ void GpuProfileTab::showAutoOCDialog()
       fpsValueLabel->setText( fps >= 0.0 ? QString( "%1 fps" ).arg( fps, 0, 'f', 1 ) : "—" );
 
       // Progress bar
-      int iter = obj["iteration"].toInt( 0 );
-      int maxIter = obj["maxIterations"].toInt( 1 );
+      int iter = p.value( "iteration", 0 ).toInt();
+      int maxIter = p.value( "maxIterations", 1 ).toInt();
       if ( phase == OCPhase::Baseline )
       {
         progressBar->setRange( 0, 0 );
@@ -1438,7 +1427,7 @@ void GpuProfileTab::showAutoOCDialog()
       }
 
       // Status message
-      QString msg = obj["message"].toString();
+      QString msg = p.value( "message" ).toString();
       if ( !msg.isEmpty() )
         statusLabel->setText( msg );
     } );
@@ -1658,15 +1647,9 @@ void GpuProfileTab::showAutoUndervoltDialog()
 
   if ( auto uvProgress = m_uccdClient->getAutoUndervoltProgress(); uvProgress.has_value() )
   {
-    const QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *uvProgress ).toUtf8() );
-    if ( doc.isObject() )
+    if ( !uvProgress->value( "running" ).toBool() && uvProgress->value( "resumeAvailable" ).toBool() )
     {
-      const QJsonObject obj = doc.object();
-      if ( !obj.value( "running" ).toBool( false ) && obj.value( "resumeAvailable" ).toBool( false ) )
-      {
-        statusLabel->setText( obj.value( "message" ).toString(
-          "Resume available. Start the game/application, then click Resume to continue." ) );
-      }
+      statusLabel->setText( uvProgress->value( "message" ).toString() );
     }
   }
 
@@ -1799,14 +1782,9 @@ void GpuProfileTab::showAutoUndervoltDialog()
   // ── D-Bus signal connections ──
   QMetaObject::Connection progressConn = connect(
     m_uccdClient, &UccdClient::autoUndervoltProgressChanged,
-    dlg, [=]( const QString &json )
+    dlg, [=]( const QVariantMap &p )
     {
-      QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
-      if ( !doc.isObject() )
-        return;
-      QJsonObject obj = doc.object();
-
-      QString phaseStr = obj["phase"].toString( "idle" );
+      QString phaseStr = p.value( "phase", "idle" ).toString();
       auto phase = ( phaseStr == "baseline" )         ? UVPhase::Baseline
                   : ( phaseStr == "capReduction" )    ? UVPhase::CapReduction
                   : ( phaseStr == "searching" )       ? UVPhase::Searching
@@ -1820,25 +1798,25 @@ void GpuProfileTab::showAutoUndervoltDialog()
         "Power Limit Sweep", "Done" };
       phaseValueLabel->setText( phaseNames[static_cast< int >( phase )] );
 
-      QString app = obj["app"].toString();
+      QString app = p.value( "app" ).toString();
       if ( !app.isEmpty() )
         appValueLabel->setText( app );
 
-      int currentCap = obj["currentCapMHz"].toInt( 0 );
-      int bestCap = obj["bestCapMHz"].toInt( 0 );
-      int plW = obj["currentPowerLimitW"].toInt( 0 );
+      int currentCap = p.value( "currentCapMHz", 0 ).toInt();
+      int bestCap = p.value( "bestCapMHz", 0 ).toInt();
+      int plW = p.value( "currentPowerLimitW", 0 ).toInt();
       capValueLabel->setText(
         ( plW > 0 && currentCap > 0 ) ? QString( "%1 MHz (best: %2) / %3 W" ).arg( currentCap ).arg( bestCap ).arg( plW )
         : ( plW > 0 )                  ? QString( "%1 W (power limit)" ).arg( plW )
         : ( currentCap > 0 )            ? QString( "%1 MHz (best: %2)" ).arg( currentCap ).arg( bestCap )
                                         : capValueLabel->text() );
 
-      int tempC = obj["temp"].toInt( 0 );
-      int gpuClk = obj["gpuClock"].toInt( 0 );
-      int powerW = obj["powerDraw"].toInt( 0 );
-      int gpuUtil = obj["gpuUtil"].toInt( 0 );
-      double fps = obj["fps"].toDouble( -1.0 );
-      double blFps = obj["baselineFps"].toDouble( -1.0 );
+      int tempC = p.value( "temp", 0 ).toInt();
+      int gpuClk = p.value( "gpuClock", 0 ).toInt();
+      int powerW = p.value( "powerDraw", 0 ).toInt();
+      int gpuUtil = p.value( "gpuUtil", 0 ).toInt();
+      double fps = p.value( "fps", -1.0 ).toDouble();
+      double blFps = p.value( "baselineFps", -1.0 ).toDouble();
 
       tempValueLabel->setText( tempC > 0 ? QString( "%1 °C" ).arg( tempC ) : "—" );
       clockValueLabel->setText( gpuClk > 0 ? QString( "%1 MHz" ).arg( gpuClk ) : "—" );
@@ -1847,8 +1825,8 @@ void GpuProfileTab::showAutoUndervoltDialog()
       fpsValueLabel->setText( fps >= 0.0 ? QString( "%1" ).arg( fps, 0, 'f', 1 ) : "—" );
       baselineFpsLabel->setText( blFps >= 0.0 ? QString( "%1" ).arg( blFps, 0, 'f', 1 ) : "—" );
 
-      double fpsPerWatt = obj["fpsPerWatt"].toDouble( 0.0 );
-      double baselineFpw = obj["baselineFpsPerWatt"].toDouble( 0.0 );
+      double fpsPerWatt = p.value( "fpsPerWatt", 0.0 ).toDouble();
+      double baselineFpw = p.value( "baselineFpsPerWatt", 0.0 ).toDouble();
       if ( fpsPerWatt > 0.0 && baselineFpw > 0.0 )
       {
         double gainPct = ( ( fpsPerWatt - baselineFpw ) / baselineFpw ) * 100.0;
@@ -1862,8 +1840,8 @@ void GpuProfileTab::showAutoUndervoltDialog()
       else
         efficiencyValueLabel->setText( "—" );
 
-      int iter = obj["iteration"].toInt( 0 );
-      int maxIter = obj["maxIterations"].toInt( 1 );
+      int iter = p.value( "iteration", 0 ).toInt();
+      int maxIter = p.value( "maxIterations", 1 ).toInt();
       if ( phase == UVPhase::Baseline )
       {
         progressBar->setRange( 0, 0 );
@@ -1893,7 +1871,7 @@ void GpuProfileTab::showAutoUndervoltDialog()
         progressBar->setFormat( "Power Limit Sweep — step %v/%m" );
       }
 
-      QString msg = obj["message"].toString();
+      QString msg = p.value( "message" ).toString();
       if ( !msg.isEmpty() )
         statusLabel->setText( msg );
     } );
@@ -2056,11 +2034,9 @@ void GpuProfileTab::handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
 {
   // Determine resume mode from checkpoint's suspendReason
   QString suspendReason;
-  if ( auto progressJson = m_uccdClient->getAutoOCProgress() )
+  if ( auto progressMap = m_uccdClient->getAutoOCProgress() )
   {
-    QJsonDocument pdoc = QJsonDocument::fromJson(
-      QString::fromStdString( *progressJson ).toUtf8() );
-    suspendReason = pdoc.object().value( "suspendReason" ).toString();
+    suspendReason = progressMap->value( "suspendReason" ).toString();
   }
 
   std::string resumeMode = askResumeMode( dlg, "Resume Overclock Scan", suspendReason );
@@ -2068,11 +2044,9 @@ void GpuProfileTab::handleResumeAutoOC( QDialog *dlg, QComboBox *componentCombo,
     return;  // user cancelled
 
   // Verify an FPS client is connected
-  if ( auto fpsJson = m_uccdClient->getFpsSourcesJSON() )
+  if ( auto fpsMap = m_uccdClient->getFpsSources() )
   {
-    QJsonDocument doc = QJsonDocument::fromJson(
-      QString::fromStdString( *fpsJson ).toUtf8() );
-    if ( doc.object().value( "currentApp" ).toString().isEmpty() )
+    if ( fpsMap->value( "currentApp" ).toString().isEmpty() )
     {
       QMessageBox::warning( dlg, "Cannot Resume",
         "No application is delivering FPS data.\n\n"
@@ -2118,11 +2092,8 @@ void GpuProfileTab::handleResumeAutoUV( QDialog *dlg,
   QString suspendReason;
   if ( auto uvProgress = m_uccdClient->getAutoUndervoltProgress() )
   {
-    QJsonDocument pdoc = QJsonDocument::fromJson(
-      QString::fromStdString( *uvProgress ).toUtf8() );
-    QJsonObject pobj = pdoc.object();
-    expectedApp = pobj.value( "checkpointApp" ).toString();
-    suspendReason = pobj.value( "suspendReason" ).toString();
+    expectedApp = uvProgress->value( "checkpointApp" ).toString();
+    suspendReason = uvProgress->value( "suspendReason" ).toString();
   }
 
   std::string resumeMode = askResumeMode( dlg, "Resume Undervolt Scan", suspendReason );
@@ -2130,11 +2101,9 @@ void GpuProfileTab::handleResumeAutoUV( QDialog *dlg,
     return;  // user cancelled
 
   // Verify the expected application is running and delivering FPS
-  if ( auto fpsJson = m_uccdClient->getFpsSourcesJSON() )
+  if ( auto fpsMap = m_uccdClient->getFpsSources() )
   {
-    QJsonDocument doc = QJsonDocument::fromJson(
-      QString::fromStdString( *fpsJson ).toUtf8() );
-    QString currentApp = doc.object().value( "currentApp" ).toString();
+    QString currentApp = fpsMap->value( "currentApp" ).toString();
     if ( currentApp.isEmpty() )
     {
       QString msg = "No application is delivering FPS data.\n\n";

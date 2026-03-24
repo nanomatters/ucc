@@ -93,11 +93,15 @@ static inline const UccOverlayData *read_shm()
 
 // ─── CPU text rendering ─────────────────────────────────────────────────────
 
-static inline void draw_char( uint32_t *buf, int stride, int px, int py,
-                              char c, uint32_t color, int maxW, int maxH )
+// Degree symbol (°) glyph — not in the ASCII font table.
+static const unsigned char kGlyphDegree[8] = {
+  0x0C, 0x12, 0x12, 0x0C, 0x00, 0x00, 0x00, 0x00
+};
+
+static inline void draw_glyph( uint32_t *buf, int stride, int px, int py,
+                               const unsigned char *glyph, uint32_t color,
+                               int maxW, int maxH )
 {
-  if ( c < 32 || c > 126 ) c = '?';
-  const unsigned char *glyph = font8x8_basic[ static_cast<int>( c ) ];
   for ( int row = 0; row < 8; ++row )
   {
     unsigned char bits = glyph[ row ];
@@ -117,14 +121,54 @@ static inline void draw_char( uint32_t *buf, int stride, int px, int py,
   }
 }
 
+static inline void draw_char( uint32_t *buf, int stride, int px, int py,
+                              char c, uint32_t color, int maxW, int maxH )
+{
+  if ( c < 32 || c > 126 ) c = '?';
+  draw_glyph( buf, stride, px, py,
+              font8x8_basic[ static_cast<int>( c ) ], color, maxW, maxH );
+}
+
+/// Draw a string with basic UTF-8 awareness (handles ° / U+00B0).
 static inline void draw_str( uint32_t *buf, int stride, int col, int row,
                              const char *text, uint32_t color,
                              int maxW, int maxH )
 {
   int px = kPadX + col * kCharW;
   int py = kPadY + row * kCharH;
-  for ( int i = 0; text[ i ] && ( col + i ) < kMaxCols; ++i )
-    draw_char( buf, stride, px + i * kCharW, py, text[ i ], color, maxW, maxH );
+  int ci = 0;  // column index for positioning
+  for ( int i = 0; text[ i ] && ( col + ci ) < kMaxCols; ++i, ++ci )
+  {
+    const auto b = static_cast< unsigned char >( text[ i ] );
+    // UTF-8 two-byte sequence for ° (U+00B0): 0xC2 0xB0
+    if ( b == 0xC2 && static_cast< unsigned char >( text[ i + 1 ] ) == 0xB0 )
+    {
+      draw_glyph( buf, stride, px + ci * kCharW, py,
+                  kGlyphDegree, color, maxW, maxH );
+      ++i;  // skip second byte of the UTF-8 pair
+      continue;
+    }
+    // Skip continuation bytes of other unhandled multi-byte sequences
+    if ( b >= 0x80 && b < 0xC0 )
+    {
+      --ci;  // don't advance column for skipped continuation bytes
+      continue;
+    }
+    // Skip lead bytes of unhandled multi-byte sequences (render nothing)
+    if ( b >= 0xC0 && b != 0xC2 )
+    {
+      --ci;
+      continue;
+    }
+    if ( b >= 0xC2 && b <= 0xDF )
+    {
+      // Two-byte sequence we don't have a glyph for — render '?' and skip
+      draw_char( buf, stride, px + ci * kCharW, py, '?', color, maxW, maxH );
+      if ( text[ i + 1 ] ) ++i;
+      continue;
+    }
+    draw_char( buf, stride, px + ci * kCharW, py, text[ i ], color, maxW, maxH );
+  }
 }
 
 static inline void render_overlay( uint32_t *buf,
@@ -191,7 +235,7 @@ static inline void render_overlay( uint32_t *buf,
   draw_str( buf, kOverlayW, 0, r++, line, cText, kOverlayW, kOverlayH );
 
   // ── telemetry ──
-  std::snprintf( line, sizeof( line ), "Clock: %d MHz  Temp: %d C",
+  std::snprintf( line, sizeof( line ), "Clock: %d MHz  Temp: %d\xC2\xB0""C",
                  d.gpuClockMHz, d.tempC );
   draw_str( buf, kOverlayW, 0, r++, line, cLabel, kOverlayW, kOverlayH );
 

@@ -40,6 +40,22 @@ bool parseProfileArray( const std::string &jsonStr,
   return true;
 }
 
+/// Parse a QVariantList of { id, name } maps into parallel name/id lists.
+bool parseProfileArray( const QVariantList &list,
+                        QStringList &outNames, QStringList &outIds )
+{
+  for ( const auto &val : list )
+  {
+    const auto map = val.toMap();
+    QString id   = map.value( "id" ).toString();
+    QString name = map.value( "name" ).toString();
+    if ( id.isEmpty() ) continue;
+    outIds.append( id );
+    outNames.append( name );
+  }
+  return !list.isEmpty();
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -597,18 +613,13 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
   {
     emit activeProfileChanged();
 
-    if ( auto json = m_client->getAppliedProfilesJSON() )
+    if ( auto applied = m_client->getAppliedProfiles() )
     {
-      auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-      if ( doc.isObject() )
+      const bool autoWC = applied->value( "wcAutoControl" ).toBool();
+      if ( autoWC != m_wcAutoControl )
       {
-        const auto obj = doc.object();
-        const bool autoWC = obj[ "wcAutoControl" ].toBool( true );
-        if ( autoWC != m_wcAutoControl )
-        {
-          m_wcAutoControl = autoWC;
-          emit wcAutoControlChanged();
-        }
+        m_wcAutoControl = autoWC;
+        emit wcAutoControlChanged();
       }
     }
   }
@@ -672,31 +683,26 @@ void TrayBackend::loadProfiles()
   }
 
   // Active profile
-  if ( auto json = m_client->getAppliedProfilesJSON() )
+  if ( auto applied = m_client->getAppliedProfiles() )
   {
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-    if ( doc.isObject() )
-    {
-      auto obj = doc.object();
-      m_activeProfileId = obj[ "profileId" ].toString();
-      m_activeProfileName = obj[ "profileName" ].toString();
-      m_activeProfileFanId = obj[ "fanProfileId" ].toString();
-      m_activeProfileFanName = resolveFanProfileName( m_activeProfileFanId );
-      m_activeProfileKeyboardId = obj[ "keyboardProfileId" ].toString();
-      m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
-      m_activeProfileGpuId = obj[ "appliedGpuProfileId" ].toString();
-      m_activeProfileGpuName = resolveGpuProfileName( m_activeProfileGpuId );
-      fprintf( stderr, "[TrayBackend] Active profile: %s / %s\n",
-               qPrintable( m_activeProfileId ), qPrintable( m_activeProfileName ) );
-      emit activeProfileChanged();
-    }
+    m_activeProfileId = applied->value( "profileId" ).toString();
+    m_activeProfileName = applied->value( "profileName" ).toString();
+    m_activeProfileFanId = applied->value( "fanProfileId" ).toString();
+    m_activeProfileFanName = resolveFanProfileName( m_activeProfileFanId );
+    m_activeProfileKeyboardId = applied->value( "keyboardProfileId" ).toString();
+    m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
+    m_activeProfileGpuId = applied->value( "appliedGpuProfileId" ).toString();
+    m_activeProfileGpuName = resolveGpuProfileName( m_activeProfileGpuId );
+    fprintf( stderr, "[TrayBackend] Active profile: %s / %s\n",
+             qPrintable( m_activeProfileId ), qPrintable( m_activeProfileName ) );
+    emit activeProfileChanged();
   }
 
   // Fan profiles
   {
     QStringList fpNames, fpIds;
-    if ( auto json = m_client->getFanProfilesJSON() )
-      parseProfileArray( *json, fpNames, fpIds );
+    if ( auto fanList = m_client->getFanProfiles() )
+      parseProfileArray( *fanList, fpNames, fpIds );
     if ( fpIds != m_fanProfileIds || fpNames != m_fanProfileNames )
     {
       m_fanProfileIds   = fpIds;

@@ -731,17 +731,17 @@ static int cmdFanList( ucc::UccdClient &c )
 {
   LocalAssignments assignments = loadLocalAssignments( c );
 
-  auto json = c.getFanProfilesJSON();
+  auto json = c.getFanProfiles();
   if ( !json )
   {
     std::fputs( "Error: Could not retrieve fan profiles\n", stderr );
     return 1;
   }
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-  if ( doc.isArray() )
+  QJsonArray arr = QJsonArray::fromVariantList( *json );
+  if ( !arr.isEmpty() )
   {
     std::puts( "Fan profiles:" );
-    for ( const QJsonValue &v : doc.array() )
+    for ( const QJsonValue &v : arr )
     {
       if ( v.isObject() )
       {
@@ -754,10 +754,6 @@ static int cmdFanList( ucc::UccdClient &c )
                      tag.toStdString().c_str() );
       }
     }
-  }
-  else
-  {
-    printJSON( *json );
   }
 
   // All fan profiles (built-in + custom) are now in the daemon response above
@@ -1732,28 +1728,22 @@ static int cmdGpuAutoOC( ucc::UccdClient &c, const char *component )
   std::atomic_bool done{ false };
   int exitCode = 0;
 
-  c.subscribeAutoOCProgress( [&]( const std::string &json )
+  c.subscribeAutoOCProgress( [&]( const QVariantMap &p )
   {
-    // Parse and display nicely
-    auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
-    if ( doc.isObject() )
-    {
-      auto obj = doc.object();
-      std::string phase   = obj["phase"].toString().toStdString();
-      std::string msg     = obj["message"].toString().toStdString();
-      int         offset  = obj["currentOffset"].toInt();
-      int         best    = obj["bestStable"].toInt();
-      int         iter    = obj["iteration"].toInt();
-      int         maxIter = obj["maxIterations"].toInt();
-      int         temp    = obj["temp"].toInt();
-      int         gpuClk  = obj["gpuClock"].toInt();
-      int         gpuUtil = obj["gpuUtil"].toInt();
+    std::string phase   = p.value( "phase" ).toString().toStdString();
+    std::string msg     = p.value( "message" ).toString().toStdString();
+    int         offset  = p.value( "currentOffset", 0 ).toInt();
+    int         best    = p.value( "bestStable", 0 ).toInt();
+    int         iter    = p.value( "iteration", 0 ).toInt();
+    int         maxIter = p.value( "maxIterations", 0 ).toInt();
+    int         temp    = p.value( "temp", 0 ).toInt();
+    int         gpuClk  = p.value( "gpuClock", 0 ).toInt();
+    int         gpuUtil = p.value( "gpuUtil", 0 ).toInt();
 
-      std::printf( "\r[%s] offset=%+d best=%+d step=%d/%d temp=%d°C clk=%dMHz util=%d%% %s",
-                   phase.c_str(), offset, best, iter, maxIter, temp, gpuClk, gpuUtil,
-                   msg.c_str() );
-      std::fflush( stdout );
-    }
+    std::printf( "\r[%s] offset=%+d best=%+d step=%d/%d temp=%d°C clk=%dMHz util=%d%% %s",
+                 phase.c_str(), offset, best, iter, maxIter, temp, gpuClk, gpuUtil,
+                 msg.c_str() );
+    std::fflush( stdout );
   } );
 
   c.subscribeAutoOCFinished( [&]( int coreOffset, int vramOffset, bool success, const std::string &msg )
@@ -1924,7 +1914,7 @@ static int cmdStateMapSet( ucc::UccdClient &c, const char *state, const char *pr
 static int cmdCpuInfo( ucc::UccdClient &c )
 {
   auto cores = c.getCpuCoreCount();
-  auto freqLimits = c.getCpuFrequencyLimitsJSON();
+  auto freqLimits = c.getCpuFrequencyLimits();
   auto govs = c.getAvailableCpuGovernors();
   auto epps = c.getAvailableEPPs();
 
@@ -1958,15 +1948,10 @@ static int cmdCpuInfo( ucc::UccdClient &c )
 
   if ( freqLimits )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *freqLimits ) );
-    if ( doc.isObject() )
-    {
-      QJsonObject obj = doc.object();
-      int minKHz = obj["min"].toInt();
-      int maxKHz = obj["max"].toInt();
-      std::printf( "  %-24s %d MHz\n", "Min frequency:", minKHz / 1000 );
-      std::printf( "  %-24s %d MHz\n", "Max frequency:", maxKHz / 1000 );
-    }
+    int minKHz = freqLimits->value( "min" ).toInt();
+    int maxKHz = freqLimits->value( "max" ).toInt();
+    std::printf( "  %-24s %d MHz\n", "Min frequency:", minKHz / 1000 );
+    std::printf( "  %-24s %d MHz\n", "Max frequency:", maxKHz / 1000 );
   }
 
   return 0;
@@ -1984,7 +1969,8 @@ static int cmdPowerLimits( ucc::UccdClient &c )
   }
   std::puts( "ODM Power Limits:" );
   for ( size_t i = 0; i < limits->size(); ++i )
-    std::printf( "  %-24s %d W\n", tdpLabel( (int)i ), ( *limits )[i] );
+    std::printf( "  %-24s %d W\n", tdpLabel( (int)i ),
+                 ( *limits )[i].toMap().value( "max" ).toInt() );
   return 0;
 }
 

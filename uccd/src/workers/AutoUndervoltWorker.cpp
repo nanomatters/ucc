@@ -202,6 +202,54 @@ struct FpsStats
   double pct1Low = 0.0; ///< 1st-percentile (1% low)
 };
 
+/// Per-frame variant: compute stats from the FrameTimeBuffer (microsecond
+/// frame durations).  The 1% low is derived as 1e6 / p99(frame_time), which
+/// is the FPS that the slowest 1% of frames achieve.
+FpsStats computeFpsStatsFromFrameTimes( const FrameTimeBuffer &buf, int windowMs )
+{
+  FpsStats out{};
+  const double windowUs = static_cast< double >( windowMs ) * 1000.0;
+  auto sorted = buf.windowSorted( windowUs );
+  const size_t n = sorted.size();
+  if ( n < 2 )
+    return out;
+
+  // Mean FPS from mean frame time
+  double sumFt = 0.0;
+  for ( double ft : sorted )
+    sumFt += ft;
+  const double meanFt = sumFt / static_cast< double >( n );
+  out.mean = ( meanFt > 0.0 ) ? 1'000'000.0 / meanFt : 0.0;
+
+  // Stddev in FPS domain: convert each frame time to FPS, compute stddev
+  double sumFps = 0.0;
+  std::vector< double > fpsVals;
+  fpsVals.reserve( n );
+  for ( double ft : sorted )
+  {
+    const double f = ( ft > 0.0 ) ? 1'000'000.0 / ft : 0.0;
+    fpsVals.push_back( f );
+    sumFps += f;
+  }
+  const double fMean = sumFps / static_cast< double >( n );
+  double sqSum = 0.0;
+  for ( double f : fpsVals )
+  {
+    const double d = f - fMean;
+    sqSum += d * d;
+  }
+  out.stddev = std::sqrt( sqSum / static_cast< double >( n ) );
+
+  // 1% low: p99 frame time → FPS
+  // sorted is ascending frame times; p99 is the 99th percentile (longest)
+  const size_t p99Idx = static_cast< size_t >( static_cast< double >( n ) * 0.99 );
+  const double p99Ft = sorted[ std::min( p99Idx, n - 1 ) ];
+  out.pct1Low = ( p99Ft > 0.0 ) ? 1'000'000.0 / p99Ft : 0.0;
+
+  return out;
+}
+
+/// Legacy fallback: compute stats from aggregated FPS samples (500ms polls).
 FpsStats computeFpsStats( const std::vector< double > &samples,
                           int pollIntervalMs, int windowMs )
 {
@@ -368,6 +416,7 @@ bool AutoUndervoltWorker::start( unsigned int deviceIndex,
   m_pauseRequested = false;
 
   m_appName = m_fpsServer->clientAppName();
+
   if ( m_appName.empty() )
     log( "AutoUV: no FPS client connected yet — will detect during baseline" );
   else
@@ -377,38 +426,9 @@ bool AutoUndervoltWorker::start( unsigned int deviceIndex,
   // or failed validation.
   captureOriginalState();
 
-  if ( tryResumeFromCheckpoint( deviceIndex ) )
-    return true;
+  if ( not tryResumeFromCheckpoint( deviceIndex ) )
+    enterBaseline();
 
-  // Platform-adaptive offset search defaults:
-  // desktop GPUs get a larger sweep (700 MHz max, 35 MHz steps), while
-  // mobile-tagged GPUs keep their configured values.
-  // Only override when the user hasn't explicitly set custom values
-  // (i.e. the values still match the struct defaults).
-  if ( auto ocState = m_nvml->getOCState( deviceIndex ); ocState.has_value() )
-  {
-    if ( isLikelyDesktopNvidiaGpu( *ocState ) )
-    {
-      const UndervoltConfig defaults;
-      if ( m_config.maxCoreOffsetMHz == defaults.maxCoreOffsetMHz )
-        m_config.maxCoreOffsetMHz = 700;
-      if ( m_config.offsetStepMHz == defaults.offsetStepMHz )
-        m_config.offsetStepMHz = 35;
-      log( "AutoUV: desktop GPU detected ('" + ocState->gpuName
-           + "') — using offset sweep max="
-           + std::to_string( m_config.maxCoreOffsetMHz ) + " MHz, step="
-           + std::to_string( m_config.offsetStepMHz ) + " MHz" );
-    }
-    else
-    {
-      log( "AutoUV: mobile GPU detected ('" + ocState->gpuName
-           + "') — using offset sweep max="
-           + std::to_string( m_config.maxCoreOffsetMHz ) + " MHz, step="
-           + std::to_string( m_config.offsetStepMHz ) + " MHz" );
-    }
-  }
-
-  enterBaseline();
   return true;
 }
 
@@ -1474,8 +1494,11 @@ void AutoUndervoltWorker::onPollTick()
                       nvapiLimiterPct, minFps );
 
     // Frame time stutter gate (#3): compute FPS variance for this step.
-    const auto fpsStats = computeFpsStats( m_stepFpsSamples,
-      m_config.pollIntervalMs, m_config.fpsCompareWindowMs );
+    // Prefer per-frame data from the FPS layer when available; fall back to
+    // aggregated 500ms FPS samples for old layer versions.
+    const auto fpsStats = ( m_fpsServer && m_fpsServer->hasFrameTimes() )
+      ? computeFpsStatsFromFrameTimes( m_fpsServer->frameTimes(), m_config.fpsCompareWindowMs )
+      : computeFpsStats( m_stepFpsSamples, m_config.pollIntervalMs, m_config.fpsCompareWindowMs );
     const double fpsStddevPct = ( fpsStats.mean > 0.0 )
       ? ( fpsStats.stddev / fpsStats.mean ) * 100.0 : 0.0;
     const double pct1LowRatio = ( fpsStats.mean > 0.0 )

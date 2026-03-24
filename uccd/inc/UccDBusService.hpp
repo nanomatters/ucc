@@ -284,7 +284,7 @@ public slots:
   QVariantMap GetFanDataCPU();
   QVariantMap GetFanDataGPU1();
   QVariantMap GetFanDataGPU2();
-  QString GetFanZoneTelemetryJSON();
+  QVariantMap GetFanZoneTelemetry();
 
   // webcam and display methods
   bool WebcamSWAvailable();
@@ -305,7 +305,7 @@ public slots:
 
   // profile methods
   QString GetActiveProfileJSON();
-  QString GetAppliedProfilesJSON();
+  QVariantMap GetAppliedProfiles();
   QString GetPowerState();
   bool SetTempProfile( const QString &profileName );
   bool SetActiveProfile( const QString &id );
@@ -313,20 +313,20 @@ public slots:
   QString GetProfilesJSON();                       // All profiles (built-in + custom) with "editable" flag
   bool ApplyFanProfiles( const QString &fanProfilesJSON );
   bool RevertFanProfiles();
-  QString GetCpuFrequencyLimitsJSON();
+  QVariantMap GetCpuFrequencyLimits();
   QString GetDefaultValuesProfileJSON();
   bool SaveProfile( const QString &profileJSON );  // Save/update any editable profile
   bool DeleteProfile( const QString &profileId );  // Delete an editable profile
 
   // Hardware zone model
-  QString GetHardwareFanDevicesJSON();              // Raw detected fan/pump devices from hardware
+  QVariantList GetHardwareFanDevices();              // Raw detected fan/pump devices from hardware
   QString GetHardwareSensorsJSON();                 // Raw detected temperature sensors from hardware
-  QString GetThermalSourcesJSON();                  // Available thermal sources from hardware
-  QString GetSensorReadingsJSON();                  // Live sensor + thermal source readings
-  QString GetFanZonesJSON();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
+  QVariantList GetThermalSources();                  // Available thermal sources from hardware
+  QVariantMap GetSensorReadings();                   // Live sensor + thermal source readings
+  QVariantList GetFanZones();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
 
   // Sub-profile CRUD — all include built-in (editable=false) + custom (editable=true)
-  QString GetFanProfilesJSON();                    // Replaces GetFanProfileNames
+  QVariantList GetFanProfiles();                    // Replaces GetFanProfileNames
   QString GetFanProfileJSON( const QString &id );  // Replaces GetFanProfile
   bool SaveFanProfile( const QString &id, const QString &name, const QString &json );
   bool DeleteFanProfile( const QString &id );
@@ -361,7 +361,7 @@ public slots:
 
   // odm methods
   QStringList ODMProfilesAvailable();
-  QString ODMPowerLimitsJSON();
+  QVariantList ODMPowerLimits();
 
   // keyboard backlight methods
   QString GetKeyboardBacklightCapabilitiesJSON();
@@ -431,7 +431,7 @@ public slots:
   bool PauseAutoOC();
   bool StopAutoOC();
   bool GetAutoOCRunning();
-  QString GetAutoOCProgress();
+  QVariantMap GetAutoOCProgress();
   bool HasAutoOCCheckpoint();
   bool ClearAutoOCCheckpoint();
 
@@ -446,7 +446,7 @@ public slots:
   bool PauseAutoUndervolt();
   bool StopAutoUndervolt();
   bool GetAutoUndervoltRunning();
-  QString GetAutoUndervoltProgress();
+  QVariantMap GetAutoUndervoltProgress();
   QString GetAutoUndervoltProfiles();
   bool HasAutoUndervoltCheckpoint();
   bool ClearAutoUndervoltCheckpoint();
@@ -476,8 +476,8 @@ public slots:
   int GetMonitorHistoryHorizon();
   QString GetMonitorSourcesJSON();
   int GetCpuFrequencyMHz();
-  QString GetFpsSourcesJSON();
-  QString GetAutoUvAutoApplyStatusJSON();
+  QVariantMap GetFpsSources();
+  QVariantMap GetAutoUvAutoApplyStatus();
   bool SetFpsSourceApp( const QString &appName );
   QString GetFpsSourceApp();
 
@@ -490,10 +490,10 @@ signals:
   void ModeReapplyPendingChanged( bool pending );
   void PowerStateChanged( const QString &state );
   void WaterCoolerStatusChanged( const QString &status );
-  void AutoOCProgressChanged( const QString &progressJSON );
+  void AutoOCProgressChanged( const QVariantMap &progress );
   void AutoOCFinished( int coreOffsetMHz, int vramOffsetMHz,
                        bool success, const QString &message );
-  void AutoUndervoltProgressChanged( const QString &progressJSON );
+  void AutoUndervoltProgressChanged( const QVariantMap &progress );
   void AutoUndervoltFinished( int gpuFreqCapMHz, bool success, const QString &message,
                               const QString &appName );
 

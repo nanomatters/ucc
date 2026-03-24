@@ -270,8 +270,8 @@ private:
   QTimer *m_sensorPollTimer = nullptr;
   QTreeWidget *m_sensorTree = nullptr;
   QTreeWidget *m_deviceTree = nullptr;
-  QJsonObject m_sensorReadings;      // sensorId → value, _source:id → value, fan:id → RPM
-  QJsonObject m_zoneTelemetry;       // zoneId → {temp, duty}
+  QVariantMap m_sensorReadings;      // sensorId → value, _source:id → value, fan:id → RPM
+  QVariantMap m_zoneTelemetry;       // zoneId → {temp, duty}
   void pollSensorReadings();
   void updateSensorTreeValues();
   void updateSourceTableValues();

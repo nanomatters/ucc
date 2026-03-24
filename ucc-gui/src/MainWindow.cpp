@@ -819,17 +819,12 @@ void MainWindow::setupProfilesPage()
   // Get hardware frequency limits and initialize slider with actual values
   int minFreqKHz = 400000;  // fallback
   int maxFreqKHz = 6000000; // fallback
-  if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
+  if ( auto limits = m_UccdClient->getCpuFrequencyLimits() )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
-    if ( doc.isObject() )
-    {
-      QJsonObject limitsObj = doc.object();
-      minFreqKHz = limitsObj["min"].toInt( 400000 );
-      maxFreqKHz = limitsObj["max"].toInt( 6000000 );
-      m_cpuMinFreqKHz = minFreqKHz;
-      m_cpuMaxFreqKHz = maxFreqKHz;
-    }
+    minFreqKHz = limits->value( "min" ).toInt();
+    maxFreqKHz = limits->value( "max" ).toInt();
+    m_cpuMinFreqKHz = minFreqKHz;
+    m_cpuMaxFreqKHz = maxFreqKHz;
   }
   m_minFrequencySlider->setMinimum( minFreqKHz );
   m_minFrequencySlider->setMaximum( maxFreqKHz );
@@ -1213,15 +1208,11 @@ void MainWindow::updateFanCrosshairs()
     return;
 
   // Fetch per-zone telemetry from daemon: { "zone-id": {"temp": T, "duty": D}, ... }
-  auto jsonOpt = m_UccdClient->getFanZoneTelemetryJSON();
-  if ( !jsonOpt )
+  auto telemetry = m_UccdClient->getFanZoneTelemetry();
+  if ( !telemetry )
     return;
 
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
-  if ( !doc.isObject() )
-    return;
-
-  QJsonObject root = doc.object();
+  const QVariantMap &root = *telemetry;
 
   // Update fan editors
   for ( auto it = m_fanControlTab->fanEditors().constBegin();
@@ -1229,11 +1220,12 @@ void MainWindow::updateFanCrosshairs()
   {
     const QString &zoneId = it.key();
     auto *editor = it.value();
-    if ( root.contains( zoneId ) )
+    QVariant ztVar = root.value( zoneId );
+    if ( ztVar.canConvert< QVariantMap >() )
     {
-      QJsonObject zt = root[zoneId].toObject();
-      int temp = zt["temp"].toInt( -1 );
-      int duty = zt["duty"].toInt( -1 );
+      QVariantMap zt = ztVar.toMap();
+      int temp = zt.value( "temp", -1 ).toInt();
+      int duty = zt.value( "duty", -1 ).toInt();
       if ( temp >= 0 && duty >= 0 )
         editor->setCrosshair( temp, duty );
       else
@@ -1251,11 +1243,12 @@ void MainWindow::updateFanCrosshairs()
   {
     const QString &zoneId = it.key();
     auto *editor = it.value();
-    if ( root.contains( zoneId ) )
+    QVariant ztVar = root.value( zoneId );
+    if ( ztVar.canConvert< QVariantMap >() )
     {
-      QJsonObject zt = root[zoneId].toObject();
-      int temp = zt["temp"].toInt( -1 );
-      int duty = zt["duty"].toInt( -1 );
+      QVariantMap zt = ztVar.toMap();
+      int temp = zt.value( "temp", -1 ).toInt();
+      int duty = zt.value( "duty", -1 ).toInt();
       if ( temp >= 0 && duty >= 0 )
         editor->setCrosshair( temp, duty );
       else
@@ -1861,22 +1854,17 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     }
 
     // Get hardware frequency limits and set slider ranges
-    if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
+    if ( auto limits = m_UccdClient->getCpuFrequencyLimits() )
     {
-      QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
-      if ( doc.isObject() )
-      {
-        QJsonObject limitsObj = doc.object();
-        int minFreqKHz = limitsObj["min"].toInt( 400000 );   // hardware min frequency in kHz
-        int maxFreqKHz = limitsObj["max"].toInt( 6000000 );  // hardware max frequency in kHz
+      int minFreqKHz = limits->value( "min" ).toInt();
+      int maxFreqKHz = limits->value( "max" ).toInt();
 
-        m_cpuMinFreqKHz = minFreqKHz;
-        m_cpuMaxFreqKHz = maxFreqKHz;
-        m_minFrequencySlider->setMinimum( minFreqKHz );
-        m_minFrequencySlider->setMaximum( maxFreqKHz );
-        m_maxFrequencySlider->setMinimum( minFreqKHz );
-        m_maxFrequencySlider->setMaximum( maxFreqKHz );
-      }
+      m_cpuMinFreqKHz = minFreqKHz;
+      m_cpuMaxFreqKHz = maxFreqKHz;
+      m_minFrequencySlider->setMinimum( minFreqKHz );
+      m_minFrequencySlider->setMaximum( maxFreqKHz );
+      m_maxFrequencySlider->setMinimum( minFreqKHz );
+      m_maxFrequencySlider->setMaximum( maxFreqKHz );
     }
 
     // Load frequency values in MHz (convert from kHz stored in profile)
@@ -1895,19 +1883,14 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   else
   {
     // Profile loading failed, still try to set slider limits from hardware
-    if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
+    if ( auto limits = m_UccdClient->getCpuFrequencyLimits() )
     {
-      QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
-      if ( doc.isObject() )
-      {
-        QJsonObject limitsObj = doc.object();
-        int minFreqKHz = limitsObj["min"].toInt( 400000 );
-        int maxFreqKHz = limitsObj["max"].toInt( 6000000 );
-        m_minFrequencySlider->setMinimum( minFreqKHz );
-        m_minFrequencySlider->setMaximum( maxFreqKHz );
-        m_maxFrequencySlider->setMinimum( minFreqKHz );
-        m_maxFrequencySlider->setMaximum( maxFreqKHz );
-      }
+      int minFreqKHz = limits->value( "min" ).toInt();
+      int maxFreqKHz = limits->value( "max" ).toInt();
+      m_minFrequencySlider->setMinimum( minFreqKHz );
+      m_minFrequencySlider->setMaximum( maxFreqKHz );
+      m_maxFrequencySlider->setMinimum( minFreqKHz );
+      m_maxFrequencySlider->setMaximum( maxFreqKHz );
     }
   }
 

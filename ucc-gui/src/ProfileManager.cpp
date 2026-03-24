@@ -59,7 +59,12 @@ ProfileManager::ProfileManager( QObject *parent )
     if ( connected && !wasConnected )
     {
       qInfo() << "[ProfileManager] uccd reconnected — reloading data from daemon";
-      m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
+      if ( auto odmList = m_client->getODMPowerLimits() )
+      {
+        m_hardwarePowerLimits.clear();
+        for ( const auto &v : *odmList )
+          m_hardwarePowerLimits.push_back( v.toMap().value( "max" ).toInt() );
+      }
       loadProfilesFromDaemon();
       loadFanProfilesFromDaemon();
       loadGpuProfilesFromDaemon();
@@ -74,7 +79,12 @@ ProfileManager::ProfileManager( QObject *parent )
 
   if ( m_connected )
   {
-    m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
+    if ( auto odmList = m_client->getODMPowerLimits() )
+    {
+      m_hardwarePowerLimits.clear();
+      for ( const auto &v : *odmList )
+        m_hardwarePowerLimits.push_back( v.toMap().value( "max" ).toInt() );
+    }
     loadProfilesFromDaemon();
     loadFanProfilesFromDaemon();
     loadGpuProfilesFromDaemon();
@@ -114,12 +124,8 @@ void ProfileManager::loadFanProfilesFromDaemon()
 {
   m_fanProfilesData = QJsonArray();
 
-  if ( auto json = m_client->getFanProfilesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
-    if ( doc.isArray() )
-      m_fanProfilesData = doc.array();
-  }
+  if ( auto list = m_client->getFanProfiles() )
+    m_fanProfilesData = QJsonArray::fromVariantList( *list );
 
   emit fanProfilesChanged();
 }
@@ -156,24 +162,16 @@ void ProfileManager::loadThermalSourcesFromDaemon()
 {
   m_thermalSourcesData = QJsonArray();
 
-  if ( auto json = m_client->getThermalSourcesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
-    if ( doc.isArray() )
-      m_thermalSourcesData = doc.array();
-  }
+  if ( auto list = m_client->getThermalSources() )
+    m_thermalSourcesData = QJsonArray::fromVariantList( *list );
 }
 
 void ProfileManager::loadHardwareFanDevicesFromDaemon()
 {
   m_hardwareFanDevicesData = QJsonArray();
 
-  if ( auto json = m_client->getHardwareFanDevicesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
-    if ( doc.isArray() )
-      m_hardwareFanDevicesData = doc.array();
-  }
+  if ( auto list = m_client->getHardwareFanDevices() )
+    m_hardwareFanDevicesData = QJsonArray::fromVariantList( *list );
 }
 
 void ProfileManager::loadHardwareSensorsFromDaemon()
@@ -192,12 +190,8 @@ void ProfileManager::loadFanZonesFromDaemon()
 {
   m_fanZonesData = QJsonArray();
 
-  if ( auto json = m_client->getFanZonesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *json ).toUtf8() );
-    if ( doc.isArray() )
-      m_fanZonesData = doc.array();
-  }
+  if ( auto list = m_client->getFanZones() )
+    m_fanZonesData = QJsonArray::fromVariantList( *list );
 }
 
 // ---------------------------------------------------------------------------
@@ -625,8 +619,12 @@ void ProfileManager::setActiveProfileByIndex( int index )
 
 std::vector< int > ProfileManager::getHardwarePowerLimits()
 {
-  if ( auto liveLimits = m_client->getODMPowerLimits(); liveLimits && !liveLimits->empty() )
-    m_hardwarePowerLimits = *liveLimits;
+  if ( auto odmList = m_client->getODMPowerLimits(); odmList && !odmList->empty() )
+  {
+    m_hardwarePowerLimits.clear();
+    for ( const auto &v : *odmList )
+      m_hardwarePowerLimits.push_back( v.toMap().value( "max" ).toInt() );
+  }
 
   return m_hardwarePowerLimits;
 }

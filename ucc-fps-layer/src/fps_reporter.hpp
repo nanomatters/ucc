@@ -132,12 +132,70 @@ inline bool is_blacklisted()
   return blacklisted;
 }
 
-inline std::atomic<uint64_t> g_frame_count{ 0 };
+/// Lock-free per-frame timestamp collector.
+/// The render thread calls record() on every present; the reporter thread
+/// drains the ring buffer each interval and sends batched frame times.
+struct FrameTimeCollector
+{
+  static constexpr size_t kCapacity = 2048;
+
+  std::atomic< uint64_t > timestamps[ kCapacity ]{};
+  std::atomic< uint32_t > writeIdx{ 0 };
+  std::atomic< uint32_t > count{ 0 };
+
+  void record( uint64_t nowUs )
+  {
+    const uint32_t idx = writeIdx.fetch_add( 1, std::memory_order_relaxed ) % kCapacity;
+    timestamps[ idx ].store( nowUs, std::memory_order_relaxed );
+    count.fetch_add( 1, std::memory_order_relaxed );
+  }
+};
+
+inline FrameTimeCollector g_collector;
+
+inline int try_connect()
+{
+  // Try abstract socket first (works inside containers).
+  {
+    const int fd = ::socket( AF_UNIX, SOCK_STREAM, 0 );
+    if ( fd >= 0 )
+    {
+      sockaddr_un addr{};
+      addr.sun_family = AF_UNIX;
+      const size_t nameLen = std::strlen( kAbstractSocketName );
+      std::memcpy( addr.sun_path + 1, kAbstractSocketName, nameLen );
+      const socklen_t addrLen = static_cast< socklen_t >(
+          offsetof( sockaddr_un, sun_path ) + 1 + nameLen );
+
+      if ( ::connect( fd, reinterpret_cast< sockaddr * >( &addr ), addrLen ) == 0 )
+        return fd;
+      ::close( fd );
+    }
+  }
+
+  // Fall back to file-based socket paths.
+  for ( const std::string &path : socket_paths() )
+  {
+    const int fd = ::socket( AF_UNIX, SOCK_STREAM, 0 );
+    if ( fd < 0 )
+      continue;
+
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    std::strncpy( addr.sun_path, path.c_str(), sizeof( addr.sun_path ) - 1 );
+
+    if ( ::connect( fd, reinterpret_cast< sockaddr * >( &addr ), sizeof( addr ) ) == 0 )
+      return fd;
+    ::close( fd );
+  }
+
+  return -1;
+}
 
 inline void fps_reporter_thread()
 {
   int sockFd = -1;
-  uint64_t lastCount = 0;
+  uint32_t lastDrainIdx = 0;
   auto lastTime = std::chrono::steady_clock::now();
   const auto interval = std::chrono::milliseconds( 500 );
 
@@ -145,81 +203,85 @@ inline void fps_reporter_thread()
   {
     std::this_thread::sleep_for( interval );
 
+    // ── Drain frame timestamps ──────────────────────────────────────────
     const auto now = std::chrono::steady_clock::now();
-    const uint64_t count = g_frame_count.load( std::memory_order_relaxed );
-    const double dt = std::chrono::duration<double>( now - lastTime ).count();
-    const double fps = dt > 0.0 ? ( count - lastCount ) / dt : 0.0;
-    lastCount = count;
-    lastTime = now;
+    const uint32_t curWriteIdx = g_collector.writeIdx.load( std::memory_order_relaxed );
+    const uint32_t frameCount = curWriteIdx - lastDrainIdx;
+    const double dt = std::chrono::duration< double >( now - lastTime ).count();
+    const double fps = ( dt > 0.0 && frameCount > 0 )
+      ? static_cast< double >( frameCount ) / dt : 0.0;
 
-    if ( sockFd < 0 )
+    // Collect timestamps, compute inter-frame deltas (μs)
+    std::vector< uint32_t > deltas;
+    if ( frameCount > 0 && frameCount <= FrameTimeCollector::kCapacity )
     {
-      // Try abstract socket first (works inside containers).
+      deltas.reserve( frameCount );
+      // Read timestamps in order and compute deltas
+      std::vector< uint64_t > ts;
+      ts.reserve( frameCount );
+      for ( uint32_t i = lastDrainIdx; i < curWriteIdx; ++i )
       {
-        const int fd = ::socket( AF_UNIX, SOCK_STREAM, 0 );
-        if ( fd >= 0 )
-        {
-          sockaddr_un addr{};
-          addr.sun_family = AF_UNIX;
-          // sun_path[0] = '\0' marks this as abstract (already zero from {}).
-          const size_t nameLen = std::strlen( kAbstractSocketName );
-          std::memcpy( addr.sun_path + 1, kAbstractSocketName, nameLen );
-          const socklen_t addrLen = static_cast< socklen_t >(
-              offsetof( sockaddr_un, sun_path ) + 1 + nameLen );
-
-          if ( ::connect( fd, reinterpret_cast< sockaddr * >( &addr ), addrLen ) == 0 )
-            sockFd = fd;
-          else
-            ::close( fd );
-        }
+        const uint32_t idx = i % FrameTimeCollector::kCapacity;
+        ts.push_back( g_collector.timestamps[ idx ].load( std::memory_order_relaxed ) );
       }
-
-      // Fall back to file-based socket paths.
-      if ( sockFd < 0 )
+      for ( size_t i = 1; i < ts.size(); ++i )
       {
-      for ( const std::string &path : socket_paths() )
-      {
-        const int fd = ::socket( AF_UNIX, SOCK_STREAM, 0 );
-        if ( fd < 0 )
-          continue;
-
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        std::strncpy( addr.sun_path, path.c_str(), sizeof( addr.sun_path ) - 1 );
-
-        if ( ::connect( fd, reinterpret_cast<sockaddr *>( &addr ), sizeof( addr ) ) == 0 )
-        {
-          sockFd = fd;
-          break;
-        }
-
-        ::close( fd );
-      }
+        const int64_t d = static_cast< int64_t >( ts[ i ] ) - static_cast< int64_t >( ts[ i - 1 ] );
+        if ( d > 0 && d < 1000000 )  // sanity: >0 and <1s
+          deltas.push_back( static_cast< uint32_t >( d ) );
       }
     }
 
-    if ( sockFd >= 0 )
-    {
-      if ( count == 0 )
-      {
-        // Keep the socket session alive so uccd can track the active process,
-        // and publish 0.0 FPS until the first frame is observed.
-        static constexpr const char *kKeepalive = "fps:0.0\n";
-        if ( ::write( sockFd, kKeepalive, std::strlen( kKeepalive ) ) < 0 )
-        {
-          ::close( sockFd );
-          sockFd = -1;
-        }
-        continue;
-      }
+    lastDrainIdx = curWriteIdx;
+    lastTime = now;
 
-      char buf[ 32 ];
-      const int n = std::snprintf( buf, sizeof( buf ), "fps:%.1f\n", fps );
-      if ( n > 0 && ::write( sockFd, buf, static_cast<size_t>( n ) ) < 0 )
+    // ── Connect ─────────────────────────────────────────────────────────
+    if ( sockFd < 0 )
+      sockFd = try_connect();
+
+    if ( sockFd < 0 )
+      continue;
+
+    // ── Send ────────────────────────────────────────────────────────────
+    if ( frameCount == 0 )
+    {
+      static constexpr const char *kKeepalive = "fps:0.0\n";
+      if ( ::write( sockFd, kKeepalive, std::strlen( kKeepalive ) ) < 0 )
       {
         ::close( sockFd );
         sockFd = -1;
       }
+      continue;
+    }
+
+    // Build fps: line (backward compat) + ft: line (frame times in μs)
+    std::string msg;
+    msg.reserve( 32 + deltas.size() * 7 );
+
+    char fpsBuf[ 32 ];
+    const int fpsLen = std::snprintf( fpsBuf, sizeof( fpsBuf ), "fps:%.1f\n", fps );
+    if ( fpsLen > 0 )
+      msg.append( fpsBuf, static_cast< size_t >( fpsLen ) );
+
+    if ( !deltas.empty() )
+    {
+      msg.append( "ft:" );
+      for ( size_t i = 0; i < deltas.size(); ++i )
+      {
+        if ( i > 0 )
+          msg.push_back( ',' );
+        char dtBuf[ 16 ];
+        const int dtLen = std::snprintf( dtBuf, sizeof( dtBuf ), "%u", deltas[ i ] );
+        if ( dtLen > 0 )
+          msg.append( dtBuf, static_cast< size_t >( dtLen ) );
+      }
+      msg.push_back( '\n' );
+    }
+
+    if ( ::write( sockFd, msg.data(), msg.size() ) < 0 )
+    {
+      ::close( sockFd );
+      sockFd = -1;
     }
   }
 }
@@ -240,7 +302,10 @@ inline void record_frame()
 {
   if ( !hook_enabled() )
     return;
-  g_frame_count.fetch_add( 1, std::memory_order_relaxed );
+  const auto now = std::chrono::steady_clock::now();
+  const uint64_t nowUs = static_cast< uint64_t >(
+    std::chrono::duration_cast< std::chrono::microseconds >( now.time_since_epoch() ).count() );
+  g_collector.record( nowUs );
   ensure_reporter_started();
 }
 

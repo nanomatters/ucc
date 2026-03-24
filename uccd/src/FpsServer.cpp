@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -270,6 +271,8 @@ bool FpsServer::start()
   m_lastClientActivity = {};
   m_clientConnectTime = {};
   m_lastPositiveFps = {};
+  m_frameTimes.clear();
+  m_hasFrameTimes = false;
 
   syslog( LOG_INFO, "FpsServer: listening on %s", m_socketPath.c_str() );
   return true;
@@ -305,6 +308,8 @@ void FpsServer::stop()
   m_lastClientActivity = {};
   m_clientConnectTime = {};
   m_lastPositiveFps = {};
+  m_frameTimes.clear();
+  m_hasFrameTimes = false;
 }
 
 void FpsServer::rebind()
@@ -324,6 +329,8 @@ void FpsServer::rebind()
   m_lastClientActivity = {};
   m_clientConnectTime = {};
   m_lastPositiveFps = {};
+  m_frameTimes.clear();
+  m_hasFrameTimes = false;
 
   // Re-create socket + bind + listen (reuse the existing start() logic but
   // without touching the reference count).
@@ -366,6 +373,8 @@ void FpsServer::poll()
       m_lastClientActivity = {};
       m_clientConnectTime = {};
       m_lastPositiveFps = {};
+      m_frameTimes.clear();
+      m_hasFrameTimes = false;
     }
   }
 
@@ -389,6 +398,8 @@ void FpsServer::poll()
       m_lastClientActivity = {};
       m_clientConnectTime = {};
       m_lastPositiveFps = {};
+      m_frameTimes.clear();
+      m_hasFrameTimes = false;
     }
   }
 
@@ -411,6 +422,8 @@ void FpsServer::poll()
       m_lastClientActivity = {};
       m_clientConnectTime = {};
       m_lastPositiveFps = {};
+      m_frameTimes.clear();
+      m_hasFrameTimes = false;
     }
   }
 }
@@ -541,6 +554,8 @@ void FpsServer::readClient()
         m_lastClientActivity = {};
         m_clientConnectTime = {};
         m_lastPositiveFps = {};
+        m_frameTimes.clear();
+        m_hasFrameTimes = false;
         syslog( LOG_DEBUG, "FpsServer: client disconnected" );
       }
       break;
@@ -558,14 +573,35 @@ void FpsServer::readClient()
     {
       *nl = '\0';
 
-      double fps = -1.0;
-      if ( ::sscanf( start, "fps:%lf", &fps ) == 1 && fps >= 0.0 )
+      if ( std::strncmp( start, "fps:", 4 ) == 0 )
       {
-        m_currentFps = fps;
-        if ( fps > 1.0 )
-          m_lastPositiveFps = std::chrono::steady_clock::now();
-        if ( fps > m_bestFps )
-          m_bestFps = fps;
+        double fps = -1.0;
+        if ( ::sscanf( start + 4, "%lf", &fps ) == 1 && fps >= 0.0 )
+        {
+          m_currentFps = fps;
+          if ( fps > 1.0 )
+            m_lastPositiveFps = std::chrono::steady_clock::now();
+          if ( fps > m_bestFps )
+            m_bestFps = fps;
+        }
+      }
+      else if ( std::strncmp( start, "ft:", 3 ) == 0 )
+      {
+        // Parse comma-separated frame durations in microseconds.
+        m_hasFrameTimes = true;
+        char *tok = start + 3;
+        while ( *tok != '\0' )
+        {
+          char *end = nullptr;
+          const long val = ::strtol( tok, &end, 10 );
+          if ( end == tok )
+            break;  // no more parseable values
+          if ( val > 0 && val < 1000000 )  // sanity: >0 and <1s
+            m_frameTimes.push( static_cast< double >( val ) );
+          tok = end;
+          if ( *tok == ',' )
+            ++tok;
+        }
       }
 
       start = nl + 1;
