@@ -23,7 +23,9 @@
 #include <QJsonObject>
 #include <memory>
 #include <map>
+#include <optional>
 #include "UccdClient.hpp"
+#include "UccDbusTypes.hpp"
 
 namespace ucc
 {
@@ -70,16 +72,16 @@ public:
   const QJsonArray& keyboardProfilesData() const { return m_keyboardProfilesData; }
 
   /// Available thermal sources from hardware (fetched once at startup)
-  const QJsonArray& thermalSourcesData() const { return m_thermalSourcesData; }
+  const ucc::dbus::ThermalSourceDtoList& thermalSourcesData() const { return m_thermalSourcesData; }
 
   /// Hardware fan zones (topology: id, name, deviceType, fanIds, thermalSourceId)
-  const QJsonArray& fanZonesData() const { return m_fanZonesData; }
+  const ucc::dbus::FanZoneDtoList& fanZonesData() const { return m_fanZonesData; }
 
   /// Raw hardware fan/pump devices (id, label, capabilities, deviceType)
-  const QJsonArray& hardwareFanDevicesData() const { return m_hardwareFanDevicesData; }
+  const ucc::dbus::HardwareFanDeviceDtoList& hardwareFanDevicesData() const { return m_hardwareFanDevicesData; }
 
   /// Raw hardware temperature sensors (id, label, source)
-  const QJsonArray& hardwareSensorsData() const { return m_hardwareSensorsData; }
+  const ucc::dbus::HardwareSensorDtoList& hardwareSensorsData() const { return m_hardwareSensorsData; }
 
 public slots:
   void refresh();
@@ -96,8 +98,11 @@ public slots:
   QString profileIdByName( const QString &profileName ) const;
 
   // Fan profiles (by ID) — all go through daemon
-  QString getFanProfile( const QString &fanProfileId );
-  bool setFanProfile( const QString &fanProfileId, const QString &name, const QString &json );
+  std::optional< ucc::dbus::FanZoneCurveDtoList > getFanProfileZones( const QString &fanProfileId );
+  std::optional< ucc::dbus::ThermalSourceDtoList > getFanProfileSources( const QString &fanProfileId );
+  bool setFanProfile( const QString &fanProfileId, const QString &name,
+                      const ucc::dbus::FanZoneCurveDtoList &zones,
+                      const ucc::dbus::ThermalSourceDtoList &thermalSources );
   bool deleteFanProfile( const QString &fanProfileId );
   bool renameFanProfile( const QString &fanProfileId, const QString &newName );
 
@@ -120,7 +125,7 @@ public slots:
 
   QVariantMap getSettings();
   bool setStateMap( const QString &state, const QString &profileId );
-  bool setBatchStateMap( const std::map< QString, QString > &entries );
+  bool setBatchStateMap( const QMap< QString, QString > &entries );
 
 signals:
   void allProfilesChanged();
@@ -173,10 +178,10 @@ private:
   QJsonArray m_fanProfilesData;          ///< all fan profiles (built-in + custom)
   QJsonArray m_gpuProfilesData;          ///< all GPU profiles (built-in + custom)
   QJsonArray m_keyboardProfilesData;     ///< all keyboard profiles (all custom)
-  QJsonArray m_thermalSourcesData;        ///< available thermal sources from hardware
-  QJsonArray m_fanZonesData;               ///< hardware fan zones (topology)
-  QJsonArray m_hardwareFanDevicesData;     ///< raw hardware fan/pump devices
-  QJsonArray m_hardwareSensorsData;        ///< raw hardware temperature sensors
+  ucc::dbus::ThermalSourceDtoList m_thermalSourcesData;        ///< available thermal sources from hardware
+  ucc::dbus::FanZoneDtoList m_fanZonesData;                    ///< hardware fan zones (topology)
+  ucc::dbus::HardwareFanDeviceDtoList m_hardwareFanDevicesData; ///< raw hardware fan/pump devices
+  ucc::dbus::HardwareSensorDtoList m_hardwareSensorsData;       ///< raw hardware temperature sensors
 };
 
 } // namespace ucc

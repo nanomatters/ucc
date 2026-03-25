@@ -35,6 +35,7 @@
 #include "PumpCurveEditorWidget.hpp"
 #include "LCTWaterCoolerController.hpp"
 #include "CommonTypes.hpp"
+#include "UccDbusTypes.hpp"
 #include "../../libucc-dbus/UccdClient.hpp"
 #include "ProfileManager.hpp"
 
@@ -77,10 +78,10 @@ public:
   const QMap< QString, PumpCurveEditorWidget * > &pumpEditors() const { return m_pumpEditors; }
 
   /** Build/rebuild zone editors from topology/source metadata and raw hardware inventory. */
-  void buildZoneEditors( const QJsonArray &zones,
-                         const QJsonArray &thermalSources,
-                         const QJsonArray &hardwareFanDevices,
-                         const QJsonArray &hardwareSensors );
+  void buildZoneEditors( const ucc::dbus::FanZoneDtoList &zones,
+                         const ucc::dbus::ThermalSourceDtoList &thermalSources,
+                         const ucc::dbus::HardwareFanDeviceDtoList &hardwareFanDevices,
+                         const ucc::dbus::HardwareSensorDtoList &hardwareSensors );
 
   /** Return the currently selected thermal source ID for a zone. */
   QString thermalSourceForZone( const QString &zoneId ) const;
@@ -89,10 +90,10 @@ public:
   void setThermalSourceForZone( const QString &zoneId, const QString &thermalSourceId );
 
   /** Return current temperature-source editor model for fan profile persistence. */
-  QJsonArray thermalSourcesData() const;
+  ucc::dbus::ThermalSourceDtoList thermalSourcesData() const;
 
   /** Return current zone editor model (name/type/fanIds/source) for profile persistence. */
-  QJsonArray fanZonesData() const;
+  ucc::dbus::FanZoneDtoList fanZonesData() const;
 
   /** Persist user-defined sensor aliases to ~/.config/uccrc. */
   void saveSensorAliasesToSettings() const;
@@ -167,9 +168,9 @@ private:
   // ── Temperature source / zone editor helpers ──
   void showStatusMessage( const QString &msg, int timeoutMs = 3000 );
   void loadSensorAliasesFromSettings();
-  static QString normalizedSourceGroup( const QJsonObject &sensor );
-  void ensureValidStrategy( QJsonObject &src );
-  QString sensorsSummaryText( const QJsonObject &src ) const;
+  static QString normalizedSourceGroup( const ucc::dbus::HardwareSensorDto &sensor );
+  void ensureValidStrategy( ucc::dbus::ThermalSourceDto &src );
+  QString sensorsSummaryText( const ucc::dbus::ThermalSourceDto &src ) const;
   void refreshAllSourceCombos();
   void installStrategyComboForRow( int row );
   void onStrategyComboChanged( int row );
@@ -191,7 +192,7 @@ private:
   void onDeviceTreeItemChanged( QTreeWidget *tree, QTreeWidgetItem *item );
   void onTemplateComboChanged( const QString &zoneId, const QString &templateId, QComboBox *combo );
   void onFanEditorPointsChanged( const QString &zoneId, const QVector< FanCurveEditorWidget::Point > &pts );
-  void rebuildZoneEditorsWithState( const QJsonArray &zones,
+  void rebuildZoneEditorsWithState( const ucc::dbus::FanZoneDtoList &zones,
                                     const QMap< QString, QVector< FanCurveEditorWidget::Point > > &fanPoints,
                                     const QMap< QString, QVector< PumpCurveEditorWidget::Point > > &pumpPoints,
                                     const QMap< QString, QString > &sourceByZone );
@@ -199,8 +200,8 @@ private:
   void onDeviceDroppedOnZone( int row, const QString &deviceId );
   void addDeviceToZone( int row, const QString &deviceId );
   void handleRemoveDevice( int row, const QString &deviceId );
-  QString devicesSummaryText( const QJsonObject &zone ) const;
-  static QString normalizedDeviceGroup( const QJsonObject &device );
+  QString devicesSummaryText( const ucc::dbus::FanZoneDto &zone ) const;
+  static QString normalizedDeviceGroup( const ucc::dbus::HardwareFanDeviceDto &device );
   static void selectComboByData( QComboBox *combo, const QString &data );
 
   UccdClient *m_uccdClient;
@@ -247,7 +248,7 @@ private:
   QWidget *m_wcHardwareWidget = nullptr;
 
   // ── Source editor state (populated by buildZoneEditors) ──
-  QVector< QJsonObject > m_sourceEditorModel;
+  QVector< ucc::dbus::ThermalSourceDto > m_sourceEditorModel;
   QVector< QComboBox * > m_strategyCombos;
   QVector< QComboBox * > m_allSourceCombos;
   QTableWidget *m_sourceTable = nullptr;
@@ -256,15 +257,15 @@ private:
   QMap< QString, QString > m_deviceAliasById;
 
   // ── Zone editing state ──
-  QVector< QJsonObject > m_zoneCache;
+  QVector< ucc::dbus::FanZoneDto > m_zoneCache;
   QMap< QString, QString > m_fanLabelById;
   QTableWidget *m_zoneTable = nullptr;
   QVector< QComboBox * > m_zoneSourceCombos;
 
   // Last build args (needed for rebuild on source removal)
-  QJsonArray m_lastZones;
-  QJsonArray m_lastFanDevices;
-  QJsonArray m_lastSensors;
+  ucc::dbus::FanZoneDtoList m_lastZones;
+  ucc::dbus::HardwareFanDeviceDtoList m_lastFanDevices;
+  ucc::dbus::HardwareSensorDtoList m_lastSensors;
 
   // ── Live sensor readings polling ──
   QTimer *m_sensorPollTimer = nullptr;

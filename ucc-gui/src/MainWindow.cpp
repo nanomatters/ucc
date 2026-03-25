@@ -2360,7 +2360,7 @@ void MainWindow::onSaveClicked()
 
   // For both custom and built-in profiles, update stateMap based on mains/battery button states
   // Batch all stateMap changes into a single D-Bus call (single backup + write)
-  std::map< QString, QString > stateMapUpdates;
+  QMap< QString, QString > stateMapUpdates;
   if ( !m_hasMultiplePowerStates )
   {
     // No battery: always assign to power_ac
@@ -2376,7 +2376,7 @@ void MainWindow::onSaveClicked()
       stateMapUpdates["power_wc"] = profileId;
   }
 
-  if ( !stateMapUpdates.empty() )
+  if ( !stateMapUpdates.isEmpty() )
     m_profileManager->setBatchStateMap( stateMapUpdates );
 
   // Indicate saving; actual success will be reflected when ProfileManager signals
@@ -2652,60 +2652,53 @@ void MainWindow::onRemoveFanProfileClicked()
 
 void MainWindow::onFanProfileChanged(const QString& fanProfileId)
 {
-  QString json = m_profileManager->getFanProfile(fanProfileId);
-  QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
-  if (doc.isObject()) {
-    QJsonObject obj = doc.object();
-    QJsonArray zones = obj["zones"].toArray();
+  auto profileZones   = m_profileManager->getFanProfileZones( fanProfileId );
+  auto profileSources = m_profileManager->getFanProfileSources( fanProfileId );
 
+  if ( profileZones )
+  {
     // Rebuild temperature source editor model from profile payload when present.
     // Fall back to hardware/default sources for built-ins and legacy profiles.
-    QJsonArray thermalSources = obj["thermalSources"].toArray();
+    ucc::dbus::ThermalSourceDtoList thermalSources;
+    if ( profileSources && !profileSources->isEmpty() )
+      thermalSources = *profileSources;
     if ( thermalSources.isEmpty() )
       thermalSources = m_profileManager->thermalSourcesData();
 
     // Treat profile zones as authoritative when present.
-    // For older curve-only zone payloads, backfill missing metadata from
-    // hardware zones by matching zone ID, but do not re-add absent zones.
-    QJsonArray zoneModel;
-    if ( !zones.isEmpty() )
+    // Backfill missing metadata from hardware zones by matching zone ID.
+    ucc::dbus::FanZoneDtoList zoneModel;
+    if ( !profileZones->isEmpty() )
     {
-      QMap< QString, QJsonObject > hardwareZoneById;
-      const QJsonArray hardwareZones = m_profileManager->fanZonesData();
-      for ( const QJsonValue &hzv : hardwareZones )
+      QMap< QString, ucc::dbus::FanZoneDto > hardwareZoneById;
+      for ( const auto &hz : m_profileManager->fanZonesData() )
       {
-        if ( !hzv.isObject() )
-          continue;
-        const QJsonObject hz = hzv.toObject();
-        const QString hzId = hz[QStringLiteral( "id" )].toString();
-        if ( !hzId.isEmpty() )
-          hardwareZoneById[hzId] = hz;
+        if ( !hz.id.isEmpty() )
+          hardwareZoneById[hz.id] = hz;
       }
 
-      for ( const QJsonValue &zv : zones )
+      for ( const auto &pz : *profileZones )
       {
-        if ( !zv.isObject() )
+        if ( pz.id.isEmpty() )
           continue;
 
-        QJsonObject merged = zv.toObject();
-        const QString zoneId = merged[QStringLiteral( "id" )].toString();
-        if ( zoneId.isEmpty() )
-          continue;
+        ucc::dbus::FanZoneDto dto;
+        dto.id              = pz.id;
+        dto.name            = pz.name;
+        dto.deviceType      = pz.deviceType;
+        dto.thermalSourceId = pz.thermalSourceId;
+        dto.fanIds          = pz.fanIds;
 
-        if ( hardwareZoneById.contains( zoneId ) )
+        if ( hardwareZoneById.contains( dto.id ) )
         {
-          const QJsonObject hz = hardwareZoneById.value( zoneId );
-          if ( !merged.contains( QStringLiteral( "name" ) ) )
-            merged[QStringLiteral( "name" )] = hz[QStringLiteral( "name" )];
-          if ( !merged.contains( QStringLiteral( "deviceType" ) ) )
-            merged[QStringLiteral( "deviceType" )] = hz[QStringLiteral( "deviceType" )];
-          if ( !merged.contains( QStringLiteral( "fanIds" ) ) )
-            merged[QStringLiteral( "fanIds" )] = hz[QStringLiteral( "fanIds" )];
-          if ( !merged.contains( QStringLiteral( "thermalSourceId" ) ) )
-            merged[QStringLiteral( "thermalSourceId" )] = hz[QStringLiteral( "thermalSourceId" )];
+          const auto &hz = hardwareZoneById[dto.id];
+          if ( dto.name.isEmpty() )            dto.name = hz.name;
+          if ( dto.deviceType.isEmpty() )      dto.deviceType = hz.deviceType;
+          if ( dto.fanIds.isEmpty() )          dto.fanIds = hz.fanIds;
+          if ( dto.thermalSourceId.isEmpty() ) dto.thermalSourceId = hz.thermalSourceId;
         }
 
-        zoneModel.append( merged );
+        zoneModel.append( dto );
       }
     }
 
@@ -2717,39 +2710,26 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
                                        m_profileManager->hardwareFanDevicesData(),
                                        m_profileManager->hardwareSensorsData() );
 
-    // Overlay profile curve data and thermal source overrides onto
-    // existing hardware-based zone editors (built once in setupFanControlTab)
-    for ( const QJsonValue &zv : zones )
+    // Overlay profile curve data and thermal source overrides onto zone editors
+    for ( const auto &pz : *profileZones )
     {
-      QJsonObject zone = zv.toObject();
-      QString id        = zone[QStringLiteral( "id" )].toString();
-      QString devType   = zone[QStringLiteral( "deviceType" )].toString();
-      QJsonArray curve  = zone[QStringLiteral( "curve" )].toArray();
+      if ( !pz.thermalSourceId.isEmpty() )
+        m_fanControlTab->setThermalSourceForZone( pz.id, pz.thermalSourceId );
 
-      // Apply thermal source override from profile
-      if ( zone.contains( QStringLiteral( "thermalSourceId" ) ) )
-        m_fanControlTab->setThermalSourceForZone( id, zone[QStringLiteral( "thermalSourceId" )].toString() );
-
-      if ( devType == QStringLiteral( "stagedPump" ) )
+      if ( pz.deviceType == QStringLiteral( "stagedPump" ) )
       {
         QVector< PumpCurveEditorWidget::Point > pts;
-        for ( const QJsonValue &cv : curve )
-        {
-          QJsonObject pt = cv.toObject();
-          pts.append( { pt["temp"].toDouble(), pt["speed"].toInt() } );
-        }
-        if ( auto *ed = m_fanControlTab->pumpEditor( id ); ed && !pts.isEmpty() )
+        for ( const auto &cp : pz.curve )
+          pts.append( { static_cast< double >( cp.temp ), cp.speed } );
+        if ( auto *ed = m_fanControlTab->pumpEditor( pz.id ); ed && !pts.isEmpty() )
           ed->setPoints( pts );
       }
       else
       {
         QVector< FanCurveEditorWidget::Point > pts;
-        for ( const QJsonValue &cv : curve )
-        {
-          QJsonObject pt = cv.toObject();
-          pts.append( { pt["temp"].toDouble(), pt["speed"].toDouble() } );
-        }
-        if ( auto *ed = m_fanControlTab->fanEditor( id ); ed && !pts.isEmpty() )
+        for ( const auto &cp : pz.curve )
+          pts.append( { static_cast< double >( cp.temp ), static_cast< double >( cp.speed ) } );
+        if ( auto *ed = m_fanControlTab->fanEditor( pz.id ); ed && !pts.isEmpty() )
           ed->setPoints( pts );
       }
     }
@@ -2881,8 +2861,9 @@ void MainWindow::onCopyFanProfileClicked()
     currentName = currentName.left( currentName.size() - 11 ); // 11 is length of " [Built-in]"
 
   // Get the current profile data
-  QString json = m_profileManager->getFanProfile( currentProfileId );
-  if ( json.isEmpty() ) {
+  auto zones   = m_profileManager->getFanProfileZones( currentProfileId );
+  auto sources = m_profileManager->getFanProfileSources( currentProfileId );
+  if ( !zones ) {
     QMessageBox::warning(this, "Error", "Failed to get fan profile data.");
     return;
   }
@@ -2898,7 +2879,7 @@ void MainWindow::onCopyFanProfileClicked()
 
   // Save it under the new name with a new ID
   QString newId = QUuid::createUuid().toString( QUuid::WithoutBraces );
-  if ( m_profileManager->setFanProfile( newId, profileName, json ) ) {
+  if ( m_profileManager->setFanProfile( newId, profileName, *zones, sources.value_or( ucc::dbus::ThermalSourceDtoList{} ) ) ) {
     m_fanControlTab->fanProfileCombo()->addItem( profileName, newId );
     if ( m_profileFanProfileCombo && m_profileFanProfileCombo->findText( profileName ) == -1 )
       m_profileFanProfileCombo->addItem( profileName, newId );
@@ -2927,68 +2908,37 @@ void MainWindow::onApplyFanProfilesClicked()
     return;
   }
 
-  // Build a zones array — start from zone cache (carries topology + deviceType)
-  // and overlay current editor curves.
-  QJsonObject root;
-  QJsonArray zonesArr;
+  // Build typed zone DTOs from zone cache + current editor curves.
+  ucc::dbus::FanZoneCurveDtoList zones;
 
-  const QJsonArray zoneModel = m_fanControlTab->fanZonesData();
-  for ( const QJsonValue &zv : zoneModel )
+  for ( const auto &z : m_fanControlTab->fanZonesData() )
   {
-    QJsonObject zone = zv.toObject();
-    const QString zoneId = zone[QStringLiteral( "id" )].toString();
-    if ( zoneId.isEmpty() )
-      continue;
+    ucc::dbus::FanZoneCurveDto dto;
+    dto.id              = z.id;
+    dto.name            = z.name;
+    dto.deviceType      = z.deviceType;
+    dto.thermalSourceId = z.thermalSourceId;
+    dto.fanIds          = z.fanIds;
 
-    // Overlay curve from fan editor
-    auto fanIt = m_fanControlTab->fanEditors().find( zoneId );
-    if ( fanIt != m_fanControlTab->fanEditors().end() )
+    if ( auto fanIt = m_fanControlTab->fanEditors().find( z.id );
+         fanIt != m_fanControlTab->fanEditors().end() )
     {
-      const auto &pts = fanIt.value()->points();
-      QJsonArray curveArr;
-      for ( const auto &p : pts )
-      {
-        QJsonObject o;
-        o["temp"]  = p.temp;
-        o["speed"] = p.duty;
-        curveArr.append( o );
-      }
-      zone["curve"] = curveArr;
+      for ( const auto &p : fanIt.value()->points() )
+        dto.curve.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
+    }
+    else if ( auto pumpIt = m_fanControlTab->pumpEditors().find( z.id );
+              pumpIt != m_fanControlTab->pumpEditors().end() )
+    {
+      for ( const auto &p : pumpIt.value()->points() )
+        dto.curve.append( { static_cast< int >( p.temp ), p.level } );
     }
 
-    // Overlay curve from pump editor
-    auto pumpIt = m_fanControlTab->pumpEditors().find( zoneId );
-    if ( pumpIt != m_fanControlTab->pumpEditors().end() )
-    {
-      const auto &pts = pumpIt.value()->points();
-      QJsonArray curveArr;
-      for ( const auto &p : pts )
-      {
-        QJsonObject o;
-        o["temp"]  = p.temp;
-        o["speed"] = p.level;
-        curveArr.append( o );
-      }
-      zone["curve"] = curveArr;
-    }
-
-    // Thermal source from combo
-    QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
-    if ( !tsId.isEmpty() )
-      zone["thermalSourceId"] = tsId;
-
-    zonesArr.append( zone );
+    zones.append( dto );
   }
 
-  root["zones"] = zonesArr;
-  root["thermalSources"] = m_fanControlTab->thermalSourcesData();
-  if ( !m_currentFanProfile.isEmpty() )
-    root["fanProfileId"] = m_currentFanProfile;
+  ucc::dbus::ThermalSourceDtoList sources = m_fanControlTab->thermalSourcesData();
 
-  QJsonDocument doc( root );
-  QString json = QString::fromUtf8( doc.toJson( QJsonDocument::Compact ) );
-
-  if ( m_UccdClient->applyFanProfiles( json.toStdString() ) )
+  if ( m_UccdClient->applyFanProfiles( zones, sources, m_currentFanProfile ) )
   {
     statusBar()->showMessage( "Temporary fan profiles applied" );
 
@@ -3022,50 +2972,37 @@ void MainWindow::onRevertFanProfilesClicked()
 
 void MainWindow::loadFanPoints()
 {
-  // Load fan profile JSON for the currently selected fan profile (if custom)
+  // Load fan profile data for the currently selected fan profile (if custom)
   if ( m_currentFanProfile.isEmpty() ) return;
 
-  QString json = m_profileManager->getFanProfile( m_currentFanProfile );
-  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
-  if ( !doc.isObject() ) return;
-  QJsonObject obj = doc.object();
-  QJsonArray zones = obj["zones"].toArray();
+  auto profileZones = m_profileManager->getFanProfileZones( m_currentFanProfile );
+  if ( !profileZones || profileZones->isEmpty() ) return;
 
   m_fanZonePoints.clear();
 
-  for ( const QJsonValue &zv : zones )
+  for ( const auto &pz : *profileZones )
   {
-    QJsonObject zone = zv.toObject();
-    QString id      = zone[QStringLiteral( "id" )].toString();
-    QString devType = zone[QStringLiteral( "deviceType" )].toString();
-    QJsonArray curve = zone[QStringLiteral( "curve" )].toArray();
-    if ( curve.isEmpty() ) continue;
+    if ( pz.curve.isEmpty() ) continue;
 
-    if ( devType == QStringLiteral( "stagedPump" ) )
+    if ( pz.deviceType == QStringLiteral( "stagedPump" ) )
     {
       QVector< PumpCurveEditorWidget::Point > pts;
-      for ( const QJsonValue &cv : curve )
-      {
-        QJsonObject o = cv.toObject();
-        pts.append( { o["temp"].toDouble(), o["speed"].toInt() } );
-      }
-      if ( auto *ed = m_fanControlTab->pumpEditor( id ) )
+      for ( const auto &cp : pz.curve )
+        pts.append( { static_cast< double >( cp.temp ), cp.speed } );
+      if ( auto *ed = m_fanControlTab->pumpEditor( pz.id ) )
         ed->setPoints( pts );
     }
     else
     {
       QVector< FanPoint > cached;
       QVector< FanCurveEditorWidget::Point > pts;
-      for ( const QJsonValue &cv : curve )
+      for ( const auto &cp : pz.curve )
       {
-        QJsonObject o = cv.toObject();
-        int temp  = o["temp"].toInt();
-        int speed = o["speed"].toInt();
-        cached.append( { temp, speed } );
-        pts.append( { static_cast< double >( temp ), static_cast< double >( speed ) } );
+        cached.append( { cp.temp, cp.speed } );
+        pts.append( { static_cast< double >( cp.temp ), static_cast< double >( cp.speed ) } );
       }
-      m_fanZonePoints[id] = cached;
-      if ( auto *ed = m_fanControlTab->fanEditor( id ) )
+      m_fanZonePoints[pz.id] = cached;
+      if ( auto *ed = m_fanControlTab->fanEditor( pz.id ) )
         ed->setPoints( pts );
     }
   }
@@ -3074,55 +3011,32 @@ void MainWindow::loadFanPoints()
 
 bool MainWindow::saveFanPoints()
 {
-  QJsonObject obj;
-  QJsonArray zonesArr;
+  ucc::dbus::FanZoneCurveDtoList zones;
 
-  const QJsonArray zoneModel = m_fanControlTab->fanZonesData();
-  for ( const QJsonValue &zv : zoneModel )
+  for ( const auto &z : m_fanControlTab->fanZonesData() )
   {
-    if ( !zv.isObject() )
-      continue;
+    ucc::dbus::FanZoneCurveDto dto;
+    dto.id              = z.id;
+    dto.name            = z.name;
+    dto.deviceType      = z.deviceType;
+    dto.thermalSourceId = z.thermalSourceId;
+    dto.fanIds          = z.fanIds;
 
-    QJsonObject zone = zv.toObject();
-    const QString zoneId = zone[QStringLiteral( "id" )].toString();
-    if ( zoneId.isEmpty() )
-      continue;
-
-    QJsonArray curveArr;
-    if ( auto *fanEd = m_fanControlTab->fanEditor( zoneId ) )
+    if ( auto *fanEd = m_fanControlTab->fanEditor( z.id ) )
     {
       for ( const auto &p : fanEd->points() )
-      {
-        QJsonObject o;
-        o["temp"] = p.temp;
-        o["speed"] = p.duty;
-        curveArr.append( o );
-      }
+        dto.curve.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
     }
-    else if ( auto *pumpEd = m_fanControlTab->pumpEditor( zoneId ) )
+    else if ( auto *pumpEd = m_fanControlTab->pumpEditor( z.id ) )
     {
       for ( const auto &p : pumpEd->points() )
-      {
-        QJsonObject o;
-        o["temp"] = p.temp;
-        o["speed"] = p.level;
-        curveArr.append( o );
-      }
+        dto.curve.append( { static_cast< int >( p.temp ), p.level } );
     }
 
-    zone["curve"] = curveArr;
-    QString tsId = m_fanControlTab->thermalSourceForZone( zoneId );
-    if ( !tsId.isEmpty() )
-      zone["thermalSourceId"] = tsId;
-
-    zonesArr.append( zone );
+    zones.append( dto );
   }
 
-  obj["zones"] = zonesArr;
-  obj["thermalSources"] = m_fanControlTab->thermalSourcesData();
-
-  QJsonDocument doc(obj);
-  QString json = doc.toJson(QJsonDocument::Compact);
+  ucc::dbus::ThermalSourceDtoList sources = m_fanControlTab->thermalSourcesData();
 
   const QString currentId = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentData().toString() : QString();
   const QString currentName = m_fanControlTab->fanProfileCombo() ? m_fanControlTab->fanProfileCombo()->currentText() : QString();
@@ -3137,7 +3051,7 @@ bool MainWindow::saveFanPoints()
   }
 
   // Save into selected custom profile (by ID)
-  if ( !m_profileManager->setFanProfile( currentId, currentName, json ) )
+  if ( !m_profileManager->setFanProfile( currentId, currentName, zones, sources ) )
   {
     QMessageBox::warning( this, "Save Failed", "Failed to save fan profile via daemon." );
     return false;

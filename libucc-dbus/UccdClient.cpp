@@ -14,14 +14,13 @@
  */
 
 #include "UccdClient.hpp"
+#include "UccDbusKeys.hpp"
+#include "UccDbusTypes.hpp"
 #include <QDBusMessage>
 #include <QDBusError>
 #include <QDBusArgument>
 #include <QDBusConnectionInterface>
 #include <QDebug>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
 #include <QDateTime>
 #include <QThread>
 #include <QFile>
@@ -34,6 +33,8 @@ namespace ucc
 UccdClient::UccdClient( QObject *parent )
   : QObject( parent )
 {
+  ucc::dbus::registerDbusTypes();
+
   // Initial connection attempt (uccd may not be running yet — that's fine)
   connectToDaemon();
 
@@ -398,13 +399,9 @@ bool UccdClient::setStateMap( const std::string &state, const std::string &profi
   return callVoidMethod( "SetStateMap", qState, qProfileId );
 }
 
-bool UccdClient::setBatchStateMap( const std::map< std::string, std::string > &entries )
+bool UccdClient::setBatchStateMap( const QMap< QString, QString > &stateMap )
 {
-  QJsonObject obj;
-  for ( const auto &[state, profileId] : entries )
-    obj[QString::fromStdString( state )] = QString::fromStdString( profileId );
-  QString json = QJsonDocument( obj ).toJson( QJsonDocument::Compact );
-  return callMethod< bool, QString >( "SetBatchStateMap", json ).value_or( false );
+  return callMethod< bool >( "SetBatchStateMap", QVariant::fromValue( stateMap ) ).value_or( false );
 }
 
 bool UccdClient::setActiveProfile( const std::string &profileId )
@@ -435,14 +432,14 @@ bool UccdClient::deleteCustomProfile( const std::string &profileId ) { return de
 // Fan sub-profiles
 // ---------------------------------------------------------------------------
 
-std::optional< QVariantList > UccdClient::getFanProfiles()
+std::optional< ucc::dbus::ProfileSummaryDtoList > UccdClient::getFanProfiles()
 {
-  return callMethod< QVariantList >( "GetFanProfiles" );
+  return callMethod< ucc::dbus::ProfileSummaryDtoList >( "GetFanProfiles" );
 }
 
-std::optional< QVariantList > UccdClient::getThermalSources()
+std::optional< ucc::dbus::ThermalSourceDtoList > UccdClient::getThermalSources()
 {
-  return callMethod< QVariantList >( "GetThermalSources" );
+  return callMethod< ucc::dbus::ThermalSourceDtoList >( "GetThermalSources" );
 }
 
 std::optional< QVariantMap > UccdClient::getSensorReadings()
@@ -452,30 +449,41 @@ std::optional< QVariantMap > UccdClient::getSensorReadings()
   return std::nullopt;
 }
 
-std::optional< QVariantList > UccdClient::getHardwareFanDevices()
+std::optional< ucc::dbus::HardwareFanDeviceDtoList > UccdClient::getHardwareFanDevices()
 {
-  return callMethod< QVariantList >( "GetHardwareFanDevices" );
+  return callMethod< ucc::dbus::HardwareFanDeviceDtoList >( "GetHardwareFanDevices" );
 }
 
-std::optional< QVariantList > UccdClient::getHardwareSensors()
+std::optional< ucc::dbus::HardwareSensorDtoList > UccdClient::getHardwareSensors()
 {
-  return callMethod< QVariantList >( "GetHardwareSensors" );
+  return callMethod< ucc::dbus::HardwareSensorDtoList >( "GetHardwareSensors" );
 }
 
-std::optional< QVariantList > UccdClient::getFanZones()
+std::optional< ucc::dbus::FanZoneDtoList > UccdClient::getFanZones()
 {
-  return callMethod< QVariantList >( "GetFanZones" );
+  return callMethod< ucc::dbus::FanZoneDtoList >( "GetFanZones" );
 }
 
-std::optional< QVariantMap > UccdClient::getFanProfile( const std::string &fanProfileId )
+std::optional< ucc::dbus::FanZoneCurveDtoList > UccdClient::getFanProfileZones( const std::string &fanProfileId )
 {
-  return callMethod< QVariantMap >( "GetFanProfile", QString::fromStdString( fanProfileId ) );
+  return callMethod< ucc::dbus::FanZoneCurveDtoList >( "GetFanProfileZones",
+                                                        QString::fromStdString( fanProfileId ) );
 }
 
-bool UccdClient::saveFanProfile( const std::string &id, const std::string &name, const std::string &json )
+std::optional< ucc::dbus::ThermalSourceDtoList > UccdClient::getFanProfileSources( const std::string &fanProfileId )
+{
+  return callMethod< ucc::dbus::ThermalSourceDtoList >( "GetFanProfileSources",
+                                                         QString::fromStdString( fanProfileId ) );
+}
+
+bool UccdClient::saveFanProfile( const std::string &id, const std::string &name,
+                                 const ucc::dbus::FanZoneCurveDtoList &zones,
+                                 const ucc::dbus::ThermalSourceDtoList &thermalSources )
 {
   auto result = callMethod< bool >( "SaveFanProfile", QString::fromStdString( id ),
-                                    QString::fromStdString( name ), QString::fromStdString( json ) );
+                                    QString::fromStdString( name ),
+                                    QVariant::fromValue( zones ),
+                                    QVariant::fromValue( thermalSources ) );
   return result.value_or( false );
 }
 
@@ -493,9 +501,9 @@ std::optional< bool > UccdClient::setFanProfile( const std::string &fanProfileId
 // GPU sub-profiles
 // ---------------------------------------------------------------------------
 
-std::optional< QVariantList > UccdClient::getGpuProfiles()
+std::optional< ucc::dbus::ProfileSummaryDtoList > UccdClient::getGpuProfiles()
 {
-  return callMethod< QVariantList >( "GetGpuProfiles" );
+  return callMethod< ucc::dbus::ProfileSummaryDtoList >( "GetGpuProfiles" );
 }
 
 std::optional< QVariantMap > UccdClient::getGpuProfile( const std::string &gpuProfileId )
@@ -519,9 +527,9 @@ bool UccdClient::deleteGpuProfile( const std::string &id )
 // Keyboard sub-profiles
 // ---------------------------------------------------------------------------
 
-std::optional< QVariantList > UccdClient::getKeyboardProfiles()
+std::optional< ucc::dbus::ProfileSummaryDtoList > UccdClient::getKeyboardProfiles()
 {
-  return callMethod< QVariantList >( "GetKeyboardProfiles" );
+  return callMethod< ucc::dbus::ProfileSummaryDtoList >( "GetKeyboardProfiles" );
 }
 
 std::optional< QVariantMap > UccdClient::getKeyboardProfile( const std::string &keyboardProfileId )
@@ -668,10 +676,14 @@ std::optional< bool > UccdClient::isWaterCoolerEnabled()
   return callMethod< bool >( "IsWaterCoolerEnabled" );
 }
 
-bool UccdClient::applyFanProfiles( const std::string &fanProfilesJSON )
+bool UccdClient::applyFanProfiles( const ucc::dbus::FanZoneCurveDtoList &zones,
+                                   const ucc::dbus::ThermalSourceDtoList &thermalSources,
+                                   const QString &fanProfileId )
 {
-  const QString js = QString::fromStdString( fanProfilesJSON );
-  return callMethod< bool, QString >( "ApplyFanProfiles", js ).value_or( false );
+  return callMethod< bool >( "ApplyFanProfiles",
+                             QVariant::fromValue( zones ),
+                             QVariant::fromValue( thermalSources ),
+                             fanProfileId ).value_or( false );
 }
 
 bool UccdClient::revertFanProfiles()
@@ -1519,6 +1531,11 @@ template std::optional< int >     UccdClient::callMethod< int  >( const QString 
 template std::optional< QString > UccdClient::callMethod< QString >( const QString & ) const;
 template std::optional< QVariantMap > UccdClient::callMethod< QVariantMap >( const QString & ) const;
 template std::optional< QVariantList > UccdClient::callMethod< QVariantList >( const QString & ) const;
+template std::optional< ucc::dbus::ProfileSummaryDtoList > UccdClient::callMethod< ucc::dbus::ProfileSummaryDtoList >( const QString & ) const;
+template std::optional< ucc::dbus::HardwareFanDeviceDtoList > UccdClient::callMethod< ucc::dbus::HardwareFanDeviceDtoList >( const QString & ) const;
+template std::optional< ucc::dbus::HardwareSensorDtoList > UccdClient::callMethod< ucc::dbus::HardwareSensorDtoList >( const QString & ) const;
+template std::optional< ucc::dbus::ThermalSourceDtoList > UccdClient::callMethod< ucc::dbus::ThermalSourceDtoList >( const QString & ) const;
+template std::optional< ucc::dbus::FanZoneDtoList > UccdClient::callMethod< ucc::dbus::FanZoneDtoList >( const QString & ) const;
 
 template std::optional< bool > UccdClient::callMethod< bool, QString >( const QString &, const QString & ) const;
 template std::optional< bool > UccdClient::callMethod< bool, QString, QString >( const QString &, const QString &, const QString & ) const;

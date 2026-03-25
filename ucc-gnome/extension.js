@@ -716,14 +716,12 @@ class UccIndicator extends PanelMenu.Button {
     }
 
     _applyFanProfile(fanProfileId) {
-        const src = this._client.getFanProfile(fanProfileId);
-        if (!src) return;
-        const dst = {};
-        // Pass zones array directly
-        if (src.zones && Array.isArray(src.zones)) {
-            dst.zones = src.zones;
-        }
-        this._client.applyFanProfiles(JSON.stringify(dst));
+        const zones = this._client.getFanProfileZonesRaw(fanProfileId);
+        if (!zones) return;
+        const sources = this._client.getFanProfileSourcesRaw(fanProfileId);
+        // Pass raw GVariant data through — sources may be null for legacy profiles
+        const emptySources = new GLib.Variant('a(sssasad)', []);
+        this._client.applyFanProfiles(zones, sources ?? emptySources, fanProfileId);
     }
 
     _applyKeyboardProfile(kbProfileId) {

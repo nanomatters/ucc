@@ -24,6 +24,20 @@
 namespace ucc
 {
 
+namespace
+{
+
+template< typename T >
+QJsonArray toJsonArray( const QList< T > &list )
+{
+  QJsonArray result;
+  for ( const auto &item : list )
+    result.append( item.toJson() );
+  return result;
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -121,7 +135,7 @@ void ProfileManager::loadFanProfilesFromDaemon()
   m_fanProfilesData = QJsonArray();
 
   if ( auto list = m_client->getFanProfiles() )
-    m_fanProfilesData = QJsonArray::fromVariantList( *list );
+    m_fanProfilesData = toJsonArray( *list );
 
   emit fanProfilesChanged();
 }
@@ -131,7 +145,7 @@ void ProfileManager::loadGpuProfilesFromDaemon()
   m_gpuProfilesData = QJsonArray();
 
   if ( auto list = m_client->getGpuProfiles() )
-    m_gpuProfilesData = QJsonArray::fromVariantList( *list );
+    m_gpuProfilesData = toJsonArray( *list );
 
   emit gpuProfilesChanged();
 }
@@ -141,41 +155,41 @@ void ProfileManager::loadKeyboardProfilesFromDaemon()
   m_keyboardProfilesData = QJsonArray();
 
   if ( auto list = m_client->getKeyboardProfiles() )
-    m_keyboardProfilesData = QJsonArray::fromVariantList( *list );
+    m_keyboardProfilesData = toJsonArray( *list );
 
   emit keyboardProfilesChanged();
 }
 
 void ProfileManager::loadThermalSourcesFromDaemon()
 {
-  m_thermalSourcesData = QJsonArray();
+  m_thermalSourcesData.clear();
 
   if ( auto list = m_client->getThermalSources() )
-    m_thermalSourcesData = QJsonArray::fromVariantList( *list );
+    m_thermalSourcesData = *list;
 }
 
 void ProfileManager::loadHardwareFanDevicesFromDaemon()
 {
-  m_hardwareFanDevicesData = QJsonArray();
+  m_hardwareFanDevicesData.clear();
 
   if ( auto list = m_client->getHardwareFanDevices() )
-    m_hardwareFanDevicesData = QJsonArray::fromVariantList( *list );
+    m_hardwareFanDevicesData = *list;
 }
 
 void ProfileManager::loadHardwareSensorsFromDaemon()
 {
-  m_hardwareSensorsData = QJsonArray();
+  m_hardwareSensorsData.clear();
 
   if ( auto list = m_client->getHardwareSensors() )
-    m_hardwareSensorsData = QJsonArray::fromVariantList( *list );
+    m_hardwareSensorsData = *list;
 }
 
 void ProfileManager::loadFanZonesFromDaemon()
 {
-  m_fanZonesData = QJsonArray();
+  m_fanZonesData.clear();
 
   if ( auto list = m_client->getFanZones() )
-    m_fanZonesData = QJsonArray::fromVariantList( *list );
+    m_fanZonesData = *list;
 }
 
 // ---------------------------------------------------------------------------
@@ -628,30 +642,31 @@ bool ProfileManager::setStateMap( const QString &state, const QString &profileId
   return m_client->setStateMap( state.toStdString(), profileId.toStdString() );
 }
 
-bool ProfileManager::setBatchStateMap( const std::map< QString, QString > &entries )
+bool ProfileManager::setBatchStateMap( const QMap< QString, QString > &entries )
 {
-  std::map< std::string, std::string > stdEntries;
-  for ( const auto &[state, profileId] : entries )
-    stdEntries[state.toStdString()] = profileId.toStdString();
-  return m_client->setBatchStateMap( stdEntries );
+  return m_client->setBatchStateMap( entries );
 }
 
 // ---------------------------------------------------------------------------
 // Fan profiles — all go through daemon
 // ---------------------------------------------------------------------------
 
-QString ProfileManager::getFanProfile( const QString &fanProfileId )
+std::optional< ucc::dbus::FanZoneCurveDtoList > ProfileManager::getFanProfileZones( const QString &fanProfileId )
 {
-  // Fetch from daemon (supports both built-in and custom)
-  if ( auto map = m_client->getFanProfile( fanProfileId.toStdString() ) )
-    return QString::fromUtf8( QJsonDocument( QJsonObject::fromVariantMap( *map ) ).toJson( QJsonDocument::Compact ) );
-
-  return "{}";
+  return m_client->getFanProfileZones( fanProfileId.toStdString() );
 }
 
-bool ProfileManager::setFanProfile( const QString &fanProfileId, const QString &name, const QString &json )
+std::optional< ucc::dbus::ThermalSourceDtoList > ProfileManager::getFanProfileSources( const QString &fanProfileId )
 {
-  bool success = m_client->saveFanProfile( fanProfileId.toStdString(), name.toStdString(), json.toStdString() );
+  return m_client->getFanProfileSources( fanProfileId.toStdString() );
+}
+
+bool ProfileManager::setFanProfile( const QString &fanProfileId, const QString &name,
+                                    const ucc::dbus::FanZoneCurveDtoList &zones,
+                                    const ucc::dbus::ThermalSourceDtoList &thermalSources )
+{
+  bool success = m_client->saveFanProfile( fanProfileId.toStdString(), name.toStdString(),
+                                           zones, thermalSources );
   if ( success )
   {
     loadFanProfilesFromDaemon();
@@ -680,11 +695,10 @@ bool ProfileManager::renameFanProfile( const QString &fanProfileId, const QStrin
   if ( newName.isEmpty() ) return false;
 
   // Fetch current data, update name, re-save
-  if ( auto map = m_client->getFanProfile( fanProfileId.toStdString() ) )
-  {
-    return setFanProfile( fanProfileId, newName,
-      QString::fromUtf8( QJsonDocument( QJsonObject::fromVariantMap( *map ) ).toJson( QJsonDocument::Compact ) ) );
-  }
+  auto zones   = m_client->getFanProfileZones( fanProfileId.toStdString() );
+  auto sources = m_client->getFanProfileSources( fanProfileId.toStdString() );
+  if ( zones && sources )
+    return setFanProfile( fanProfileId, newName, *zones, *sources );
   return false;
 }
 

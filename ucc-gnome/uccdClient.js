@@ -81,6 +81,24 @@ export class UccdClient {
         }
     }
 
+    /** Call a D-Bus method and return the first result as a raw GVariant. */
+    _callRaw(method, args = null, signature = null) {
+        if (!this._connected) return null;
+        try {
+            const params = args !== null
+                ? new GLib.Variant(`(${signature})`, args)
+                : null;
+            const result = this._bus.call_sync(
+                BUS_NAME, OBJECT_PATH, IFACE_NAME,
+                method, params, null,
+                Gio.DBusCallFlags.NONE, 2000, null,
+            );
+            return result ? result.get_child_value(0) : null;
+        } catch (_e) {
+            return null;
+        }
+    }
+
     /** Call a void-returning method; returns true on success. */
     _callVoid(method, args = null, signature = null) {
         if (!this._connected) return false;
@@ -207,7 +225,8 @@ export class UccdClient {
     getCapabilities()     { return this._call('GetCapabilities'); }
     getSystemInfo()       { return this._call('GetSystemInfo'); }
 
-    getFanProfile(name) { return this._call('GetFanProfile', [name], 's'); }
+    getFanProfileZonesRaw(id) { return this._callRaw('GetFanProfileZones', [id], 's'); }
+    getFanProfileSourcesRaw(id) { return this._callRaw('GetFanProfileSources', [id], 's'); }
     getGpuProfile(id)   { return this._call('GetGpuProfile', [id], 's'); }
     getGpuProfiles() { return this._call('GetGpuProfiles'); }
     getCTGPAdjustmentSupported() { return this._call('GetCTGPAdjustmentSupported') ?? false; }
@@ -242,8 +261,23 @@ export class UccdClient {
         return this._callVoid('SetActiveProfile', [id], 's');
     }
 
-    applyFanProfiles(json) {
-        return this._callVoid('ApplyFanProfiles', [json], 's');
+    applyFanProfiles(zonesVariant, sourcesVariant, fanProfileId) {
+        if (!this._connected) return false;
+        try {
+            const params = GLib.Variant.new_tuple([
+                zonesVariant,
+                sourcesVariant,
+                new GLib.Variant('s', fanProfileId),
+            ]);
+            this._bus.call_sync(
+                BUS_NAME, OBJECT_PATH, IFACE_NAME,
+                'ApplyFanProfiles', params, null,
+                Gio.DBusCallFlags.NONE, 2000, null,
+            );
+            return true;
+        } catch (_e) {
+            return false;
+        }
     }
 
     setKeyboardBacklight(json) {

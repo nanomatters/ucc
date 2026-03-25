@@ -268,7 +268,6 @@ private slots:
 private:
   void loadProfiles();
   void loadCapabilities();
-  void applyFanProfileFromJson( const std::string &jsonStr, const QString &fanProfileId );
   QString resolveFanProfileName( const QString &fanProfileId ) const;
   QString resolveKeyboardProfileName( const QString &kbProfileId ) const;
   QString resolveGpuProfileName( const QString &gpuProfileId ) const;

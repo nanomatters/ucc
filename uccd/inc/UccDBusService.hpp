@@ -24,6 +24,7 @@
 #include <QDBusError>
 #include <QDBusContext>
 #include <QVariantMap>
+#include <QVariantList>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -34,6 +35,7 @@
 #include <optional>
 #include <unordered_set>
 #include "CommonTypes.hpp"
+#include "UccDbusTypes.hpp"
 #include "workers/DaemonWorker.hpp"
 #include "workers/HardwareMonitorWorker.hpp"
 #include "workers/DisplayWorker.hpp"
@@ -307,7 +309,9 @@ public slots:
   bool SetActiveProfile( const QString &id );
   bool ApplyProfile( const QString &profileJSON );
   QVariantList GetProfiles();                       // All profiles (built-in + custom) with "editable" flag
-  bool ApplyFanProfiles( const QString &fanProfilesJSON );
+  bool ApplyFanProfiles( const ucc::dbus::FanZoneCurveDtoList &zones,
+                         const ucc::dbus::ThermalSourceDtoList &thermalSources,
+                         const QString &fanProfileId );
   bool RevertFanProfiles();
   QVariantMap GetCpuFrequencyLimits();
   QVariantMap GetDefaultValuesProfile();
@@ -315,24 +319,27 @@ public slots:
   bool DeleteProfile( const QString &profileId );  // Delete an editable profile
 
   // Hardware zone model
-  QVariantList GetHardwareFanDevices();              // Raw detected fan/pump devices from hardware
-  QVariantList GetHardwareSensors();                 // Raw detected temperature sensors from hardware
-  QVariantList GetThermalSources();                  // Available thermal sources from hardware
-  QVariantMap GetSensorReadings();                   // Live sensor + thermal source readings
-  QVariantList GetFanZones();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
+  ucc::dbus::HardwareFanDeviceDtoList GetHardwareFanDevices();  // Raw detected fan/pump devices from hardware
+  ucc::dbus::HardwareSensorDtoList GetHardwareSensors();        // Raw detected temperature sensors from hardware
+  ucc::dbus::ThermalSourceDtoList GetThermalSources();          // Available thermal sources from hardware
+  QVariantMap GetSensorReadings();                              // Live sensor + thermal source readings
+  ucc::dbus::FanZoneDtoList GetFanZones();                      // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
 
   // Sub-profile CRUD — all include built-in (editable=false) + custom (editable=true)
-  QVariantList GetFanProfiles();                    // Replaces GetFanProfileNames
-  QVariantMap GetFanProfile( const QString &id );
-  bool SaveFanProfile( const QString &id, const QString &name, const QString &json );
+  ucc::dbus::ProfileSummaryDtoList GetFanProfiles();                    // Replaces GetFanProfileNames
+  ucc::dbus::FanZoneCurveDtoList GetFanProfileZones( const QString &id );
+  ucc::dbus::ThermalSourceDtoList GetFanProfileSources( const QString &id );
+  bool SaveFanProfile( const QString &id, const QString &name,
+                       const ucc::dbus::FanZoneCurveDtoList &zones,
+                       const ucc::dbus::ThermalSourceDtoList &thermalSources );
   bool DeleteFanProfile( const QString &id );
 
-  QVariantList GetGpuProfiles();                    // Replaces GetGpuProfileNames
+  ucc::dbus::ProfileSummaryDtoList GetGpuProfiles();                    // Replaces GetGpuProfileNames
   QVariantMap GetGpuProfile( const QString &id );
   bool SaveGpuProfile( const QString &id, const QString &name, const QString &json );
   bool DeleteGpuProfile( const QString &id );
 
-  QVariantList GetKeyboardProfiles();
+  ucc::dbus::ProfileSummaryDtoList GetKeyboardProfiles();
   QVariantMap GetKeyboardProfile( const QString &id );
   bool SaveKeyboardProfile( const QString &id, const QString &name, const QString &json );
   bool DeleteKeyboardProfile( const QString &id );
@@ -350,7 +357,7 @@ public slots:
   // settings methods
   QVariantMap GetSettings();
   bool SetStateMap( const QString &state, const QString &profileId );
-  bool SetBatchStateMap( const QString &stateMapJSON );
+  bool SetBatchStateMap( const QMap< QString, QString > &stateMap );
 
   // odm methods
   QStringList ODMProfilesAvailable();

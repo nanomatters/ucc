@@ -10,6 +10,7 @@
 #include "TrayBackend.hpp"
 
 #include "GuiLauncher.hpp"
+#include "UccDbusTypes.hpp"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -31,6 +32,18 @@ bool parseProfileArray( const QVariantList &list,
     if ( id.isEmpty() ) continue;
     outIds.append( id );
     outNames.append( name );
+  }
+  return !list.isEmpty();
+}
+
+bool parseProfileArray( const ucc::dbus::ProfileSummaryDtoList &list,
+                        QStringList &outNames, QStringList &outIds )
+{
+  for ( const auto &item : list )
+  {
+    if ( item.id.isEmpty() ) continue;
+    outIds.append( item.id );
+    outNames.append( item.name );
   }
   return !list.isEmpty();
 }
@@ -311,38 +324,17 @@ void TrayBackend::setActiveProfile( const QString &profileId )
 
 void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
 {
-  // Fetch the fan profile and apply its curves to hardware.
-  if ( auto map = m_client->getFanProfile( fanProfileId.toStdString() ) )
-  {
-    auto json = QJsonDocument( QJsonObject::fromVariantMap( *map ) ).toJson( QJsonDocument::Compact ).toStdString();
-    applyFanProfileFromJson( json, fanProfileId );
-  }
+  // Fetch the fan profile zones/sources and apply directly
+  auto zones   = m_client->getFanProfileZones( fanProfileId.toStdString() );
+  auto sources = m_client->getFanProfileSources( fanProfileId.toStdString() );
+  if ( zones )
+    m_client->applyFanProfiles( *zones, sources.value_or( ucc::dbus::ThermalSourceDtoList{} ), fanProfileId );
 
   // Mark override so pollSlowState() doesn't revert to the daemon's stored value
   m_fanProfileOverride = true;
   m_activeProfileFanId = fanProfileId;
   m_activeProfileFanName = resolveFanProfileName( fanProfileId );
   emit activeProfileChanged();
-}
-
-void TrayBackend::applyFanProfileFromJson( const std::string &jsonStr, const QString &fanProfileId )
-{
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( jsonStr ) );
-  if ( !doc.isObject() )
-    return;
-
-  QJsonObject src = doc.object();
-  QJsonObject dst;
-
-  if ( src.contains( "zones" ) && src["zones"].isArray() )
-  {
-    dst["zones"] = src["zones"];
-  }
-
-  dst[ "fanProfileId" ] = fanProfileId;
-  const std::string applyJson =
-    QJsonDocument( dst ).toJson( QJsonDocument::Compact ).toStdString();
-  m_client->applyFanProfiles( applyJson );
 }
 
 void TrayBackend::setActiveKeyboardProfile( const QString &keyboardProfileId )

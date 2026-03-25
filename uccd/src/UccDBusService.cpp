@@ -14,6 +14,8 @@
  */
 
 #include "UccDBusService.hpp"
+#include "UccDbusKeys.hpp"
+#include "UccDbusTypes.hpp"
 #include "CommonTypes.hpp"
 #include "NvmlWrapper.hpp"
 #include "SmbiosMemoryDecoder.hpp"
@@ -331,6 +333,8 @@ UccDBusInterfaceAdaptor::UccDBusInterfaceAdaptor( QObject *parent,
     m_service( service ),
     m_lastDataCollectionAccess( std::chrono::steady_clock::now() )
 {
+  ucc::dbus::registerDbusTypes();
+
   // Qt's MOC handles introspection and method dispatch automatically
   // via Q_CLASSINFO and public slots declarations
   setAutoRelaySignals( true );
@@ -878,143 +882,129 @@ QVariantMap UccDBusInterfaceAdaptor::GetAppliedProfiles()
   return root;
 }
 
-bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq )
+bool UccDBusInterfaceAdaptor::ApplyFanProfiles(
+    const ucc::dbus::FanZoneCurveDtoList &zones,
+    const ucc::dbus::ThermalSourceDtoList &thermalSources,
+    const QString &fanProfileId )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( not m_service )
     return false;
 
-  const std::string fanProfilesJSON = fanProfilesJSONq.toStdString();
-
   try
   {
-    // Helper: extract a JSON array by key name
-    auto extractArray = [&]( const std::string &key ) -> std::string {
-      std::string search = "\"" + key + "\":";
-      size_t pos = fanProfilesJSON.find( search );
-      if ( pos == std::string::npos ) return {};
-      size_t bracketStart = fanProfilesJSON.find( '[', pos );
-      if ( bracketStart == std::string::npos ) return {};
-      int depth = 0;
-      for ( size_t i = bracketStart; i < fanProfilesJSON.length(); ++i )
-      {
-        if ( fanProfilesJSON[i] == '[' ) ++depth;
-        else if ( fanProfilesJSON[i] == ']' ) --depth;
-        if ( depth == 0 )
-          return fanProfilesJSON.substr( bracketStart, i - bracketStart + 1 );
-      }
-      return {};
-    };
-
-    // Build zone curves map from the JSON
-    std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurves;
-
     // Register custom thermal sources from the profile before zone processing
+    if ( !thermalSources.isEmpty() )
     {
-      auto tsJson = extractArray( "thermalSources" );
-      if ( !tsJson.empty() )
+      std::vector< ucc::hal::ThermalSource > tsSources;
+      tsSources.reserve( thermalSources.size() );
+      for ( const auto &ts : thermalSources )
       {
-        auto tsProfile = ProfileManager::parseFanProfileJSON(
-          "{\"thermalSources\":" + tsJson + "}" );
-        if ( !tsProfile.thermalSources.empty() )
-        {
-          m_service->m_hw.addThermalSources( tsProfile.thermalSources );
-          std::cerr << "[DBus] Registered " << tsProfile.thermalSources.size()
-                    << " custom thermal sources" << std::endl;
-        }
+        ucc::hal::ThermalSource src;
+        src.id       = ts.id.toStdString();
+        src.label    = ts.label.toStdString();
+        src.strategy = ucc::hal::thermalStrategyFromString( ts.strategy.toStdString() );
+        for ( const auto &s : ts.sensorIds )
+          src.sensorIds.push_back( s.toStdString() );
+        for ( double w : ts.weights )
+          src.weights.push_back( w );
+        tsSources.push_back( std::move( src ) );
+      }
+      m_service->m_hw.addThermalSources( tsSources );
+      std::cerr << "[DBus] Registered " << tsSources.size()
+                << " custom thermal sources" << std::endl;
+    }
+
+    // Convert zone DTOs to internal FanZoneCurve structures
+    std::vector< ucc::hal::FanZoneCurve > zoneCurveVec;
+    std::map< std::string, std::vector< ucc::hal::FanCurvePoint > > zoneCurvesMap;
+
+    for ( const auto &z : zones )
+    {
+      ucc::hal::FanZoneCurve zc;
+      zc.zoneId         = z.id.toStdString();
+      zc.name           = z.name.toStdString();
+      zc.deviceType     = ucc::hal::fanDeviceTypeFromString( z.deviceType.toStdString() );
+      zc.hysteresisDeg  = z.hysteresisDeg;
+      zc.enabled        = z.enabled;
+      zc.thermalSourceId = z.thermalSourceId.toStdString();
+      for ( const auto &fid : z.fanIds )
+        zc.fanIds.push_back( fid.toStdString() );
+      for ( const auto &pt : z.curve )
+        zc.curve.push_back( { pt.temp, pt.speed } );
+
+      zoneCurveVec.push_back( std::move( zc ) );
+    }
+
+    // If the zones carry topology (fanIds), rebuild the zone model
+    bool hasTopology = false;
+    for ( const auto &zc : zoneCurveVec )
+    {
+      if ( zc.hasTopology() )
+      {
+        hasTopology = true;
+        break;
       }
     }
 
-    // Parse "zones" array
-    auto zonesJson = extractArray( "zones" );
-    if ( !zonesJson.empty() )
+    if ( hasTopology && m_service )
     {
-      auto zoneProfile = ProfileManager::parseFanProfileJSON(
-        "{\"zones\":" + zonesJson + "}" );
+      FanProfile topologyProfile;
+      topologyProfile.zoneCurves = zoneCurveVec;
+      m_service->rebuildFanZonesFromProfile( topologyProfile );
 
-      // If the zones carry topology (fanIds), rebuild the zone model
-      bool hasTopology = false;
-      for ( const auto &zc : zoneProfile.zoneCurves )
+      if ( m_service->m_fanControlWorker )
       {
-        if ( zc.hasTopology() )
-        {
-          hasTopology = true;
-          break;
-        }
+        m_service->m_fanControlWorker->stop();
+        m_service->m_fanControlWorker->start();
+        std::cerr << "[DBus] Restarted FanControlWorker with new zone topology" << std::endl;
       }
+    }
 
-      if ( hasTopology && m_service )
+    for ( const auto &zc : zoneCurveVec )
+    {
+      if ( !zc.curve.empty() )
+        zoneCurvesMap[zc.zoneId] = zc.curve;
+    }
+
+    // Apply per-zone thermal source overrides
+    if ( m_service && m_service->m_fanControlWorker )
+    {
+      std::map< std::string, std::string > thermalSourceOverrides;
+      for ( const auto &zc : zoneCurveVec )
       {
-        FanProfile topologyProfile;
-        topologyProfile.zoneCurves = zoneProfile.zoneCurves;
-        m_service->rebuildFanZonesFromProfile( topologyProfile );
-
-        // Restart worker to pick up new zone topology
-        if ( m_service->m_fanControlWorker )
-        {
-          m_service->m_fanControlWorker->stop();
-          m_service->m_fanControlWorker->start();
-          std::cerr << "[DBus] Restarted FanControlWorker with new zone topology" << std::endl;
-        }
+        std::cerr << "[DBus] Zone '" << zc.zoneId << "' thermalSourceId='" << zc.thermalSourceId << "'" << std::endl;
+        if ( !zc.thermalSourceId.empty() )
+          thermalSourceOverrides[zc.zoneId] = zc.thermalSourceId;
       }
-
-      for ( const auto &zc : zoneProfile.zoneCurves )
+      if ( !thermalSourceOverrides.empty() )
       {
-        if ( !zc.curve.empty() )
-          zoneCurves[zc.zoneId] = zc.curve;
+        m_service->m_fanControlWorker->applyZoneThermalSources( thermalSourceOverrides );
+        std::cerr << "[DBus] Applied thermal sources for " << thermalSourceOverrides.size() << " zones" << std::endl;
       }
-
-      // Apply per-zone thermal source overrides
-      if ( m_service && m_service->m_fanControlWorker )
+      else
       {
-        std::map< std::string, std::string > thermalSources;
-        for ( const auto &zc : zoneProfile.zoneCurves )
-        {
-          std::cerr << "[DBus] Zone '" << zc.zoneId << "' thermalSourceId='" << zc.thermalSourceId << "'" << std::endl;
-          if ( !zc.thermalSourceId.empty() )
-            thermalSources[zc.zoneId] = zc.thermalSourceId;
-        }
-        if ( !thermalSources.empty() )
-        {
-          m_service->m_fanControlWorker->applyZoneThermalSources( thermalSources );
-          std::cerr << "[DBus] Applied thermal sources for " << thermalSources.size() << " zones" << std::endl;
-        }
-        else
-        {
-          std::cerr << "[DBus] WARNING: No thermal source overrides found in zone data!" << std::endl;
-        }
+        std::cerr << "[DBus] WARNING: No thermal source overrides found in zone data!" << std::endl;
       }
     }
 
     // Apply the temporary zone curves
-    if ( m_service->m_fanControlWorker && !zoneCurves.empty() )
+    if ( m_service->m_fanControlWorker && !zoneCurvesMap.empty() )
     {
-      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
-      std::cerr << "[DBus] Applied temporary zone curves (" << zoneCurves.size() << " zones)" << std::endl;
+      m_service->m_fanControlWorker->applyTemporaryZoneCurves( zoneCurvesMap );
+      std::cerr << "[DBus] Applied temporary zone curves (" << zoneCurvesMap.size() << " zones)" << std::endl;
     }
 
     // If the caller provided a fan profile ID, update the active profile
     // reference and notify all clients so they stay in sync.
+    if ( !fanProfileId.isEmpty() )
     {
-      auto extractStr = []( const std::string &json, const std::string &key ) -> std::string {
-        std::string search = "\"" + key + "\":\"";
-        size_t pos = json.find( search );
-        if ( pos == std::string::npos ) return {};
-        pos += search.length();
-        size_t end = json.find( '"', pos );
-        if ( end == std::string::npos ) return {};
-        return json.substr( pos, end - pos );
-      };
-      std::string fanProfileId = extractStr( fanProfilesJSON, "fanProfileId" );
-      if ( !fanProfileId.empty() )
-      {
-        m_service->m_activeProfile.fan.fanProfile = fanProfileId;
-        m_service->updateDBusActiveProfileData();
-        if ( m_service->m_adaptor )
-          emitProfileChanged( m_service->m_activeProfile.id,
-                              m_service->m_activeProfile.keyboard.keyboardProfileId,
-                              fanProfileId );
-      }
+      m_service->m_activeProfile.fan.fanProfile = fanProfileId.toStdString();
+      m_service->updateDBusActiveProfileData();
+      if ( m_service->m_adaptor )
+        emitProfileChanged( m_service->m_activeProfile.id,
+                            m_service->m_activeProfile.keyboard.keyboardProfileId,
+                            fanProfileId.toStdString() );
     }
 
     return true;
@@ -1380,26 +1370,22 @@ bool UccDBusInterfaceAdaptor::SaveCustomProfile( const QString &profileJSON )
 // Unified fan profile methods (new API)
 // ---------------------------------------------------------------------------
 
-QVariantList UccDBusInterfaceAdaptor::GetFanProfiles()
+ucc::dbus::ProfileSummaryDtoList UccDBusInterfaceAdaptor::GetFanProfiles()
 {
-  QVariantList list;
+  ucc::dbus::ProfileSummaryDtoList list;
   if ( m_service )
   {
     for ( const auto &fp : m_service->m_builtinFanProfiles )
-      list.append( QVariantMap{ { "id", QString::fromStdString( fp.id ) },
-                                { "name", QString::fromStdString( fp.name ) },
-                                { "editable", false } } );
+      list.append( { QString::fromStdString( fp.id ), QString::fromStdString( fp.name ), false } );
     for ( const auto &fp : m_service->m_customFanProfiles )
-      list.append( QVariantMap{ { "id", QString::fromStdString( fp.id ) },
-                                { "name", QString::fromStdString( fp.name ) },
-                                { "editable", true } } );
+      list.append( { QString::fromStdString( fp.id ), QString::fromStdString( fp.name ), true } );
   }
   return list;
 }
 
-QVariantList UccDBusInterfaceAdaptor::GetThermalSources()
+ucc::dbus::ThermalSourceDtoList UccDBusInterfaceAdaptor::GetThermalSources()
 {
-  QVariantList list;
+  ucc::dbus::ThermalSourceDtoList list;
   if ( !m_service )
     return list;
 
@@ -1409,15 +1395,15 @@ QVariantList UccDBusInterfaceAdaptor::GetThermalSources()
     for ( const auto &sid : ts.sensorIds )
       sensorIds.append( QString::fromStdString( sid ) );
 
-    QVariantList weights;
+    QList< double > weights;
     for ( double w : ts.weights )
       weights.append( w );
 
-    list.append( QVariantMap{ { "id", QString::fromStdString( ts.id ) },
-                              { "label", QString::fromStdString( ts.label ) },
-                              { "strategy", QString::fromStdString( ucc::hal::thermalStrategyToString( ts.strategy ) ) },
-                              { "sensorIds", QVariant::fromValue( sensorIds ) },
-                              { "weights", QVariant::fromValue( weights ) } } );
+    list.append( { QString::fromStdString( ts.id ),
+                   QString::fromStdString( ts.label ),
+                   QString::fromStdString( ucc::hal::thermalStrategyToString( ts.strategy ) ),
+                   sensorIds,
+                   weights } );
   }
   return list;
 }
@@ -1466,30 +1452,30 @@ QVariantMap UccDBusInterfaceAdaptor::GetSensorReadings()
   return root;
 }
 
-QVariantList UccDBusInterfaceAdaptor::GetHardwareFanDevices()
+ucc::dbus::HardwareFanDeviceDtoList UccDBusInterfaceAdaptor::GetHardwareFanDevices()
 {
-  QVariantList list;
+  ucc::dbus::HardwareFanDeviceDtoList list;
   if ( !m_service )
     return list;
 
   for ( const auto &f : m_service->m_hw.fans() )
   {
-    list.append( QVariantMap{ { "id", QString::fromStdString( f.id ) },
-                              { "label", QString::fromStdString( f.label ) },
-                              { "sourceName", QString::fromStdString( f.sourceName ) },
-                              { "hwmonPath", QString::fromStdString( f.hwmonPath ) },
-                              { "index", f.index },
-                              { "canRead", f.canRead },
-                              { "canControl", f.canControl },
-                              { "deviceType", QString::fromStdString( ucc::hal::fanDeviceTypeToString( f.deviceType ) ) } } );
+    list.append( { QString::fromStdString( f.id ),
+                   QString::fromStdString( f.label ),
+                   QString::fromStdString( f.sourceName ),
+                   QString::fromStdString( f.hwmonPath ),
+                   f.index,
+                   f.canRead,
+                   f.canControl,
+                   QString::fromStdString( ucc::hal::fanDeviceTypeToString( f.deviceType ) ) } );
   }
   return list;
 }
 
-QVariantList UccDBusInterfaceAdaptor::GetHardwareSensors()
+ucc::dbus::HardwareSensorDtoList UccDBusInterfaceAdaptor::GetHardwareSensors()
 {
   if ( !m_service )
-    return QVariantList();
+    return {};
 
   auto trimCopy = []( const std::string &in ) -> std::string {
     size_t b = 0;
@@ -1875,7 +1861,7 @@ QVariantList UccDBusInterfaceAdaptor::GetHardwareSensors()
     return "other";
   };
 
-  QVariantList arr;
+  ucc::dbus::HardwareSensorDtoList arr;
 
   for ( size_t i = 0; i < sensors.size(); ++i )
   {
@@ -1890,18 +1876,14 @@ QVariantList UccDBusInterfaceAdaptor::GetHardwareSensors()
     else if ( category == "ddr5" )
       displayLabel = buildDdrDisplayLabel( s );
 
-    QVariantMap obj;
-    obj["id"]       = QString::fromStdString( s.id );
-    obj["label"]    = QString::fromStdString( s.label );
-    if ( !displayLabel.empty() )
-      obj["displayLabel"] = QString::fromStdString( displayLabel );
-    obj["source"]   = QString::fromStdString( s.source );
-    if ( !sourceDisplay.empty() )
-      obj["sourceDisplay"] = QString::fromStdString( sourceDisplay );
-    obj["category"] = QString::fromStdString( category );
-    obj["hwmonPath"] = QString::fromStdString( s.hwmonPath );
-    obj["index"]    = s.index;
-    arr.append( obj );
+    arr.append( { QString::fromStdString( s.id ),
+                   QString::fromStdString( s.label ),
+                   QString::fromStdString( category ),
+                   QString::fromStdString( s.source ),
+                   QString::fromStdString( sourceDisplay ),
+                   QString::fromStdString( displayLabel ),
+                   QString::fromStdString( s.hwmonPath ),
+                   s.index } );
   }
 
   // Add iGPU virtual sensor for systems where hwmon doesn't cover integrated GPU.
@@ -1911,30 +1893,25 @@ QVariantList UccDBusInterfaceAdaptor::GetHardwareSensors()
 
     const QString iGpuModel = QString::fromStdString( m_service->m_systemInfo.iGpuModel ).trimmed();
 
-    const QVariantMap &igpuMap = m_data.iGpuInfoValues;
     if ( !iGpuModel.isEmpty() )
     {
-      const double temp = igpuMap.value( QStringLiteral( "temp" ), -1.0 ).toDouble();
-
-      QVariantMap obj;
-      obj["id"]       = QStringLiteral( "gpu-igpu-temp" );
-      obj["label"]    = QStringLiteral( "Temperature" );
-      obj["source"]   = iGpuModel;
-      obj["category"] = QStringLiteral( "gpu" );
-      obj["hwmonPath"] = QString();
-      obj["index"]    = 1;
-      if ( temp >= 0.0 )
-        obj["currentTempC"] = static_cast< int >( std::lround( temp ) );
-      arr.append( obj );
+      arr.append( { QStringLiteral( "gpu-igpu-temp" ),
+                     QStringLiteral( "Temperature" ),
+                     QStringLiteral( "gpu" ),
+                     iGpuModel,
+                     QString(),
+                     QString(),
+                     QString(),
+                     1 } );
     }
   }
 
   return arr;
 }
 
-QVariantList UccDBusInterfaceAdaptor::GetFanZones()
+ucc::dbus::FanZoneDtoList UccDBusInterfaceAdaptor::GetFanZones()
 {
-  QVariantList list;
+  ucc::dbus::FanZoneDtoList list;
   if ( !m_service )
     return list;
 
@@ -1944,46 +1921,164 @@ QVariantList UccDBusInterfaceAdaptor::GetFanZones()
     for ( const auto &fid : z.fanIds )
       fanIds.append( QString::fromStdString( fid ) );
 
-    list.append( QVariantMap{ { "id", QString::fromStdString( z.id ) },
-                              { "name", QString::fromStdString( z.name ) },
-                              { "deviceType", QString::fromStdString( ucc::hal::fanDeviceTypeToString( z.defaultType ) ) },
-                              { "thermalSourceId", QString::fromStdString( z.thermalSourceId ) },
-                              { "fanIds", QVariant::fromValue( fanIds ) } } );
+    list.append( { QString::fromStdString( z.id ),
+                   QString::fromStdString( z.name ),
+                   QString::fromStdString( ucc::hal::fanDeviceTypeToString( z.defaultType ) ),
+                   QString::fromStdString( z.thermalSourceId ),
+                   fanIds } );
   }
   return list;
 }
 
-QVariantMap UccDBusInterfaceAdaptor::GetFanProfile( const QString &id )
+/// Parse a SubProfile's stored JSON into typed zone-curve DTOs.
+static ucc::dbus::FanZoneCurveDtoList fanProfileJsonToZoneDtos( const std::string &json )
+{
+  ucc::dbus::FanZoneCurveDtoList list;
+  auto fp = ProfileManager::parseFanProfileJSON( json );
+  for ( const auto &zc : fp.zoneCurves )
+  {
+    ucc::dbus::FanZoneCurveDto dto;
+    dto.id            = QString::fromStdString( zc.zoneId );
+    dto.name          = QString::fromStdString( zc.name );
+    dto.deviceType    = QString::fromStdString( ucc::hal::fanDeviceTypeToString( zc.deviceType ) );
+    dto.thermalSourceId = QString::fromStdString( zc.thermalSourceId );
+    dto.hysteresisDeg = zc.hysteresisDeg;
+    dto.enabled       = zc.enabled;
+    for ( const auto &fid : zc.fanIds )
+      dto.fanIds.append( QString::fromStdString( fid ) );
+    for ( const auto &pt : zc.curve )
+      dto.curve.append( { pt.temp, pt.speed } );
+    list.append( std::move( dto ) );
+  }
+  return list;
+}
+
+/// Parse a SubProfile's stored JSON into typed thermal-source DTOs.
+static ucc::dbus::ThermalSourceDtoList fanProfileJsonToSourceDtos( const std::string &json )
+{
+  ucc::dbus::ThermalSourceDtoList list;
+  auto fp = ProfileManager::parseFanProfileJSON( json );
+  for ( const auto &ts : fp.thermalSources )
+  {
+    ucc::dbus::ThermalSourceDto dto;
+    dto.id       = QString::fromStdString( ts.id );
+    dto.label    = QString::fromStdString( ts.label );
+    dto.strategy = QString::fromStdString( ucc::hal::thermalStrategyToString( ts.strategy ) );
+    for ( const auto &s : ts.sensorIds )
+      dto.sensorIds.append( QString::fromStdString( s ) );
+    for ( double w : ts.weights )
+      dto.weights.append( w );
+    list.append( std::move( dto ) );
+  }
+  return list;
+}
+
+/// Serialize typed zone-curve + source DTOs back to JSON for settings persistence.
+static std::string fanProfileDtosToJson( const ucc::dbus::FanZoneCurveDtoList &zones,
+                                         const ucc::dbus::ThermalSourceDtoList &sources )
+{
+  nlohmann::json j;
+
+  nlohmann::json zonesArr = nlohmann::json::array();
+  for ( const auto &z : zones )
+  {
+    nlohmann::json zone;
+    zone["id"]            = z.id.toStdString();
+    zone["name"]          = z.name.toStdString();
+    zone["deviceType"]    = z.deviceType.toStdString();
+    zone["thermalSourceId"] = z.thermalSourceId.toStdString();
+    zone["hysteresisDeg"] = z.hysteresisDeg;
+    zone["enabled"]       = z.enabled;
+
+    nlohmann::json fids = nlohmann::json::array();
+    for ( const auto &f : z.fanIds )
+      fids.push_back( f.toStdString() );
+    zone["fanIds"] = std::move( fids );
+
+    nlohmann::json curve = nlohmann::json::array();
+    for ( const auto &pt : z.curve )
+      curve.push_back( {{ "temp", pt.temp }, { "speed", pt.speed }} );
+    zone["curve"] = std::move( curve );
+
+    zonesArr.push_back( std::move( zone ) );
+  }
+  j["zones"] = std::move( zonesArr );
+
+  if ( !sources.isEmpty() )
+  {
+    nlohmann::json tsList = nlohmann::json::array();
+    for ( const auto &ts : sources )
+    {
+      nlohmann::json tsObj;
+      tsObj["id"]       = ts.id.toStdString();
+      tsObj["label"]    = ts.label.toStdString();
+      tsObj["strategy"] = ts.strategy.toStdString();
+
+      nlohmann::json sids = nlohmann::json::array();
+      for ( const auto &s : ts.sensorIds )
+        sids.push_back( s.toStdString() );
+      tsObj["sensorIds"] = std::move( sids );
+
+      nlohmann::json wts = nlohmann::json::array();
+      for ( double w : ts.weights )
+        wts.push_back( w );
+      tsObj["weights"] = std::move( wts );
+
+      tsList.push_back( std::move( tsObj ) );
+    }
+    j["thermalSources"] = std::move( tsList );
+  }
+
+  return j.dump();
+}
+
+ucc::dbus::FanZoneCurveDtoList UccDBusInterfaceAdaptor::GetFanProfileZones( const QString &id )
 {
   const std::string requestedId = id.toStdString();
 
-  // Check custom fan profiles first (daemon-side)
   if ( m_service )
   {
     for ( const auto &fp : m_service->m_customFanProfiles )
-    {
       if ( fp.id == requestedId )
-        return subProfileJsonToMap( fp.json );
-    }
+        return fanProfileJsonToZoneDtos( fp.json );
 
     for ( const auto &fp : m_service->m_builtinFanProfiles )
-    {
       if ( fp.id == requestedId )
-        return subProfileJsonToMap( fp.json );
-    }
+        return fanProfileJsonToZoneDtos( fp.json );
   }
 
   return {};
 }
 
-bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &name, const QString &json )
+ucc::dbus::ThermalSourceDtoList UccDBusInterfaceAdaptor::GetFanProfileSources( const QString &id )
+{
+  const std::string requestedId = id.toStdString();
+
+  if ( m_service )
+  {
+    for ( const auto &fp : m_service->m_customFanProfiles )
+      if ( fp.id == requestedId )
+        return fanProfileJsonToSourceDtos( fp.json );
+
+    for ( const auto &fp : m_service->m_builtinFanProfiles )
+      if ( fp.id == requestedId )
+        return fanProfileJsonToSourceDtos( fp.json );
+  }
+
+  return {};
+}
+
+bool UccDBusInterfaceAdaptor::SaveFanProfile(
+    const QString &id, const QString &name,
+    const ucc::dbus::FanZoneCurveDtoList &zones,
+    const ucc::dbus::ThermalSourceDtoList &thermalSources )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service ) return false;
 
   const std::string sid = id.toStdString();
   const std::string sname = name.toStdString();
-  const std::string sjson = json.toStdString();
+  const std::string sjson = fanProfileDtosToJson( zones, thermalSources );
 
   // Check this doesn't collide with a built-in fan profile
   for ( const auto &fp : m_service->m_builtinFanProfiles )
@@ -2013,7 +2108,6 @@ bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &
   }
 
   // Persist to settings
-  // Wrap the raw fan JSON inside an object with "name" so loadSubProfiles can extract it
   nlohmann::json wrapper;
   try { wrapper = nlohmann::json::parse( sjson ); } catch ( ... ) { wrapper = nlohmann::json::object(); }
   wrapper["name"] = sname;
@@ -2056,30 +2150,22 @@ bool UccDBusInterfaceAdaptor::DeleteFanProfile( const QString &id )
 // Unified GPU profile methods (new API)
 // ---------------------------------------------------------------------------
 
-QVariantList UccDBusInterfaceAdaptor::GetGpuProfiles()
+ucc::dbus::ProfileSummaryDtoList UccDBusInterfaceAdaptor::GetGpuProfiles()
 {
-  if ( !m_service ) return QVariantList();
+  if ( !m_service ) return {};
 
-  QVariantList list;
+  ucc::dbus::ProfileSummaryDtoList list;
 
   // Built-in GPU profiles (editable=false)
   for ( const auto &profile : m_service->m_builtinGpuProfiles )
   {
-    list.append( QVariantMap{
-      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
-      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
-      { QStringLiteral( "editable" ), false }
-    } );
+    list.append( { QString::fromStdString( profile.id ), QString::fromStdString( profile.name ), false } );
   }
 
   // Custom GPU profiles (editable=true)
   for ( const auto &profile : m_service->m_customGpuProfiles )
   {
-    list.append( QVariantMap{
-      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
-      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
-      { QStringLiteral( "editable" ), true }
-    } );
+    list.append( { QString::fromStdString( profile.id ), QString::fromStdString( profile.name ), true } );
   }
 
   return list;
@@ -2180,30 +2266,22 @@ bool UccDBusInterfaceAdaptor::DeleteGpuProfile( const QString &id )
 // Unified keyboard profile methods (new API)
 // ---------------------------------------------------------------------------
 
-QVariantList UccDBusInterfaceAdaptor::GetKeyboardProfiles()
+ucc::dbus::ProfileSummaryDtoList UccDBusInterfaceAdaptor::GetKeyboardProfiles()
 {
-  if ( !m_service ) return QVariantList();
+  if ( !m_service ) return {};
 
-  QVariantList list;
+  ucc::dbus::ProfileSummaryDtoList list;
 
   // Built-in keyboard profiles (editable=false)
   for ( const auto &profile : m_service->m_builtinKeyboardProfiles )
   {
-    list.append( QVariantMap{
-      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
-      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
-      { QStringLiteral( "editable" ), false }
-    } );
+    list.append( { QString::fromStdString( profile.id ), QString::fromStdString( profile.name ), false } );
   }
 
   // Custom keyboard profiles (editable=true)
   for ( const auto &profile : m_service->m_customKeyboardProfiles )
   {
-    list.append( QVariantMap{
-      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
-      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
-      { QStringLiteral( "editable" ), true }
-    } );
+    list.append( { QString::fromStdString( profile.id ), QString::fromStdString( profile.name ), true } );
   }
   return list;
 }
@@ -2395,27 +2473,19 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const QString &state, const QString &
   return false;
 }
 
-bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QString &stateMapJSON )
+bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QMap< QString, QString > &stateMap )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( !m_service )
     return false;
 
-  QJsonDocument doc = QJsonDocument::fromJson( stateMapJSON.toUtf8() );
-  if ( !doc.isObject() )
-  {
-    std::cerr << "[DBus] SetBatchStateMap: Invalid JSON" << std::endl;
-    return false;
-  }
-
-  QJsonObject map = doc.object();
   static const QStringList validStates = { "power_ac", "power_bat", "power_wc" };
   bool anyChanged = false;
 
-  for ( auto it = map.constBegin(); it != map.constEnd(); ++it )
+  for ( auto it = stateMap.constBegin(); it != stateMap.constEnd(); ++it )
   {
     const std::string stateStr = it.key().toStdString();
-    const std::string profileIdStr = it.value().toString().toStdString();
+    const std::string profileIdStr = it.value().toStdString();
 
     if ( !validStates.contains( it.key() ) )
     {
@@ -2460,7 +2530,7 @@ bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QString &stateMapJSON )
 
   // If the current power state was among the changed entries, apply the new profile immediately
   const std::string currentStateKey = profileStateToString( m_service->m_currentState );
-  if ( map.contains( QString::fromStdString( currentStateKey ) ) )
+  if ( stateMap.contains( QString::fromStdString( currentStateKey ) ) )
   {
     std::cout << "[DBus] SetBatchStateMap: Current state '" << currentStateKey
               << "' was updated, applying profile" << std::endl;

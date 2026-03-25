@@ -664,28 +664,22 @@ static int cmdFanList( ucc::UccdClient &c )
 {
   LocalAssignments assignments = loadLocalAssignments( c );
 
-  auto json = c.getFanProfiles();
-  if ( !json )
+  auto list = c.getFanProfiles();
+  if ( !list )
   {
     std::fputs( "Error: Could not retrieve fan profiles\n", stderr );
     return 1;
   }
-  QJsonArray arr = QJsonArray::fromVariantList( *json );
-  if ( !arr.isEmpty() )
+  if ( !list->isEmpty() )
   {
     std::puts( "Fan profiles:" );
-    for ( const QJsonValue &v : arr )
+    for ( const auto &item : *list )
     {
-      if ( v.isObject() )
-      {
-        QJsonObject obj = v.toObject();
-        QString id = obj["id"].toString();
-        QString tag = assignmentTag( assignments.fanStates.value( id ) );
-        std::printf( "  %-36s  %s%s\n",
-                     id.toStdString().c_str(),
-                     obj["name"].toString().toStdString().c_str(),
-                     tag.toStdString().c_str() );
-      }
+      QString tag = assignmentTag( assignments.fanStates.value( item.id ) );
+      std::printf( "  %-36s  %s%s\n",
+                   item.id.toStdString().c_str(),
+                   item.name.toStdString().c_str(),
+                   tag.toStdString().c_str() );
     }
   }
 
@@ -693,50 +687,33 @@ static int cmdFanList( ucc::UccdClient &c )
   return 0;
 }
 
-/// Print a fan curve table from a JSON array of {temp, speed} objects.
-static void printFanCurve( const char *label, const QJsonArray &arr )
+/// Print a fan curve table from a list of FanCurvePointDto.
+static void printFanCurve( const char *label, const QList< ucc::dbus::FanCurvePointDto > &pts )
 {
-  if ( arr.isEmpty() ) return;
+  if ( pts.isEmpty() ) return;
   std::printf( "\n  %s:\n", label );
   std::printf( "    %-10s %s\n", "Temp (°C)", "Speed (%)" );
   std::printf( "    %-10s %s\n", "--------", "---------" );
-  for ( const QJsonValue &v : arr )
-  {
-    QJsonObject pt = v.toObject();
-    std::printf( "    %-10d %d\n", pt["temp"].toInt(), pt["speed"].toInt() );
-  }
+  for ( const auto &pt : pts )
+    std::printf( "    %-10d %d\n", pt.temp, pt.speed );
 }
 
 static int cmdFanGet( ucc::UccdClient &c, const char *fanProfileId )
 {
-  auto map = c.getFanProfile( fanProfileId );
+  auto zones = c.getFanProfileZones( fanProfileId );
 
-  if ( !map || map->isEmpty() )
+  if ( !zones || zones->isEmpty() )
   {
     std::fputs( "Error: Could not retrieve fan profile\n", stderr );
     return 1;
   }
-  QJsonObject obj = QJsonObject::fromVariantMap( *map );
-  
-  // Use name/id from JSON, fallback to argument
-  QString displayName = !obj["name"].toString().isEmpty() ? obj["name"].toString() : QString::fromUtf8( fanProfileId );
-  QString displayId = !obj["id"].toString().isEmpty() ? obj["id"].toString() : QString::fromUtf8( fanProfileId );
-  
-  std::printf( "=== Fan Profile: %s ===\n", displayName.toStdString().c_str() );
-  std::printf( "  %-24s %s\n", "ID:", displayId.toStdString().c_str() );
 
-  // Print zone curves from the zones array
-  if ( obj.contains( "zones" ) && obj["zones"].isArray() )
+  std::printf( "=== Fan Profile: %s ===\n", fanProfileId );
+
+  for ( const auto &z : *zones )
   {
-    QJsonArray zones = obj["zones"].toArray();
-    for ( const QJsonValue &zv : zones )
-    {
-      QJsonObject zone = zv.toObject();
-      QString zoneLabel = zone["name"].toString();
-      if ( zoneLabel.isEmpty() ) zoneLabel = zone["id"].toString();
-      if ( zone.contains( "curve" ) && zone["curve"].isArray() )
-        printFanCurve( zoneLabel.toStdString().c_str(), zone["curve"].toArray() );
-    }
+    QString zoneLabel = z.name.isEmpty() ? z.id : z.name;
+    printFanCurve( zoneLabel.toStdString().c_str(), z.curve );
   }
 
   return 0;
@@ -744,8 +721,50 @@ static int cmdFanGet( ucc::UccdClient &c, const char *fanProfileId )
 
 static int cmdFanApply( ucc::UccdClient &c, const char *jsonStr )
 {
-  // The apply method expects keys: cpu, gpu, pump, waterCoolerFan
-  ok( c.applyFanProfiles( jsonStr ) );
+  // Parse the CLI-supplied JSON into typed DTOs for the D-Bus call
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray( jsonStr ) );
+  if ( !doc.isObject() )
+  {
+    std::fputs( "Error: invalid JSON\n", stderr );
+    return 1;
+  }
+  QJsonObject root = doc.object();
+
+  ucc::dbus::FanZoneCurveDtoList zones;
+  for ( const QJsonValue &zv : root["zones"].toArray() )
+  {
+    QJsonObject jz = zv.toObject();
+    ucc::dbus::FanZoneCurveDto z;
+    z.id              = jz["id"].toString();
+    z.name            = jz["name"].toString();
+    z.deviceType      = jz["deviceType"].toString();
+    z.thermalSourceId = jz["thermalSourceId"].toString();
+    for ( const auto &v : jz["fanIds"].toArray() )
+      z.fanIds.append( v.toString() );
+    for ( const auto &cv : jz["curve"].toArray() )
+    {
+      QJsonObject cp = cv.toObject();
+      z.curve.append( { cp["temp"].toInt(), cp["speed"].toInt() } );
+    }
+    zones.append( z );
+  }
+
+  ucc::dbus::ThermalSourceDtoList sources;
+  for ( const QJsonValue &tv : root["thermalSources"].toArray() )
+  {
+    QJsonObject ts = tv.toObject();
+    ucc::dbus::ThermalSourceDto s;
+    s.id       = ts["id"].toString();
+    s.label    = ts["label"].toString();
+    s.strategy = ts["strategy"].toString();
+    for ( const auto &v : ts["sensorIds"].toArray() )
+      s.sensorIds.append( v.toString() );
+    for ( const auto &v : ts["weights"].toArray() )
+      s.weights.append( v.toDouble() );
+    sources.append( s );
+  }
+
+  ok( c.applyFanProfiles( zones, sources, root["fanProfileId"].toString() ) );
   return 0;
 }
 
@@ -755,28 +774,20 @@ static int cmdFanRevert( ucc::UccdClient &c )
   return 0;
 }
 
-/// Activate a fan profile by ID: fetch its curves, remap keys, and apply.
+/// Activate a fan profile by ID: fetch its curves and apply.
 static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
 {
-  // All fan profiles (built-in + custom) are now on the daemon
-  auto map = c.getFanProfile( fanProfileId );
+  auto zones   = c.getFanProfileZones( fanProfileId );
+  auto sources = c.getFanProfileSources( fanProfileId );
 
-  if ( !map || map->isEmpty() )
+  if ( !zones || zones->isEmpty() )
   {
     std::fputs( "Error: Fan profile not found\n", stderr );
     return 1;
   }
 
-  // Remap zone curves to the apply format expected by daemon
-  QJsonObject src = QJsonObject::fromVariantMap( *map );
-  QJsonObject dst;
-
-  // Pass through the zones array directly
-  if ( src.contains( "zones" ) )
-    dst["zones"] = src["zones"];
-
-  std::string applyJson = QJsonDocument( dst ).toJson( QJsonDocument::Compact ).toStdString();
-  ok( c.applyFanProfiles( applyJson ) );
+  ok( c.applyFanProfiles( *zones, sources.value_or( ucc::dbus::ThermalSourceDtoList{} ),
+                           QString::fromUtf8( fanProfileId ) ) );
   return 0;
 }
 
@@ -963,14 +974,12 @@ static int cmdKeyboardProfileList( ucc::UccdClient &c )
     return 0;
   }
   std::puts( "Keyboard profiles:" );
-  for ( const QVariant &v : *list )
+  for ( const auto &item : *list )
   {
-    QVariantMap obj = v.toMap();
-    QString id = obj["id"].toString();
-    QString tag = assignmentTag( assignments.kbStates.value( id ) );
+    QString tag = assignmentTag( assignments.kbStates.value( item.id ) );
     std::printf( "  %-36s  %s%s\n",
-                 id.toStdString().c_str(),
-                 obj["name"].toString().toStdString().c_str(),
+                 item.id.toStdString().c_str(),
+                 item.name.toStdString().c_str(),
                  tag.toStdString().c_str() );
   }
   return 0;
@@ -1431,14 +1440,12 @@ static int cmdGpuProfileList( ucc::UccdClient &c )
   if ( list && !list->isEmpty() )
   {
     std::puts( "GPU OC profiles:" );
-    for ( const QVariant &v : *list )
+    for ( const auto &item : *list )
     {
-      QVariantMap obj = v.toMap();
-      bool editable = obj["editable"].toBool();
       std::printf( "  %-36s  %s%s\n",
-                   obj["id"].toString().toStdString().c_str(),
-                   obj["name"].toString().toStdString().c_str(),
-                   editable ? " (custom)" : "" );
+                   item.id.toStdString().c_str(),
+                   item.name.toStdString().c_str(),
+                   item.editable ? " (custom)" : "" );
     }
   }
 

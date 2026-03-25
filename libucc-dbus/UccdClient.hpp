@@ -21,6 +21,7 @@
 #include <QDBusConnection>
 #include <QDBusReply>
 #include <QDBusServiceWatcher>
+#include "UccDbusTypes.hpp"
 #include <string>
 #include <memory>
 #include <optional>
@@ -65,7 +66,7 @@ public:
   std::optional< QVariantMap > getSettings();
   std::optional< std::string > getPowerState();
   bool setStateMap( const std::string &state, const std::string &profileId );
-  bool setBatchStateMap( const std::map< std::string, std::string > &entries );
+  bool setBatchStateMap( const QMap< QString, QString > &stateMap );
   bool setActiveProfile( const std::string &profileId );
   bool applyProfile( const std::string &profileJSON );
   bool saveProfile( const std::string &profileJSON );         // Unified save
@@ -74,26 +75,29 @@ public:
   bool deleteCustomProfile( const std::string &profileId );   // Backward-compat → deleteProfile
 
   // Hardware zone model
-  std::optional< QVariantList > getHardwareFanDevices();
-  std::optional< QVariantList > getHardwareSensors();
-  std::optional< QVariantList > getThermalSources();
+  std::optional< ucc::dbus::HardwareFanDeviceDtoList > getHardwareFanDevices();
+  std::optional< ucc::dbus::HardwareSensorDtoList > getHardwareSensors();
+  std::optional< ucc::dbus::ThermalSourceDtoList > getThermalSources();
   std::optional< QVariantMap > getSensorReadings();
-  std::optional< QVariantList > getFanZones();
+  std::optional< ucc::dbus::FanZoneDtoList > getFanZones();
 
   // Fan sub-profiles (built-in + custom, with editable flag)
-  std::optional< QVariantList > getFanProfiles();
-  std::optional< QVariantMap > getFanProfile( const std::string &fanProfileId );
-  bool saveFanProfile( const std::string &id, const std::string &name, const std::string &json );
+  std::optional< ucc::dbus::ProfileSummaryDtoList > getFanProfiles();
+  std::optional< ucc::dbus::FanZoneCurveDtoList > getFanProfileZones( const std::string &fanProfileId );
+  std::optional< ucc::dbus::ThermalSourceDtoList > getFanProfileSources( const std::string &fanProfileId );
+  bool saveFanProfile( const std::string &id, const std::string &name,
+                       const ucc::dbus::FanZoneCurveDtoList &zones,
+                       const ucc::dbus::ThermalSourceDtoList &thermalSources );
   bool deleteFanProfile( const std::string &id );
 
   // GPU sub-profiles (built-in + custom, with editable flag)
-  std::optional< QVariantList > getGpuProfiles();
+  std::optional< ucc::dbus::ProfileSummaryDtoList > getGpuProfiles();
   std::optional< QVariantMap > getGpuProfile( const std::string &gpuProfileId );
   bool saveGpuProfile( const std::string &id, const std::string &name, const std::string &json );
   bool deleteGpuProfile( const std::string &id );
 
   // Keyboard sub-profiles (custom only, all editable)
-  std::optional< QVariantList > getKeyboardProfiles();
+  std::optional< ucc::dbus::ProfileSummaryDtoList > getKeyboardProfiles();
   std::optional< QVariantMap > getKeyboardProfile( const std::string &keyboardProfileId );
   bool saveKeyboardProfile( const std::string &id, const std::string &name, const std::string &json );
   bool deleteKeyboardProfile( const std::string &id );
@@ -118,7 +122,9 @@ public:
   std::optional< int > getCpuCoreCount();
 
   // Fan Control
-  bool applyFanProfiles( const std::string &fanProfilesJSON );
+  bool applyFanProfiles( const ucc::dbus::FanZoneCurveDtoList &zones,
+                         const ucc::dbus::ThermalSourceDtoList &thermalSources,
+                         const QString &fanProfileId );
   bool revertFanProfiles();
   std::optional< QVariantMap > getFanZoneTelemetry();
   std::optional< std::string > getCurrentFanSpeed();
