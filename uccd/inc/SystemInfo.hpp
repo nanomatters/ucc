@@ -17,6 +17,8 @@
 
 #include "profiles/DefaultProfiles.hpp"
 #include "hal/HwCapability.hpp"
+#include <QVariantList>
+#include <QVariantMap>
 #include <string>
 #include <optional>
 #include <vector>
@@ -89,9 +91,9 @@ struct SystemInfo
   std::optional< UniwillDeviceID > deviceId;
 
   /**
-   * @brief Serialize to JSON string for D-Bus transport
+   * @brief Convert to QVariantMap for native D-Bus transport
    */
-  [[nodiscard]] std::string toJSON() const;
+  [[nodiscard]] QVariantMap toVariantMap() const;
 };
 
 /**

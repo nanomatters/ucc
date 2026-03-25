@@ -353,18 +353,12 @@ void SystemMonitor::refreshAll()
 void SystemMonitor::initializeChargingState()
 {
   // Charging profiles (firmware-level modes)
-  if ( auto json = m_client->getChargingProfilesAvailable() )
+  if ( auto profiles = m_client->getChargingProfilesAvailable() )
   {
-    if ( QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) ); doc.isArray() )
+    if ( m_chargingProfilesAvailable != *profiles )
     {
-      QStringList profiles;
-      for ( const auto &v : doc.array() )
-        profiles << v.toString();
-      if ( m_chargingProfilesAvailable != profiles )
-      {
-        m_chargingProfilesAvailable = profiles;
-        emit chargingProfilesAvailableChanged();
-      }
+      m_chargingProfilesAvailable = *profiles;
+      emit chargingProfilesAvailableChanged();
     }
   }
 
@@ -378,18 +372,12 @@ void SystemMonitor::initializeChargingState()
   }
 
   // Charging priority (USB-C PD)
-  if ( auto json = m_client->getChargingPrioritiesAvailable() )
+  if ( auto priorities = m_client->getChargingPrioritiesAvailable() )
   {
-    if ( QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) ); doc.isArray() )
+    if ( m_chargingPrioritiesAvailable != *priorities )
     {
-      QStringList priorities;
-      for ( const auto &v : doc.array() )
-        priorities << v.toString();
-      if ( m_chargingPrioritiesAvailable != priorities )
-      {
-        m_chargingPrioritiesAvailable = priorities;
-        emit chargingPrioritiesAvailableChanged();
-      }
+      m_chargingPrioritiesAvailable = *priorities;
+      emit chargingPrioritiesAvailableChanged();
     }
   }
 
@@ -404,12 +392,8 @@ void SystemMonitor::initializeChargingState()
 
   // Battery charge thresholds
   bool thresholdsAvail = false;
-  if ( auto json = m_client->getChargeEndAvailableThresholds() )
-  {
-    if ( QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-         doc.isArray() and not doc.array().isEmpty() )
-      thresholdsAvail = true;
-  }
+  if ( auto thresholds = m_client->getChargeEndAvailableThresholds() )
+    thresholdsAvail = !thresholds->isEmpty();
   if ( m_chargeThresholdsAvailable != thresholdsAvail )
   {
     m_chargeThresholdsAvailable = thresholdsAvail;

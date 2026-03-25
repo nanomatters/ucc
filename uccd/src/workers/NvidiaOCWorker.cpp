@@ -38,17 +38,17 @@ bool NvidiaOCWorker::isAvailable() const noexcept
   return m_nvml && m_nvml->isInitialized() && m_nvml->deviceCount() > 0;
 }
 
-std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
+QVariantMap NvidiaOCWorker::getOCState( unsigned int deviceIndex ) const
 {
   if ( !isAvailable() )
-    return "{}";
+    return {};
 
   if ( m_nvml->needsReset( deviceIndex ) )
-    log( "getOCStateJSON: GPU " + std::to_string( deviceIndex ) + " requires reset (reboot or nvidia-smi -r)" );
+    log( "getOCState: GPU " + std::to_string( deviceIndex ) + " requires reset (reboot or nvidia-smi -r)" );
 
   auto stateOpt = m_nvml->getOCState( deviceIndex );
   if ( !stateOpt )
-    return "{}";
+    return {};
 
   const auto &s = *stateOpt;
   QJsonObject root;
@@ -141,8 +141,7 @@ std::string NvidiaOCWorker::getOCStateJSON( unsigned int deviceIndex ) const
     root["vramLockedClocks"] = lc;
   }
 
-  QJsonDocument doc( root );
-  return doc.toJson( QJsonDocument::Compact ).toStdString();
+  return root.toVariantMap();
 }
 
 bool NvidiaOCWorker::setClockOffset( unsigned int deviceIndex,

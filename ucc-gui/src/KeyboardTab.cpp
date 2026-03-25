@@ -131,17 +131,15 @@ void MainWindow::setupKeyboardBacklightPage()
   mainLayout->addWidget( separator );
 
   // Check if keyboard backlight is supported
-  if ( auto info = m_UccdClient->getKeyboardBacklightInfo() )
+  if ( auto caps = m_UccdClient->getKeyboardBacklightInfo() )
   {
-    // Parse the JSON to get capabilities
-    if ( QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *info ).toUtf8() ); doc.isObject() )
+    if ( !caps->isEmpty() )
     {
-      QJsonObject caps = doc.object();
-      int zones = caps["zones"].toInt();
-      int maxBrightness = caps["maxBrightness"].toInt();
-      int maxRed = caps["maxRed"].toInt();
-      int maxGreen = caps["maxGreen"].toInt();
-      int maxBlue = caps["maxBlue"].toInt();
+      int zones = caps->value( "zones" ).toInt();
+      int maxBrightness = caps->value( "maxBrightness" ).toInt();
+      int maxRed = caps->value( "maxRed" ).toInt();
+      int maxGreen = caps->value( "maxGreen" ).toInt();
+      int maxBlue = caps->value( "maxBlue" ).toInt();
 
       if ( zones > 0 )
       {

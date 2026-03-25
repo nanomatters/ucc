@@ -26,6 +26,7 @@
 #include <QThread>
 #include <QFile>
 #include <QVariantMap>
+#include <type_traits>
 
 namespace ucc
 {
@@ -190,45 +191,105 @@ void UccdClient::onProfilesListChangedSignal()
   emit profilesListChanged();
 }
 
+// ---------------------------------------------------------------------------
+// Recursive D-Bus demarshalling
+// ---------------------------------------------------------------------------
+// Qt D-Bus converts the top-level container but leaves nested complex types
+// (maps-in-maps, lists-of-maps, etc.) as raw QDBusArgument objects.  These
+// cannot be converted to QJson* types, so we must walk the tree and convert
+// them to native QVariantMap / QVariantList values.
+
+static QVariant demarshallDBusVariant( const QVariant &v );
+
+static QVariantMap demarshallMap( const QVariantMap &map )
+{
+  QVariantMap out;
+  for ( auto it = map.cbegin(); it != map.cend(); ++it )
+    out[ it.key() ] = demarshallDBusVariant( it.value() );
+  return out;
+}
+
+static QVariantList demarshallList( const QVariantList &list )
+{
+  QVariantList out;
+  out.reserve( list.size() );
+  for ( const auto &item : list )
+    out.append( demarshallDBusVariant( item ) );
+  return out;
+}
+
+static QVariant demarshallDBusVariant( const QVariant &v )
+{
+  if ( v.canConvert< QDBusArgument >() )
+  {
+    const QDBusArgument arg = v.value< QDBusArgument >();
+    switch ( arg.currentType() )
+    {
+      case QDBusArgument::MapType:
+      {
+        QVariantMap map;
+        arg >> map;
+        return demarshallMap( map );
+      }
+      case QDBusArgument::ArrayType:
+      {
+        QVariantList list;
+        arg >> list;
+        return demarshallList( list );
+      }
+      default:
+        return v;
+    }
+  }
+
+  if ( v.typeId() == QMetaType::QVariantMap )
+    return demarshallMap( v.toMap() );
+  if ( v.typeId() == QMetaType::QVariantList )
+    return demarshallList( v.toList() );
+
+  return v;
+}
+
+template< typename T >
+static T demarshallResult( const T &value )
+{
+  if constexpr ( std::is_same_v< T, QVariantMap > )
+    return demarshallMap( value );
+  else if constexpr ( std::is_same_v< T, QVariantList > )
+    return demarshallList( value );
+  else
+    return value;
+}
+
 // Template implementations
 template< typename T >
 std::optional< T > UccdClient::callMethod( const QString &method ) const
 {
-  if ( !isConnected() )
-  {
+  if ( not isConnected() )
     return std::nullopt;
-  }
 
   QDBusReply< T > reply = m_interface->call( method );
+
   if ( reply.isValid() )
-  {
-    return reply.value();
-  }
-  else
-  {
-    qWarning() << "DBus call failed:" << method << "-" << reply.error().message();
-    return std::nullopt;
-  }
+    return demarshallResult( reply.value() );
+
+  qWarning() << "DBus call failed:" << method << "-" << reply.error().message();
+  return std::nullopt;
 }
 
 template< typename T, typename... Args >
 std::optional< T > UccdClient::callMethod( const QString &method, const Args &...args ) const
 {
-  if ( !isConnected() )
-  {
+  if ( not isConnected() )
     return std::nullopt;
-  }
 
   QDBusReply< T > reply = m_interface->call( method, args... );
+
   if ( reply.isValid() )
-  {
-    return reply.value();
-  }
-  else
-  {
-    qWarning() << "DBus call failed:" << method << "-" << reply.error().message();
-    return std::nullopt;
-  }
+    return demarshallResult( reply.value() );
+
+  qWarning() << "DBus call failed:" << method << "-" << reply.error().message();
+  return std::nullopt;
 }
 
 bool UccdClient::callVoidMethod( const QString &method ) const
@@ -265,13 +326,9 @@ bool UccdClient::callVoidMethod( const QString &method, const Args &...args ) co
 }
 
 // System Information
-std::optional< std::string > UccdClient::getSystemInfoJSON()
+std::optional< QVariantMap > UccdClient::getSystemInfo()
 {
-  if ( auto result = callMethod< QString >( "GetSystemInfoJSON" ) )
-  {
-    return result->toStdString();
-  }
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetSystemInfo" );
 }
 
 std::optional< bool > UccdClient::isDeviceSupported()
@@ -279,30 +336,22 @@ std::optional< bool > UccdClient::isDeviceSupported()
   return callMethod< bool >( "IsDeviceSupported" );
 }
 
-std::optional< std::string > UccdClient::getCapabilitiesJSON()
+std::optional< QStringList > UccdClient::getCapabilities()
 {
-  if ( auto result = callMethod< QString >( "GetCapabilitiesJSON" ) )
-  {
-    return result->toStdString();
-  }
-  return std::nullopt;
+  return callMethod< QStringList >( "GetCapabilities" );
 }
 
 // ---------------------------------------------------------------------------
 // Profile Management — unified API
 // ---------------------------------------------------------------------------
 
-std::optional< std::string > UccdClient::getProfilesJSON()
+std::optional< QVariantList > UccdClient::getProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetProfilesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetProfiles" );
 }
-std::optional< std::string > UccdClient::getDefaultProfilesJSON()
+std::optional< QVariantList > UccdClient::getDefaultProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetDefaultProfilesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetDefaultProfiles" );
 }
 
 std::optional< QVariantMap > UccdClient::getCpuFrequencyLimits()
@@ -310,25 +359,19 @@ std::optional< QVariantMap > UccdClient::getCpuFrequencyLimits()
   return callMethod< QVariantMap >( "GetCpuFrequencyLimits" );
 }
 
-std::optional< std::string > UccdClient::getDefaultValuesProfileJSON()
+std::optional< QVariantMap > UccdClient::getDefaultValuesProfile()
 {
-  if ( auto result = callMethod< QString >( "GetDefaultValuesProfileJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetDefaultValuesProfile" );
 }
 
-std::optional< std::string > UccdClient::getCustomProfilesJSON()
+std::optional< QVariantList > UccdClient::getCustomProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetCustomProfilesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetCustomProfiles" );
 }
 
-std::optional< std::string > UccdClient::getActiveProfileJSON()
+std::optional< QVariantMap > UccdClient::getActiveProfile()
 {
-  if ( auto result = callMethod< QString >( "GetActiveProfileJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetActiveProfile" );
 }
 
 std::optional< QVariantMap > UccdClient::getAppliedProfiles()
@@ -336,11 +379,9 @@ std::optional< QVariantMap > UccdClient::getAppliedProfiles()
   return callMethod< QVariantMap >( "GetAppliedProfiles" );
 }
 
-std::optional< std::string > UccdClient::getSettingsJSON()
+std::optional< QVariantMap > UccdClient::getSettings()
 {
-  if ( auto result = callMethod< QString >( "GetSettingsJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetSettings" );
 }
 
 std::optional< std::string > UccdClient::getPowerState()
@@ -416,11 +457,9 @@ std::optional< QVariantList > UccdClient::getHardwareFanDevices()
   return callMethod< QVariantList >( "GetHardwareFanDevices" );
 }
 
-std::optional< std::string > UccdClient::getHardwareSensorsJSON()
+std::optional< QVariantList > UccdClient::getHardwareSensors()
 {
-  if ( auto result = callMethod< QString >( "GetHardwareSensorsJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetHardwareSensors" );
 }
 
 std::optional< QVariantList > UccdClient::getFanZones()
@@ -428,11 +467,9 @@ std::optional< QVariantList > UccdClient::getFanZones()
   return callMethod< QVariantList >( "GetFanZones" );
 }
 
-std::optional< std::string > UccdClient::getFanProfileJSON( const std::string &fanProfileId )
+std::optional< QVariantMap > UccdClient::getFanProfile( const std::string &fanProfileId )
 {
-  if ( auto result = callMethod< QString >( "GetFanProfileJSON", QString::fromStdString( fanProfileId ) ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetFanProfile", QString::fromStdString( fanProfileId ) );
 }
 
 bool UccdClient::saveFanProfile( const std::string &id, const std::string &name, const std::string &json )
@@ -447,12 +484,6 @@ bool UccdClient::deleteFanProfile( const std::string &id )
   return callMethod< bool >( "DeleteFanProfile", QString::fromStdString( id ) ).value_or( false );
 }
 
-// Legacy aliases
-std::optional< std::string > UccdClient::getFanProfile( const std::string &fanProfileId )
-{
-  return getFanProfileJSON( fanProfileId );
-}
-
 std::optional< bool > UccdClient::setFanProfile( const std::string &fanProfileId, const std::string &json )
 {
   return callMethod< bool >( "SetFanProfile", QString::fromStdString( fanProfileId ), QString::fromStdString( json ) );
@@ -462,21 +493,14 @@ std::optional< bool > UccdClient::setFanProfile( const std::string &fanProfileId
 // GPU sub-profiles
 // ---------------------------------------------------------------------------
 
-std::optional< std::string > UccdClient::getGpuProfilesJSON()
+std::optional< QVariantList > UccdClient::getGpuProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetGpuProfilesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetGpuProfiles" );
 }
 
-std::optional< std::string > UccdClient::getGpuProfileJSON( const std::string &gpuProfileId )
+std::optional< QVariantMap > UccdClient::getGpuProfile( const std::string &gpuProfileId )
 {
-  if ( auto result = callMethod< QString >( "GetGpuProfileJSON", QString::fromStdString( gpuProfileId ) ) )
-  {
-    if ( const std::string json = result->toStdString(); !json.empty() && json != "{}" )
-      return json;
-  }
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetGpuProfile", QString::fromStdString( gpuProfileId ) );
 }
 
 bool UccdClient::saveGpuProfile( const std::string &id, const std::string &name, const std::string &json )
@@ -491,28 +515,18 @@ bool UccdClient::deleteGpuProfile( const std::string &id )
   return callMethod< bool >( "DeleteGpuProfile", QString::fromStdString( id ) ).value_or( false );
 }
 
-// Legacy alias
-std::optional< std::string > UccdClient::getGpuProfile( const std::string &gpuProfileId )
-{
-  return getGpuProfileJSON( gpuProfileId );
-}
-
 // ---------------------------------------------------------------------------
 // Keyboard sub-profiles
 // ---------------------------------------------------------------------------
 
-std::optional< std::string > UccdClient::getKeyboardProfilesJSON()
+std::optional< QVariantList > UccdClient::getKeyboardProfiles()
 {
-  if ( auto result = callMethod< QString >( "GetKeyboardProfilesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetKeyboardProfiles" );
 }
 
-std::optional< std::string > UccdClient::getKeyboardProfileJSON( const std::string &keyboardProfileId )
+std::optional< QVariantMap > UccdClient::getKeyboardProfile( const std::string &keyboardProfileId )
 {
-  if ( auto result = callMethod< QString >( "GetKeyboardProfileJSON", QString::fromStdString( keyboardProfileId ) ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetKeyboardProfile", QString::fromStdString( keyboardProfileId ) );
 }
 
 bool UccdClient::saveKeyboardProfile( const std::string &id, const std::string &name, const std::string &json )
@@ -609,24 +623,13 @@ std::optional< std::string > UccdClient::getCpuScalingGovernor()
 
 std::optional< std::vector< std::string > > UccdClient::getAvailableCpuGovernors()
 {
-  auto jsonStr = callMethod< QString >( "GetAvailableGovernors" );
-  if ( !jsonStr )
-    return std::nullopt;
-
-  QJsonDocument doc = QJsonDocument::fromJson( jsonStr->toUtf8() );
-  if ( !doc.isArray() )
-    return std::nullopt;
-
-  QJsonArray array = doc.array();
-  std::vector< std::string > governors;
-  for ( const QJsonValue &value : array )
-  {
-    if ( value.isString() )
-    {
-      governors.push_back( value.toString().toStdString() );
-    }
-  }
-  return governors;
+  auto list = callMethod< QStringList >( "GetAvailableGovernors" );
+  if ( !list ) return std::nullopt;
+  std::vector< std::string > result;
+  result.reserve( list->size() );
+  for ( const auto &s : *list )
+    result.push_back( s.toStdString() );
+  return result;
 }
 
 bool UccdClient::setCpuFrequency( [[maybe_unused]] int minFreq, [[maybe_unused]] int maxFreq )
@@ -641,24 +644,13 @@ bool UccdClient::setEnergyPerformancePreference( [[maybe_unused]] const std::str
 
 std::optional< std::vector< std::string > > UccdClient::getAvailableEPPs()
 {
-  auto jsonStr = callMethod< QString >( "GetAvailableEPPs" );
-  if ( !jsonStr )
-    return std::nullopt;
-
-  QJsonDocument doc = QJsonDocument::fromJson( jsonStr->toUtf8() );
-  if ( !doc.isArray() )
-    return std::nullopt;
-
-  QJsonArray array = doc.array();
-  std::vector< std::string > epps;
-  for ( const QJsonValue &value : array )
-  {
-    if ( value.isString() )
-    {
-      epps.push_back( value.toString().toStdString() );
-    }
-  }
-  return epps;
+  auto list = callMethod< QStringList >( "GetAvailableEPPs" );
+  if ( !list ) return std::nullopt;
+  std::vector< std::string > result;
+  result.reserve( list->size() );
+  for ( const auto &s : *list )
+    result.push_back( s.toStdString() );
+  return result;
 }
 
 std::optional< int > UccdClient::getCpuCoreCount()
@@ -719,12 +711,9 @@ bool UccdClient::setChargingProfile( const std::string &profileDescriptor )
   return callVoidMethod( "SetChargingProfile", QString::fromStdString( profileDescriptor ) );
 }
 
-std::optional< std::string > UccdClient::getChargingProfilesAvailable()
+std::optional< QStringList > UccdClient::getChargingProfilesAvailable()
 {
-  if ( auto result = callMethod< QString >( "GetChargingProfilesAvailable" ) )
-    return result->toStdString();
-
-  return std::nullopt;
+  return callMethod< QStringList >( "GetChargingProfilesAvailable" );
 }
 
 std::optional< std::string > UccdClient::getCurrentChargingProfile()
@@ -735,12 +724,9 @@ std::optional< std::string > UccdClient::getCurrentChargingProfile()
   return std::nullopt;
 }
 
-std::optional< std::string > UccdClient::getChargingPrioritiesAvailable()
+std::optional< QStringList > UccdClient::getChargingPrioritiesAvailable()
 {
-  if ( auto result = callMethod< QString >( "GetChargingPrioritiesAvailable" ) )
-    return result->toStdString();
-
-  return std::nullopt;
+  return callMethod< QStringList >( "GetChargingPrioritiesAvailable" );
 }
 
 std::optional< std::string > UccdClient::getCurrentChargingPriority()
@@ -756,20 +742,14 @@ bool UccdClient::setChargingPriority( const std::string &priorityDescriptor )
   return callVoidMethod( "SetChargingPriority", QString::fromStdString( priorityDescriptor ) );
 }
 
-std::optional< std::string > UccdClient::getChargeStartAvailableThresholds()
+std::optional< QVariantList > UccdClient::getChargeStartAvailableThresholds()
 {
-  if ( auto result = callMethod< QString >( "GetChargeStartAvailableThresholds" ) )
-    return result->toStdString();
-
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetChargeStartAvailableThresholds" );
 }
 
-std::optional< std::string > UccdClient::getChargeEndAvailableThresholds()
+std::optional< QVariantList > UccdClient::getChargeEndAvailableThresholds()
 {
-  if ( auto result = callMethod< QString >( "GetChargeEndAvailableThresholds" ) )
-    return result->toStdString();
-
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetChargeEndAvailableThresholds" );
 }
 
 std::optional< int > UccdClient::getChargeStartThreshold()
@@ -859,11 +839,9 @@ std::optional< bool > UccdClient::getNvidiaOCAvailable()
   return callMethod< bool >( "GetNvidiaOCAvailable" );
 }
 
-std::optional< std::string > UccdClient::getNvidiaOCState( int deviceIndex )
+std::optional< QVariantMap > UccdClient::getNvidiaOCState( int deviceIndex )
 {
-  if ( auto result = callMethod< QString, int >( "GetNvidiaOCState", deviceIndex ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantMap, int >( "GetNvidiaOCState", deviceIndex );
 }
 
 bool UccdClient::setNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz )
@@ -1074,13 +1052,9 @@ bool UccdClient::setKeyboardBacklight( const std::string &config )
   return callMethod< bool, QString >( "SetKeyboardBacklightStatesJSON", QString::fromStdString( config ) ).value_or( false );
 }
 
-std::optional< std::string > UccdClient::getKeyboardBacklightInfo()
+std::optional< QVariantMap > UccdClient::getKeyboardBacklightInfo()
 {
-  if ( auto caps = callMethod< QString >( "GetKeyboardBacklightCapabilitiesJSON" ); caps )
-  {
-    return caps->toStdString();
-  }
-  return std::nullopt;
+  return callMethod< QVariantMap >( "GetKeyboardBacklightCapabilities" );
 }
 
 std::optional< std::string > UccdClient::getKeyboardBacklightStates()
@@ -1175,37 +1149,29 @@ void UccdClient::refreshDGpuSnapshot()
     return;
 
   m_dGpuSnap = {};
-  if ( !m_interface )
+  auto map = callMethod< QVariantMap >( "GetDGpuInfoValues" );
+  if ( !map )
     return;
 
-  QDBusMessage reply = m_interface->call( QStringLiteral( "GetDGpuInfoValuesJSON" ) );
-  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
-    return;
-
-  QJsonDocument doc = QJsonDocument::fromJson( reply.arguments().at( 0 ).toString().toUtf8() );
-  if ( doc.isNull() || !doc.isObject() )
-    return;
-
-  const QJsonObject obj = doc.object();
   m_dGpuSnap.ts    = now;
   m_dGpuSnap.valid = true;
-  m_dGpuSnap.temp            = obj[ "temp" ].toInt( -1 );
-  m_dGpuSnap.coreFrequency   = obj.contains( "coreFrequency" ) ? obj[ "coreFrequency" ].toInt( -1 )
-                                                                 : obj[ "coreFreq" ].toInt( -1 );
-  m_dGpuSnap.vramFrequency   = obj[ "vramFrequency" ].toInt( -1 );
-  m_dGpuSnap.powerDraw       = obj[ "powerDraw" ].toDouble( -1.0 );
-  m_dGpuSnap.computeUtilPct  = obj[ "computeUtilPct" ].toInt( -1 );
-  m_dGpuSnap.memoryUtilPct   = obj[ "memoryUtilPct" ].toInt( -1 );
-  m_dGpuSnap.vramUsedMiB     = obj[ "vramUsedMiB" ].toInt( -1 );
-  m_dGpuSnap.vramTotalMiB    = obj[ "vramTotalMiB" ].toInt( -1 );
-  m_dGpuSnap.perfLimitReason = obj[ "perfLimitReason" ].toString().toStdString();
-  m_dGpuSnap.encoderUtilPct  = obj[ "encoderUtilPct" ].toInt( -1 );
-  m_dGpuSnap.decoderUtilPct  = obj[ "decoderUtilPct" ].toInt( -1 );
-  m_dGpuSnap.currentPstate   = obj[ "currentPstate" ].toInt( -1 );
-  m_dGpuSnap.grClockOffsetMHz  = obj[ "grClockOffsetMHz" ].toInt( -999 );
-  m_dGpuSnap.memClockOffsetMHz = obj[ "memClockOffsetMHz" ].toInt( -999 );
-  m_dGpuSnap.coreVoltageMv   = obj[ "coreVoltageMv" ].toInt( -1 );
-  m_dGpuSnap.fanSpeedPct     = obj[ "fanSpeedPct" ].toInt( -1 );
+  m_dGpuSnap.temp            = map->value( "temp", -1 ).toInt();
+  m_dGpuSnap.coreFrequency   = map->contains( "coreFrequency" ) ? map->value( "coreFrequency", -1 ).toInt()
+                                                                  : map->value( "coreFreq", -1 ).toInt();
+  m_dGpuSnap.vramFrequency   = map->value( "vramFrequency", -1 ).toInt();
+  m_dGpuSnap.powerDraw       = map->value( "powerDraw", -1.0 ).toDouble();
+  m_dGpuSnap.computeUtilPct  = map->value( "computeUtilPct", -1 ).toInt();
+  m_dGpuSnap.memoryUtilPct   = map->value( "memoryUtilPct", -1 ).toInt();
+  m_dGpuSnap.vramUsedMiB     = map->value( "vramUsedMiB", -1 ).toInt();
+  m_dGpuSnap.vramTotalMiB    = map->value( "vramTotalMiB", -1 ).toInt();
+  m_dGpuSnap.perfLimitReason = map->value( "perfLimitReason" ).toString().toStdString();
+  m_dGpuSnap.encoderUtilPct  = map->value( "encoderUtilPct", -1 ).toInt();
+  m_dGpuSnap.decoderUtilPct  = map->value( "decoderUtilPct", -1 ).toInt();
+  m_dGpuSnap.currentPstate   = map->value( "currentPstate", -1 ).toInt();
+  m_dGpuSnap.grClockOffsetMHz  = map->value( "grClockOffsetMHz", -999 ).toInt();
+  m_dGpuSnap.memClockOffsetMHz = map->value( "memClockOffsetMHz", -999 ).toInt();
+  m_dGpuSnap.coreVoltageMv   = map->value( "coreVoltageMv", -1 ).toInt();
+  m_dGpuSnap.fanSpeedPct     = map->value( "fanSpeedPct", -1 ).toInt();
 }
 
 void UccdClient::refreshIGpuSnapshot()
@@ -1217,23 +1183,15 @@ void UccdClient::refreshIGpuSnapshot()
     return;
 
   m_iGpuSnap = {};
-  if ( !m_interface )
+  auto map = callMethod< QVariantMap >( "GetIGpuInfoValues" );
+  if ( !map )
     return;
 
-  QDBusMessage reply = m_interface->call( QStringLiteral( "GetIGpuInfoValuesJSON" ) );
-  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
-    return;
-
-  QJsonDocument doc = QJsonDocument::fromJson( reply.arguments().at( 0 ).toString().toUtf8() );
-  if ( doc.isNull() || !doc.isObject() )
-    return;
-
-  const QJsonObject obj = doc.object();
   m_iGpuSnap.ts    = now;
   m_iGpuSnap.valid = true;
-  m_iGpuSnap.temp          = obj[ "temp" ].toInt( -1 );
-  m_iGpuSnap.coreFrequency = obj[ "coreFrequency" ].toInt( -1 );
-  m_iGpuSnap.powerDraw     = obj[ "powerDraw" ].toDouble( -1.0 );
+  m_iGpuSnap.temp          = map->value( "temp", -1 ).toInt();
+  m_iGpuSnap.coreFrequency = map->value( "coreFrequency", -1 ).toInt();
+  m_iGpuSnap.powerDraw     = map->value( "powerDraw", -1.0 ).toDouble();
 }
 
 void UccdClient::refreshCpuPowerSnapshot()
@@ -1245,21 +1203,13 @@ void UccdClient::refreshCpuPowerSnapshot()
     return;
 
   m_cpuPowerSnap = {};
-  if ( !m_interface )
+  auto map = callMethod< QVariantMap >( "GetCpuPowerValues" );
+  if ( !map )
     return;
 
-  QDBusMessage reply = m_interface->call( QStringLiteral( "GetCpuPowerValuesJSON" ) );
-  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
-    return;
-
-  QJsonDocument doc = QJsonDocument::fromJson( reply.arguments().at( 0 ).toString().toUtf8() );
-  if ( doc.isNull() || !doc.isObject() )
-    return;
-
-  const QJsonObject obj = doc.object();
   m_cpuPowerSnap.ts    = now;
   m_cpuPowerSnap.valid = true;
-  m_cpuPowerSnap.powerDraw = obj[ "powerDraw" ].toDouble( -1.0 );
+  m_cpuPowerSnap.powerDraw = map->value( "powerDraw", -1.0 ).toDouble();
 }
 
 // ---------------------------------------------------------------------------
@@ -1523,11 +1473,9 @@ std::optional< int > UccdClient::getMonitorHistoryHorizon()
   return callMethod< int >( "GetMonitorHistoryHorizon" );
 }
 
-std::optional< std::string > UccdClient::getMonitorSourcesJSON()
+std::optional< QVariantList > UccdClient::getMonitorSources()
 {
-  if ( auto result = callMethod< QString >( "GetMonitorSourcesJSON" ) )
-    return result->toStdString();
-  return std::nullopt;
+  return callMethod< QVariantList >( "GetMonitorSources" );
 }
 
 std::optional< QVariantMap > UccdClient::getFpsSources()

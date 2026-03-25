@@ -19,27 +19,6 @@
 
 namespace {
 
-/// Parse a JSON array of { id, name } objects into parallel name/id lists.
-/// Returns true if parsing was successful.
-bool parseProfileArray( const std::string &jsonStr,
-                        QStringList &outNames, QStringList &outIds )
-{
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( jsonStr ) );
-  if ( !doc.isArray() )
-    return false;
-
-  for ( const auto &val : doc.array() )
-  {
-    auto obj = val.toObject();
-    QString id   = obj[ "id" ].toString();
-    QString name = obj[ "name" ].toString();
-    if ( id.isEmpty() ) continue;
-    outIds.append( id );
-    outNames.append( name );
-  }
-  return true;
-}
-
 /// Parse a QVariantList of { id, name } maps into parallel name/id lists.
 bool parseProfileArray( const QVariantList &list,
                         QStringList &outNames, QStringList &outIds )
@@ -332,9 +311,12 @@ void TrayBackend::setActiveProfile( const QString &profileId )
 
 void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
 {
-  // Fetch the fan profile JSON and apply its curves to hardware.
-  if ( auto json = m_client->getFanProfile( fanProfileId.toStdString() ) )
-    applyFanProfileFromJson( *json, fanProfileId );
+  // Fetch the fan profile and apply its curves to hardware.
+  if ( auto map = m_client->getFanProfile( fanProfileId.toStdString() ) )
+  {
+    auto json = QJsonDocument( QJsonObject::fromVariantMap( *map ) ).toJson( QJsonDocument::Compact ).toStdString();
+    applyFanProfileFromJson( json, fanProfileId );
+  }
 
   // Mark override so pollSlowState() doesn't revert to the daemon's stored value
   m_fanProfileOverride = true;
@@ -365,17 +347,13 @@ void TrayBackend::applyFanProfileFromJson( const std::string &jsonStr, const QSt
 
 void TrayBackend::setActiveKeyboardProfile( const QString &keyboardProfileId )
 {
-  if ( auto profileData = m_client->getKeyboardProfileJSON( keyboardProfileId.toStdString() ) )
+  if ( auto profileData = m_client->getKeyboardProfile( keyboardProfileId.toStdString() ) )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *profileData ) );
-    if ( doc.isObject() )
-    {
-      QJsonObject obj = doc.object();
-      // Inject the keyboard profile ID so uccd can notify subscribers
-      obj[ "keyboardProfileId" ] = keyboardProfileId;
-      m_client->setKeyboardBacklight(
-        QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString() );
-    }
+    QJsonObject obj = QJsonObject::fromVariantMap( *profileData );
+    // Inject the keyboard profile ID so uccd can notify subscribers
+    obj[ "keyboardProfileId" ] = keyboardProfileId;
+    m_client->setKeyboardBacklight(
+      QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString() );
   }
   m_keyboardProfileOverride = true;
   m_activeProfileKeyboardId = keyboardProfileId;
@@ -405,9 +383,9 @@ void TrayBackend::setActiveGpuProfile( const QString &gpuProfileId )
       QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString(), 0 );
   };
 
-  if ( auto json = m_client->getGpuProfile( gpuProfileId.toStdString() ) )
+  if ( auto map = m_client->getGpuProfile( gpuProfileId.toStdString() ) )
   {
-    applyWithProfileId( QString::fromStdString( *json ) );
+    applyWithProfileId( QString::fromUtf8( QJsonDocument( QJsonObject::fromVariantMap( *map ) ).toJson( QJsonDocument::Compact ) ) );
   }
   else
   {
@@ -671,7 +649,7 @@ void TrayBackend::loadProfiles()
   // All profiles (built-in + custom) come from the daemon now
   QStringList names, ids;
 
-  if ( auto json = m_client->getProfilesJSON() )
+  if ( auto json = m_client->getProfiles() )
     parseProfileArray( *json, names, ids );
 
   if ( ids != m_profileIds || names != m_profileNames )
@@ -714,7 +692,7 @@ void TrayBackend::loadProfiles()
   // GPU profiles
   {
     QStringList gpNames, gpIds;
-    if ( auto json = m_client->getGpuProfilesJSON() )
+    if ( auto json = m_client->getGpuProfiles() )
       parseProfileArray( *json, gpNames, gpIds );
     if ( gpIds != m_gpuProfileIds || gpNames != m_gpuProfileNames )
     {
@@ -727,7 +705,7 @@ void TrayBackend::loadProfiles()
   // Keyboard profiles from daemon
   {
     QStringList kpNames, kpIds;
-    if ( auto json = m_client->getKeyboardProfilesJSON() )
+    if ( auto json = m_client->getKeyboardProfiles() )
       parseProfileArray( *json, kpNames, kpIds );
     if ( kpIds != m_keyboardProfileIds || kpNames != m_keyboardProfileNames )
     {
@@ -764,9 +742,9 @@ void TrayBackend::loadCapabilities()
   // Capability-based detection: the daemon always runs, capability flags
   // determine what the UI shows.  deviceSupported is true if the HAL found
   // *any* controllable hardware.
-  if ( auto caps = m_client->getCapabilitiesJSON() )
+  if ( auto caps = m_client->getCapabilities() )
   {
-    bool hasAnyCaps = ( *caps != "[]" );
+    bool hasAnyCaps = !caps->isEmpty();
     bool was = m_deviceSupported;
     m_deviceSupported = hasAnyCaps;
     if ( was != m_deviceSupported )
@@ -784,18 +762,13 @@ void TrayBackend::loadCapabilities()
       emit waterCoolerSupportedChanged();
   }
 
-  if ( auto sysInfoJson = m_client->getSystemInfoJSON() )
+  if ( auto sysInfo = m_client->getSystemInfo() )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfoJson ) );
-    if ( doc.isObject() )
-    {
-      const QJsonObject obj = doc.object();
-      m_laptopModel = obj.value( "laptopModel" ).toString();
-      m_cpuModel    = obj.value( "cpuModel" ).toString();
-      m_dGpuModel   = obj.value( "dGpuModel" ).toString();
-      m_iGpuModel   = obj.value( "iGpuModel" ).toString();
-      emit systemInfoChanged();
-    }
+    m_laptopModel = sysInfo->value( "laptopModel" ).toString();
+    m_cpuModel    = sysInfo->value( "cpuModel" ).toString();
+    m_dGpuModel   = sysInfo->value( "dGpuModel" ).toString();
+    m_iGpuModel   = sysInfo->value( "iGpuModel" ).toString();
+    emit systemInfoChanged();
   }
 }
 

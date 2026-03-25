@@ -50,19 +50,19 @@ public:
   ~UccdClient() override = default;
 
   // System Information
-  std::optional< std::string > getSystemInfoJSON();
+  std::optional< QVariantMap > getSystemInfo();
   std::optional< bool > isDeviceSupported();
-  std::optional< std::string > getCapabilitiesJSON();
+  std::optional< QStringList > getCapabilities();
 
   // Profile Management — unified API (profiles have "editable" flag)
-  std::optional< std::string > getProfilesJSON();       // All profiles with editable flag
-  std::optional< std::string > getDefaultProfilesJSON(); // Backward-compat: built-in only
+  std::optional< QVariantList > getProfiles();       // All profiles with editable flag
+  std::optional< QVariantList > getDefaultProfiles(); // Backward-compat: built-in only
   std::optional< QVariantMap > getCpuFrequencyLimits();
-  std::optional< std::string > getDefaultValuesProfileJSON();
-  std::optional< std::string > getCustomProfilesJSON();  // Backward-compat: custom only
-  std::optional< std::string > getActiveProfileJSON();
+  std::optional< QVariantMap > getDefaultValuesProfile();
+  std::optional< QVariantList > getCustomProfiles();  // Backward-compat: custom only
+  std::optional< QVariantMap > getActiveProfile();
   std::optional< QVariantMap > getAppliedProfiles();
-  std::optional< std::string > getSettingsJSON();
+  std::optional< QVariantMap > getSettings();
   std::optional< std::string > getPowerState();
   bool setStateMap( const std::string &state, const std::string &profileId );
   bool setBatchStateMap( const std::map< std::string, std::string > &entries );
@@ -75,32 +75,30 @@ public:
 
   // Hardware zone model
   std::optional< QVariantList > getHardwareFanDevices();
-  std::optional< std::string > getHardwareSensorsJSON();
+  std::optional< QVariantList > getHardwareSensors();
   std::optional< QVariantList > getThermalSources();
   std::optional< QVariantMap > getSensorReadings();
   std::optional< QVariantList > getFanZones();
 
   // Fan sub-profiles (built-in + custom, with editable flag)
   std::optional< QVariantList > getFanProfiles();
-  std::optional< std::string > getFanProfileJSON( const std::string &fanProfileId );
+  std::optional< QVariantMap > getFanProfile( const std::string &fanProfileId );
   bool saveFanProfile( const std::string &id, const std::string &name, const std::string &json );
   bool deleteFanProfile( const std::string &id );
 
   // GPU sub-profiles (built-in + custom, with editable flag)
-  std::optional< std::string > getGpuProfilesJSON();
-  std::optional< std::string > getGpuProfileJSON( const std::string &gpuProfileId );
+  std::optional< QVariantList > getGpuProfiles();
+  std::optional< QVariantMap > getGpuProfile( const std::string &gpuProfileId );
   bool saveGpuProfile( const std::string &id, const std::string &name, const std::string &json );
   bool deleteGpuProfile( const std::string &id );
 
   // Keyboard sub-profiles (custom only, all editable)
-  std::optional< std::string > getKeyboardProfilesJSON();
-  std::optional< std::string > getKeyboardProfileJSON( const std::string &keyboardProfileId );
+  std::optional< QVariantList > getKeyboardProfiles();
+  std::optional< QVariantMap > getKeyboardProfile( const std::string &keyboardProfileId );
   bool saveKeyboardProfile( const std::string &id, const std::string &name, const std::string &json );
   bool deleteKeyboardProfile( const std::string &id );
 
-  // Legacy aliases (deprecated)
-  std::optional< std::string > getFanProfile( const std::string &fanProfileId );
-  std::optional< std::string > getGpuProfile( const std::string &gpuProfileId );
+  // Legacy alias (deprecated)
   std::optional< bool > setFanProfile( const std::string &fanProfileId, const std::string &json );
 
   // Display Control
@@ -131,18 +129,18 @@ public:
   std::optional< QVariantList > getODMPowerLimits();
 
   // Charging Profile (firmware-level charging modes)
-  std::optional< std::string > getChargingProfilesAvailable();
+  std::optional< QStringList > getChargingProfilesAvailable();
   std::optional< std::string > getCurrentChargingProfile();
   bool setChargingProfile( const std::string &profileDescriptor );
 
   // Charging Priority (USB-C PD priority)
-  std::optional< std::string > getChargingPrioritiesAvailable();
+  std::optional< QStringList > getChargingPrioritiesAvailable();
   std::optional< std::string > getCurrentChargingPriority();
   bool setChargingPriority( const std::string &priorityDescriptor );
 
   // Battery Charge Thresholds
-  std::optional< std::string > getChargeStartAvailableThresholds();
-  std::optional< std::string > getChargeEndAvailableThresholds();
+  std::optional< QVariantList > getChargeStartAvailableThresholds();
+  std::optional< QVariantList > getChargeEndAvailableThresholds();
   std::optional< int > getChargeStartThreshold();
   std::optional< int > getChargeEndThreshold();
   bool setChargeStartThreshold( int value );
@@ -165,7 +163,7 @@ public:
 
   // NVIDIA GPU OC Control
   std::optional< bool > getNvidiaOCAvailable();
-  std::optional< std::string > getNvidiaOCState( int deviceIndex = 0 );
+  std::optional< QVariantMap > getNvidiaOCState( int deviceIndex = 0 );
   bool setNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz );
   bool setNvidiaGpuLockedClocks( int deviceIndex, int minMHz, int maxMHz );
   bool setNvidiaVramLockedClocks( int deviceIndex, int minMHz, int maxMHz );
@@ -229,7 +227,7 @@ public:
 
   // Keyboard Control
   bool setKeyboardBacklight( const std::string &config );
-  std::optional< std::string > getKeyboardBacklightInfo();
+  std::optional< QVariantMap > getKeyboardBacklightInfo();
   std::optional< std::string > getKeyboardBacklightStates();
   bool setFnLock( bool enabled );
   std::optional< bool > getFnLock();
@@ -286,7 +284,7 @@ public:
   std::optional< QByteArray > getMonitorDataSince( qint64 sinceTimestampMs );
   bool setMonitorHistoryHorizon( int seconds );
   std::optional< int > getMonitorHistoryHorizon();
-  std::optional< std::string > getMonitorSourcesJSON();
+  std::optional< QVariantList > getMonitorSources();
   std::optional< QVariantMap > getFpsSources();
   std::optional< QVariantMap > getAutoUvAutoApplyStatus();
   bool setFpsSourceApp( const std::string &appName );

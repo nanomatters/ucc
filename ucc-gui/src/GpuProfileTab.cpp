@@ -436,13 +436,7 @@ void GpuProfileTab::refreshOCState()
   if ( !stateOpt )
     return;
 
-  qDebug() << "[GPU-CTGP] refreshOCState raw state:" << QString::fromStdString( *stateOpt );
-
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *stateOpt ) );
-  if ( !doc.isObject() )
-    return;
-
-  QJsonObject state = doc.object();
+  QJsonObject state = QJsonObject::fromVariantMap( *stateOpt );
 
   // Check if GPU needs reset
   if ( state.contains( "needsReset" ) && state["needsReset"].toBool() )
@@ -670,17 +664,13 @@ void GpuProfileTab::refreshLiveMetrics()
     auto stateOpt = m_uccdClient->getNvidiaOCState( 0 );
     if ( stateOpt )
     {
-      const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *stateOpt ) );
-      if ( doc.isObject() )
-      {
-        const QJsonObject state = doc.object();
-        if ( !tempC && state.contains( "tempC" ) )
-          tempC = state["tempC"].toInt();
-        if ( !powerW && state.contains( "powerDrawW" ) )
-          powerW = state["powerDrawW"].toDouble();
-        if ( !currentPstate && state.contains( "currentPstate" ) )
-          currentPstate = state["currentPstate"].toInt( -1 );
-      }
+      const QJsonObject state = QJsonObject::fromVariantMap( *stateOpt );
+      if ( !tempC && state.contains( "tempC" ) )
+        tempC = state["tempC"].toInt();
+      if ( !powerW && state.contains( "powerDrawW" ) )
+        powerW = state["powerDrawW"].toDouble();
+      if ( !currentPstate && state.contains( "currentPstate" ) )
+        currentPstate = state["currentPstate"].toInt( -1 );
     }
   }
 

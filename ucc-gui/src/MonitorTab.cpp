@@ -524,18 +524,14 @@ void MonitorTab::refreshAvailableSources()
 
     loadSourceAliasesFromSettings();
 
-    auto jsonOpt = m_client->getMonitorSourcesJSON();
-    if ( !jsonOpt.has_value() )
-        return;
-
-    const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *jsonOpt ) );
-    if ( !doc.isArray() )
+    auto sourcesOpt = m_client->getMonitorSources();
+    if ( !sourcesOpt.has_value() )
         return;
 
     m_availableSources.clear();
-    for ( const auto &v : doc.array() )
+    for ( const auto &v : *sourcesOpt )
     {
-        const QJsonObject obj = v.toObject();
+        const QVariantMap obj = v.toMap();
         SourceDef sd;
         sd.key   = obj.value( "key" ).toString().toStdString();
         const std::string rawLabel = obj.value( "label" ).toString().toStdString();

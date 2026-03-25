@@ -117,14 +117,12 @@ export class UccdClient {
         return v >= 0 ? v : null;
     }
 
-    /** Parse a JSON-returning D-Bus method and extract a numeric key. */
-    _readJsonNum(method, key) {
-        const raw = this._call(method);
-        if (!raw) return null;
-        try {
-            const v = JSON.parse(raw)[key];
-            return typeof v === 'number' && v >= 0 ? v : null;
-        } catch { return null; }
+    /** Extract a numeric value from a variant-map-returning D-Bus method. */
+    _readNum(method, key) {
+        const obj = this._call(method);
+        if (!obj) return null;
+        const v = obj[key];
+        return typeof v === 'number' && v >= 0 ? v : null;
     }
 
     // -----------------------------------------------------------------------
@@ -136,27 +134,27 @@ export class UccdClient {
     }
 
     getGpuTemperature() {
-        // Prefer dGPU JSON, fall back to iGPU JSON
-        return this._readJsonNum('GetDGpuInfoValuesJSON', 'temp')
-            ?? this._readJsonNum('GetIGpuInfoValuesJSON', 'temp')
+        // Prefer dGPU, fall back to iGPU
+        return this._readNum('GetDGpuInfoValues', 'temp')
+            ?? this._readNum('GetIGpuInfoValues', 'temp')
             ?? -1;
     }
 
     getCpuFrequency() { return this._call('GetCpuFrequencyMHz') ?? -1; }
 
     getGpuFrequency() {
-        return this._readJsonNum('GetDGpuInfoValuesJSON', 'coreFrequency')
-            ?? this._readJsonNum('GetDGpuInfoValuesJSON', 'coreFreq')
+        return this._readNum('GetDGpuInfoValues', 'coreFrequency')
+            ?? this._readNum('GetDGpuInfoValues', 'coreFreq')
             ?? -1;
     }
 
     getCpuPower() {
-        return this._readJsonNum('GetCpuPowerValuesJSON', 'powerDraw') ?? -1;
+        return this._readNum('GetCpuPowerValues', 'powerDraw') ?? -1;
     }
 
     getGpuPower() {
-        return this._readJsonNum('GetDGpuInfoValuesJSON', 'powerDraw')
-            ?? this._readJsonNum('GetIGpuInfoValuesJSON', 'powerDraw')
+        return this._readNum('GetDGpuInfoValues', 'powerDraw')
+            ?? this._readNum('GetIGpuInfoValues', 'powerDraw')
             ?? -1;
     }
 
@@ -192,10 +190,10 @@ export class UccdClient {
     // Slow poll — profiles, state, hardware toggles
     // -----------------------------------------------------------------------
 
-    getActiveProfileJSON()   { return this._call('GetActiveProfileJSON'); }
+    getActiveProfile()   { return this._call('GetActiveProfile'); }
     getPowerState()          { return this._call('GetPowerState'); }
-    getDefaultProfilesJSON() { return this._call('GetDefaultProfilesJSON'); }
-    getFanProfileNames()     { return this._call('GetFanProfileNames'); }
+    getDefaultProfiles() { return this._call('GetDefaultProfiles'); }
+    getFanProfiles()     { return this._call('GetFanProfiles'); }
 
     getWebcamEnabled()      { return this._call('GetWebcamSWStatus') ?? false; }
     getFnLock()             { return this._call('GetFnLockStatus') ?? false; }
@@ -206,23 +204,21 @@ export class UccdClient {
     getWaterCoolerSupported() { return this._call('GetWaterCoolerSupported') ?? false; }
     isWaterCoolerEnabled()    { return this._call('IsWaterCoolerEnabled') ?? false; }
     isDeviceSupported()       { return this._call('IsDeviceSupported') ?? false; }
-    getCapabilitiesJSON()     { return this._call('GetCapabilitiesJSON'); }
-    getSystemInfoJSON()       { return this._call('GetSystemInfoJSON'); }
+    getCapabilities()     { return this._call('GetCapabilities'); }
+    getSystemInfo()       { return this._call('GetSystemInfo'); }
 
     getFanProfile(name) { return this._call('GetFanProfile', [name], 's'); }
     getGpuProfile(id)   { return this._call('GetGpuProfile', [id], 's'); }
-    getGpuProfilesJSON() { return this._call('GetGpuProfileNames'); }
+    getGpuProfiles() { return this._call('GetGpuProfiles'); }
     getCTGPAdjustmentSupported() { return this._call('GetCTGPAdjustmentSupported') ?? false; }
 
     // -----------------------------------------------------------------------
-    // Extended NVIDIA dGPU metrics (all from GetDGpuInfoValuesJSON)
+    // Extended NVIDIA dGPU metrics (all from GetDGpuInfoValues)
     // -----------------------------------------------------------------------
 
-    /** Parse the dGPU JSON blob and return the full object, cached per poll. */
+    /** Return the dGPU info as a JS object (from variant map). */
     _getDGpuInfo() {
-        const raw = this._call('GetDGpuInfoValuesJSON');
-        if (!raw) return null;
-        try { return JSON.parse(raw); } catch { return null; }
+        return this._call('GetDGpuInfoValues') ?? null;
     }
 
     getDGpuComputeUtilPct()   { return this._getDGpuInfo()?.computeUtilPct   ?? -1; }

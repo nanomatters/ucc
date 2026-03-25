@@ -716,17 +716,14 @@ class UccIndicator extends PanelMenu.Button {
     }
 
     _applyFanProfile(fanProfileId) {
-        const raw = this._client.getFanProfile(fanProfileId);
-        if (!raw) return;
-        try {
-            const src = JSON.parse(raw);
-            const dst = {};
-            // Pass zones array directly
-            if (src.zones && Array.isArray(src.zones)) {
-                dst.zones = src.zones;
-            }
-            this._client.applyFanProfiles(JSON.stringify(dst));
-        } catch { /* ignore parse errors */ }
+        const src = this._client.getFanProfile(fanProfileId);
+        if (!src) return;
+        const dst = {};
+        // Pass zones array directly
+        if (src.zones && Array.isArray(src.zones)) {
+            dst.zones = src.zones;
+        }
+        this._client.applyFanProfiles(JSON.stringify(dst));
     }
 
     _applyKeyboardProfile(kbProfileId) {
@@ -763,10 +760,10 @@ class UccIndicator extends PanelMenu.Button {
 
     _applyGpuProfile(gpuProfileId) {
         // Try daemon built-in profile first
-        let profileJson = this._client.getGpuProfile(gpuProfileId);
+        let profile = this._client.getGpuProfile(gpuProfileId);
 
         // Fall back to custom profile from uccrc
-        if (!profileJson || profileJson === '{}') {
+        if (!profile || Object.keys(profile).length === 0) {
             try {
                 const uccrc = GLib.build_filenamev([GLib.get_home_dir(), '.config', 'uccrc']);
                 const kf = new GLib.KeyFile();
@@ -775,7 +772,7 @@ class UccIndicator extends PanelMenu.Button {
                 if (raw) {
                     for (const p of JSON.parse(raw)) {
                         if (p.id === gpuProfileId && p.json) {
-                            profileJson = p.json;
+                            profile = JSON.parse(p.json);
                             break;
                         }
                     }
@@ -783,22 +780,18 @@ class UccIndicator extends PanelMenu.Button {
             } catch { /* ignore */ }
         }
 
-        if (!profileJson || profileJson === '{}') return;
+        if (!profile || Object.keys(profile).length === 0) return;
 
-        try {
-            const obj = JSON.parse(profileJson);
-
-            // Apply cTGP offset if present
-            if (obj.nvidiaPowerCTRLProfile?.cTGPOffset !== undefined) {
-                if (this._client.getCTGPAdjustmentSupported()) {
-                    this._client.setNVIDIAPowerOffset(obj.nvidiaPowerCTRLProfile.cTGPOffset);
-                }
+        // Apply cTGP offset if present
+        if (profile.nvidiaPowerCTRLProfile?.cTGPOffset !== undefined) {
+            if (this._client.getCTGPAdjustmentSupported()) {
+                this._client.setNVIDIAPowerOffset(profile.nvidiaPowerCTRLProfile.cTGPOffset);
             }
+        }
 
-            // Stamp the gpuProfileId and send to daemon
-            obj.gpuProfileId = gpuProfileId;
-            this._client.applyNvidiaGpuOCProfile(JSON.stringify(obj));
-        } catch { /* ignore parse errors */ }
+        // Stamp the gpuProfileId and send to daemon
+        profile.gpuProfileId = gpuProfileId;
+        this._client.applyNvidiaGpuOCProfile(JSON.stringify(profile));
     }
 
     _rebuildODMProfileButtons() {
@@ -845,8 +838,7 @@ class UccIndicator extends PanelMenu.Button {
     // -----------------------------------------------------------------------
 
     _loadCapabilities() {
-        const capsJson = this._client.getCapabilitiesJSON();
-        const caps = capsJson ? JSON.parse(capsJson) : [];
+        const caps = this._client.getCapabilities() ?? [];
         if (caps.length === 0) {
             log('[UCC] No hardware capabilities detected — hiding indicator');
             this._stopTimers();
@@ -864,16 +856,13 @@ class UccIndicator extends PanelMenu.Button {
             }
         }
 
-        const sysInfoRaw = this._client.getSystemInfoJSON();
-        if (sysInfoRaw) {
-            try {
-                const si = JSON.parse(sysInfoRaw);
-                this._state.laptopModel = si.laptopModel ?? '';
-                this._state.cpuModel    = si.cpuModel    ?? '';
-                // prefer dGPU model, fall back to iGPU
-                this._state.gpuModel    = si.dGpuModel   || si.iGpuModel || '';
-                this._updateSystemInfoLabels();
-            } catch { /* ignore */ }
+        const si = this._client.getSystemInfo();
+        if (si) {
+            this._state.laptopModel = si.laptopModel ?? '';
+            this._state.cpuModel    = si.cpuModel    ?? '';
+            // prefer dGPU model, fall back to iGPU
+            this._state.gpuModel    = si.dGpuModel   || si.iGpuModel || '';
+            this._updateSystemInfoLabels();
         }
     }
 
@@ -882,13 +871,9 @@ class UccIndicator extends PanelMenu.Button {
 
         // Built-in profiles
         const names = [], ids = [];
-        const raw = this._client.getDefaultProfilesJSON();
-        if (raw) {
-            try {
-                for (const p of JSON.parse(raw)) {
-                    if (p.id) { ids.push(p.id); names.push(p.name ?? p.id); }
-                }
-            } catch { /* ignore */ }
+        const profiles = this._client.getDefaultProfiles() ?? [];
+        for (const p of profiles) {
+            if (p.id) { ids.push(p.id); names.push(p.name ?? p.id); }
         }
 
         // Load uccrc once — QSettings (IniFormat) wraps byte arrays with
@@ -920,26 +905,19 @@ class UccIndicator extends PanelMenu.Button {
         s.profileIds = ids;
 
         // Active profile
-        const ap = this._client.getActiveProfileJSON();
+        const ap = this._client.getActiveProfile();
         if (ap) {
-            try {
-                const obj = JSON.parse(ap);
-                s.activeProfileId = obj.id ?? '';
-                s.activeProfileName = obj.name ?? '';
-                s.activeProfileFanId = obj.fan?.fanProfile ?? '';
-                s.wcAutoControl = obj.fan?.autoControlWC ?? true;
-            } catch { /* ignore */ }
+            s.activeProfileId = ap.id ?? '';
+            s.activeProfileName = ap.name ?? '';
+            s.activeProfileFanId = ap.fan?.fanProfile ?? '';
+            s.wcAutoControl = ap.fan?.autoControlWC ?? true;
         }
 
         // Fan profiles
         const fanNames = [], fanIds = [];
-        const fpRaw = this._client.getFanProfileNames();
-        if (fpRaw) {
-            try {
-                for (const p of JSON.parse(fpRaw)) {
-                    if (p.id) { fanIds.push(p.id); fanNames.push(p.name ?? p.id); }
-                }
-            } catch { /* ignore */ }
+        const fanProfiles = this._client.getFanProfiles() ?? [];
+        for (const p of fanProfiles) {
+            if (p.id) { fanIds.push(p.id); fanNames.push(p.name ?? p.id); }
         }
 
         // Custom fan profiles from uccrc
@@ -980,25 +958,18 @@ class UccIndicator extends PanelMenu.Button {
         s.keyboardProfileIds = kbIds;
         s.keyboardProfilesData = kbData;
 
-        // Extract active keyboard profile from the active profile JSON
+        // Extract active keyboard profile from the active profile
         if (ap) {
-            try {
-                const obj = JSON.parse(ap);
-                const kbRef = obj.selectedKeyboardProfile ?? '';
-                // Resolve: may be a UUID or a display name
-                s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
-            } catch { /* ignore */ }
+            const kbRef = ap.selectedKeyboardProfile ?? '';
+            // Resolve: may be a UUID or a display name
+            s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
         }
 
         // GPU OC profiles — built-in from daemon + custom from uccrc
         const gpuNames = [], gpuIds = [];
-        const gpuRaw = this._client.getGpuProfilesJSON();
-        if (gpuRaw) {
-            try {
-                for (const p of JSON.parse(gpuRaw)) {
-                    if (p.id) { gpuIds.push(p.id); gpuNames.push(p.name ?? p.id); }
-                }
-            } catch { /* ignore */ }
+        const gpuProfiles = this._client.getGpuProfiles() ?? [];
+        for (const p of gpuProfiles) {
+            if (p.id) { gpuIds.push(p.id); gpuNames.push(p.name ?? p.id); }
         }
         if (uccrcKf) {
             try {
@@ -1015,12 +986,9 @@ class UccIndicator extends PanelMenu.Button {
         s.gpuProfileNames = gpuNames;
         s.gpuProfileIds = gpuIds;
 
-        // Extract active GPU profile from the active profile JSON
+        // Extract active GPU profile from the active profile
         if (ap) {
-            try {
-                const obj = JSON.parse(ap);
-                s.activeProfileGpuId = obj.gpuProfileId ?? '';
-            } catch { /* ignore */ }
+            s.activeProfileGpuId = ap.gpuProfileId ?? '';
         }
 
         // ODM performance profiles
@@ -1082,10 +1050,8 @@ class UccIndicator extends PanelMenu.Button {
         s.cpuFanPct = this._client.getFanSpeedPercent();
         s.gpuFanPct = this._client.getGpuFanSpeedPercent();
 
-        // Extended NVIDIA dGPU metrics (single D-Bus call, parse once)
-        const dgpuRaw = this._client._call('GetDGpuInfoValuesJSON');
-        let dgpu = null;
-        if (dgpuRaw) { try { dgpu = JSON.parse(dgpuRaw); } catch {} }
+        // Extended NVIDIA dGPU metrics (single D-Bus call)
+        const dgpu = this._client._call('GetDGpuInfoValues');
         s.gpuComputeUtilPct   = dgpu?.computeUtilPct   ?? -1;
         s.gpuMemoryUtilPct    = dgpu?.memoryUtilPct    ?? -1;
         s.gpuVramUsedMiB      = dgpu?.vramUsedMiB      ?? -1;
@@ -1114,31 +1080,28 @@ class UccIndicator extends PanelMenu.Button {
         const s = this._state;
 
         // Active profile
-        const ap = this._client.getActiveProfileJSON();
+        const ap = this._client.getActiveProfile();
         if (ap) {
-            try {
-                const obj = JSON.parse(ap);
-                const newId = obj.id ?? '';
-                if (newId !== s.activeProfileId) {
-                    s.activeProfileId = newId;
-                    s.activeProfileName = obj.name ?? '';
-                    s.activeProfileFanId = obj.fan?.fanProfile ?? '';
-                    // Extract keyboard profile reference
-                    const kbRef = obj.selectedKeyboardProfile ?? '';
-                    s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
-                    // Extract GPU profile reference
-                    s.activeProfileGpuId = obj.gpuProfileId ?? '';
-                    this._rebuildProfileButtons();
-                    this._rebuildFanProfileButtons();
-                    this._rebuildKeyboardProfileButtons();
-                    this._rebuildGpuProfileButtons();
-                }
-                const oldAutoControl = s.wcAutoControl;
-                s.wcAutoControl = obj.fan?.autoControlWC ?? true;
-                if (oldAutoControl !== s.wcAutoControl) {
-                    this._updateWaterCoolerControlsEnabled();
-                }
-            } catch { /* ignore */ }
+            const newId = ap.id ?? '';
+            if (newId !== s.activeProfileId) {
+                s.activeProfileId = newId;
+                s.activeProfileName = ap.name ?? '';
+                s.activeProfileFanId = ap.fan?.fanProfile ?? '';
+                // Extract keyboard profile reference
+                const kbRef = ap.selectedKeyboardProfile ?? '';
+                s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
+                // Extract GPU profile reference
+                s.activeProfileGpuId = ap.gpuProfileId ?? '';
+                this._rebuildProfileButtons();
+                this._rebuildFanProfileButtons();
+                this._rebuildKeyboardProfileButtons();
+                this._rebuildGpuProfileButtons();
+            }
+            const oldAutoControl = s.wcAutoControl;
+            s.wcAutoControl = ap.fan?.autoControlWC ?? true;
+            if (oldAutoControl !== s.wcAutoControl) {
+                this._updateWaterCoolerControlsEnabled();
+            }
         }
 
         // Power state

@@ -83,8 +83,8 @@ int main( int argc, char *argv[] )
 
   {
     ucc::UccdClient client;
-    auto caps = client.getCapabilitiesJSON();
-    if ( !caps.has_value() || caps.value() == "[]" )
+    auto caps = client.getCapabilities();
+    if ( !caps.has_value() || caps->isEmpty() )
     {
       QMessageBox::warning(
         nullptr, "No Hardware Detected",

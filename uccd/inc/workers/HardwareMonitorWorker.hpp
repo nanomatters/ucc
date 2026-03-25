@@ -17,6 +17,7 @@
 
 #include "DaemonWorker.hpp"
 #include "../NvmlWrapper.hpp"
+#include <QVariantMap>
 #include <climits>
 #include <string>
 #include <optional>
@@ -267,7 +268,7 @@ public:
    * @param json JSON string with power data
    * @param cpuPowerWatts Current CPU power draw in watts (or -1.0 if unavailable)
    */
-  using CpuPowerCallback = std::function< void( const std::string &json, double cpuPowerWatts ) >;
+  using CpuPowerCallback = std::function< void( const QVariantMap &cpuPowerMap, double cpuPowerWatts ) >;
 
   /**
    * @brief Callback function type for CPU frequency updates (MHz)

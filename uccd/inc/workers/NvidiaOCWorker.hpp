@@ -18,6 +18,7 @@
 #include "../NvmlWrapper.hpp"
 #include <functional>
 #include <memory>
+#include <QVariantMap>
 #include <string>
 
 /**
@@ -42,8 +43,8 @@ public:
   /** @return true if NVML initialised and at least one GPU found */
   [[nodiscard]] bool isAvailable() const noexcept;
 
-  /** @return JSON string with full OC state for device 0 */
-  [[nodiscard]] std::string getOCStateJSON( unsigned int deviceIndex = 0 ) const;
+  /** @return QVariantMap with full OC state for device 0 */
+  [[nodiscard]] QVariantMap getOCState( unsigned int deviceIndex = 0 ) const;
 
   /** Set clock offset for a specific P-state */
   bool setClockOffset( unsigned int deviceIndex,

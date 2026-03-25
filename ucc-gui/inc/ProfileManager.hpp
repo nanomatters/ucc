@@ -118,7 +118,7 @@ public slots:
   /// Check whether a sub-profile ID is editable (returns false for built-ins)
   bool isProfileEditable( const QString &profileId, const QJsonArray &profilesData ) const;
 
-  QString getSettingsJSON();
+  QVariantMap getSettings();
   bool setStateMap( const QString &state, const QString &profileId );
   bool setBatchStateMap( const std::map< QString, QString > &entries );
 

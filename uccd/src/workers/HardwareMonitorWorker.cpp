@@ -752,26 +752,24 @@ void HardwareMonitorWorker::initCpuPower()
 
 void HardwareMonitorWorker::updateCpuPower()
 {
-  std::ostringstream jsonStream;
-  jsonStream << "{";
+  QVariantMap map;
   double rawPower = -1.0;
 
   if ( m_getSensorDataCollectionStatus() )
   {
     rawPower = getCpuCurrentPower();
-    jsonStream << "\"powerDraw\":" << rawPower;
+    map["powerDraw"] = rawPower;
 
     double maxPowerLimit = getCpuMaxPowerLimit();
     if ( maxPowerLimit > 0 )
-      jsonStream << ",\"maxPowerLimit\":" << maxPowerLimit;
+      map["maxPowerLimit"] = maxPowerLimit;
   }
   else
   {
-    jsonStream << "\"powerDraw\":-1";
+    map["powerDraw"] = -1.0;
   }
 
-  jsonStream << "}";
-  m_cpuPowerUpdateCallback( jsonStream.str(), rawPower );
+  m_cpuPowerUpdateCallback( map, rawPower );
 }
 
 double HardwareMonitorWorker::getCpuCurrentPower()

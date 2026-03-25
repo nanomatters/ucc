@@ -57,7 +57,6 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 
-static std::string jsonEscape( const std::string &value );
 
 namespace
 {
@@ -85,149 +84,98 @@ static std::string fanProfileToJSON( const FanProfile &fp,
     return "fan";
   };
 
-  std::string json = "{";
-  json += "\"id\":\"" + jsonEscape( fp.id ) + "\",";
-  json += "\"name\":\"" + jsonEscape( fp.name ) + "\",";
-  json += "\"zones\":[";
+  nlohmann::json j;
+  j["id"]   = fp.id;
+  j["name"] = fp.name;
 
-  bool firstZone = true;
+  nlohmann::json zones = nlohmann::json::array();
   for ( const auto &zc : fp.zoneCurves )
   {
     if ( !hwDeviceTypes.empty() && hwDeviceTypes.find( zc.zoneId ) == hwDeviceTypes.end() )
       continue;
 
-    if ( !firstZone )
-      json += ',';
-    firstZone = false;
-
-    json += "{\"id\":\"" + jsonEscape( zc.zoneId ) + "\"";
-    json += ",\"name\":\"" + jsonEscape( zoneDisplayName( zc.zoneId ) ) + "\"";
-    json += ",\"deviceType\":\"" + jsonEscape( zoneDeviceTypeStr( zc.zoneId ) ) + "\"";
-    json += ",\"hysteresisDeg\":" + std::to_string( zc.hysteresisDeg );
-    json += ",\"enabled\":" + std::string( zc.enabled ? "true" : "false" );
+    nlohmann::json zone;
+    zone["id"]           = zc.zoneId;
+    zone["name"]         = zoneDisplayName( zc.zoneId );
+    zone["deviceType"]   = zoneDeviceTypeStr( zc.zoneId );
+    zone["hysteresisDeg"] = zc.hysteresisDeg;
+    zone["enabled"]      = zc.enabled;
     if ( !zc.thermalSourceId.empty() )
-      json += ",\"thermalSourceId\":\"" + jsonEscape( zc.thermalSourceId ) + "\"";
-
-    // Serialize fan assignments if present (topology from user profile)
+      zone["thermalSourceId"] = zc.thermalSourceId;
     if ( !zc.fanIds.empty() )
-    {
-      json += ",\"fanIds\":[";
-      for ( size_t f = 0; f < zc.fanIds.size(); ++f )
-      {
-        if ( f > 0 ) json += ',';
-        json += "\"" + jsonEscape( zc.fanIds[f] ) + "\"";
-      }
-      json += "]";
-    }
+      zone["fanIds"] = zc.fanIds;
 
-    json += ",\"curve\":[";
-    for ( size_t i = 0; i < zc.curve.size(); ++i )
-    {
-      if ( i > 0 )
-        json += ',';
-      json += "{\"temp\":" + std::to_string( zc.curve[i].temp )
-           + ",\"speed\":" + std::to_string( zc.curve[i].speed ) + "}";
-    }
-    json += "]}";
+    nlohmann::json curve = nlohmann::json::array();
+    for ( const auto &pt : zc.curve )
+      curve.push_back( {{ "temp", pt.temp }, { "speed", pt.speed }} );
+    zone["curve"] = std::move( curve );
+
+    zones.push_back( std::move( zone ) );
   }
-  json += "]";
+  j["zones"] = std::move( zones );
 
-  // Serialize custom thermal sources
   if ( !fp.thermalSources.empty() )
   {
-    json += ",\"thermalSources\":[";
-    bool firstTs = true;
+    nlohmann::json tsList = nlohmann::json::array();
     for ( const auto &ts : fp.thermalSources )
     {
-      if ( !firstTs ) json += ',';
-      firstTs = false;
-      json += "{\"id\":\"" + jsonEscape( ts.id ) + "\"";
-      json += ",\"label\":\"" + jsonEscape( ts.label ) + "\"";
-      json += ",\"strategy\":\"" + jsonEscape( ucc::hal::thermalStrategyToString( ts.strategy ) ) + "\"";
-      json += ",\"sensorIds\":[";
-      for ( size_t s = 0; s < ts.sensorIds.size(); ++s )
-      {
-        if ( s > 0 ) json += ',';
-        json += "\"" + jsonEscape( ts.sensorIds[s] ) + "\"";
-      }
-      json += "],\"weights\":[";
-      for ( size_t w = 0; w < ts.weights.size(); ++w )
-      {
-        if ( w > 0 ) json += ',';
-        json += std::to_string( ts.weights[w] );
-      }
-      json += "]}";
+      tsList.push_back( {
+        { "id",        ts.id },
+        { "label",     ts.label },
+        { "strategy",  ucc::hal::thermalStrategyToString( ts.strategy ) },
+        { "sensorIds", ts.sensorIds },
+        { "weights",   ts.weights },
+      } );
     }
-    json += "]";
+    j["thermalSources"] = std::move( tsList );
   }
 
-  json += "}";
-  return json;
+  return j.dump();
 }
 
-// helper function to convert GPU info to JSON
-std::string dgpuInfoToJSON( const DGpuInfo &info )
+/// Parse a SubProfile's raw JSON string to QVariantMap for D-Bus return.
+static QVariantMap subProfileJsonToMap( const std::string &json )
 {
-  std::ostringstream oss;
-  oss << std::fixed << std::setprecision( 2 );
-  oss << "{"
-  << "\"temp\":" << info.m_temp << ","
-      << "\"coreFrequency\":" << info.m_coreFrequency << ","
-      << "\"vramFrequency\":" << info.m_vramFrequency << ","
-      << "\"maxCoreFrequency\":" << info.m_maxCoreFrequency << ","
-      << "\"powerDraw\":" << info.m_powerDraw << ","
-      << "\"maxPowerLimit\":" << info.m_maxPowerLimit << ","
-      << "\"enforcedPowerLimit\":" << info.m_enforcedPowerLimit << ","
-      << "\"computeUtilPct\":" << info.m_computeUtilPct << ","
-      << "\"memoryUtilPct\":" << info.m_memoryUtilPct << ","
-      << "\"vramUsedMiB\":" << info.m_vramUsedMiB << ","
-      << "\"vramTotalMiB\":" << info.m_vramTotalMiB << ","
-      << "\"perfLimitReason\":\"" << jsonEscape( info.m_perfLimitReason ) << "\","
-      << "\"encoderUtilPct\":" << info.m_encoderUtilPct << ","
-      << "\"decoderUtilPct\":" << info.m_decoderUtilPct << ","
-      << "\"currentPstate\":" << info.m_currentPstate << ","
-      << "\"grClockOffsetMHz\":" << ( info.m_grClockOffsetMHz == INT_MIN ? -999 : info.m_grClockOffsetMHz ) << ","
-      << "\"memClockOffsetMHz\":" << ( info.m_memClockOffsetMHz == INT_MIN ? -999 : info.m_memClockOffsetMHz ) << ","
-      << "\"coreVoltageMv\":" << info.m_coreVoltageMv << ","
-      << "\"fanSpeedPct\":" << info.m_fanSpeedPct << ","
-      << "\"thermalMarginC\":" << info.m_thermalMarginC << ","
-      << "\"d0MetricsUsage\":" << ( info.m_d0MetricsUsage ? "true" : "false" )
-      << "}";
-  return oss.str();
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromRawData( json.data(), static_cast< int >( json.size() ) ) );
+  return doc.isObject() ? doc.object().toVariantMap() : QVariantMap{};
 }
 
-std::string igpuInfoToJSON( const IGpuInfo &info )
+static QVariantMap dgpuInfoToVariantMap( const DGpuInfo &info )
 {
-  std::ostringstream oss;
-  oss << std::fixed << std::setprecision( 2 );
-  oss << "{"
-      << "\"temp\":" << info.m_temp << ","
-      << "\"coreFrequency\":" << info.m_coreFrequency << ","
-      << "\"maxCoreFrequency\":" << info.m_maxCoreFrequency << ","
-      << "\"powerDraw\":" << info.m_powerDraw << ","
-      << "\"vendor\":\"" << info.m_vendor << "\""
-      << "}";
-  return oss.str();
+  return {
+    { "temp",              info.m_temp },
+    { "coreFrequency",     info.m_coreFrequency },
+    { "vramFrequency",     info.m_vramFrequency },
+    { "maxCoreFrequency",  info.m_maxCoreFrequency },
+    { "powerDraw",         info.m_powerDraw },
+    { "maxPowerLimit",     info.m_maxPowerLimit },
+    { "enforcedPowerLimit", info.m_enforcedPowerLimit },
+    { "computeUtilPct",    info.m_computeUtilPct },
+    { "memoryUtilPct",     info.m_memoryUtilPct },
+    { "vramUsedMiB",       info.m_vramUsedMiB },
+    { "vramTotalMiB",      info.m_vramTotalMiB },
+    { "perfLimitReason",   QString::fromStdString( info.m_perfLimitReason ) },
+    { "encoderUtilPct",    info.m_encoderUtilPct },
+    { "decoderUtilPct",    info.m_decoderUtilPct },
+    { "currentPstate",     info.m_currentPstate },
+    { "grClockOffsetMHz",  ( info.m_grClockOffsetMHz == INT_MIN ? -999 : info.m_grClockOffsetMHz ) },
+    { "memClockOffsetMHz", ( info.m_memClockOffsetMHz == INT_MIN ? -999 : info.m_memClockOffsetMHz ) },
+    { "coreVoltageMv",     info.m_coreVoltageMv },
+    { "fanSpeedPct",       info.m_fanSpeedPct },
+    { "thermalMarginC",    info.m_thermalMarginC },
+    { "d0MetricsUsage",    info.m_d0MetricsUsage },
+  };
 }
 
-static std::string jsonEscape( const std::string &value )
+static QVariantMap igpuInfoToVariantMap( const IGpuInfo &info )
 {
-  std::ostringstream oss;
-  for ( const char c : value )
-  {
-    switch ( c )
-    {
-      case '"': oss << "\\\""; break;
-      case '\\': oss << "\\\\"; break;
-      case '\b': oss << "\\b"; break;
-      case '\f': oss << "\\f"; break;
-      case '\n': oss << "\\n"; break;
-      case '\r': oss << "\\r"; break;
-      case '\t': oss << "\\t"; break;
-      default: oss << c; break;
-    }
-  }
-  return oss.str();
+  return {
+    { "temp",            info.m_temp },
+    { "coreFrequency",   info.m_coreFrequency },
+    { "maxCoreFrequency", info.m_maxCoreFrequency },
+    { "powerDraw",       info.m_powerDraw },
+    { "vendor",          QString::fromStdString( info.m_vendor ) },
+  };
 }
 
 
@@ -267,142 +215,110 @@ static int32_t optionalValueOr( const std::optional< int32_t > &value, int32_t f
   return value.has_value() ? value.value() : fallback;
 }
 
-static std::string profileToJSON( const UccProfile &profile,
-                                  int32_t defaultOnlineCores,
-                                  int32_t defaultScalingMin,
-                                  int32_t defaultScalingMax,
-                                  bool editable = false )
+static QVariantMap profileToVariantMap( const UccProfile &profile,
+                                        int32_t defaultOnlineCores,
+                                        int32_t defaultScalingMin,
+                                        int32_t defaultScalingMax,
+                                        bool editable = false )
 {
-  std::ostringstream oss;
-  oss << "{"
-      << "\"id\":\"" << jsonEscape( profile.id ) << "\" ,"
-      << "\"name\":\"" << jsonEscape( profile.name ) << "\" ,"
-      << "\"editable\":" << ( editable ? "true" : "false" ) << ","
-      << "\"description\":\"" << jsonEscape( profile.description ) << "\" ,"
-      << "\"display\":{"
-      << "\"brightness\":" << profile.display.brightness << ","
-      << "\"useBrightness\":" << ( profile.display.useBrightness ? "true" : "false" ) << ","
-      << "\"refreshRate\":" << profile.display.refreshRate << ","
-      << "\"useRefRate\":" << ( profile.display.useRefRate ? "true" : "false" ) << ","
-      << "\"xResolution\":" << profile.display.xResolution << ","
-      << "\"yResolution\":" << profile.display.yResolution << ","
-      << "\"useResolution\":" << ( profile.display.useResolution ? "true" : "false" )
-      << "},"
-      << "\"cpu\":{"
-      << "\"governor\":\"" << jsonEscape( profile.cpu.governor ) << "\" ,"
-      << "\"energyPerformancePreference\":\"" << jsonEscape( profile.cpu.energyPerformancePreference ) << "\" ,"
-      << "\"noTurbo\":" << ( profile.cpu.noTurbo ? "true" : "false" ) << ","
-      << "\"onlineCores\":" << optionalValueOr( profile.cpu.onlineCores, defaultOnlineCores ) << ","
-      << "\"scalingMinFrequency\":" << optionalValueOr( profile.cpu.scalingMinFrequency, defaultScalingMin ) << ","
-      << "\"scalingMaxFrequency\":" << optionalValueOr( profile.cpu.scalingMaxFrequency, defaultScalingMax )
-      << "},"
-      << "\"webcam\":{"
-      << "\"status\":" << ( profile.webcam.status ? "true" : "false" ) << ","
-      << "\"useStatus\":" << ( profile.webcam.useStatus ? "true" : "false" )
-      << "},"
-      << "\"fan\":{"
-      << "\"useControl\":" << ( profile.fan.useControl ? "true" : "false" ) << ","
-      << "\"fanProfile\":\"" << jsonEscape( profile.fan.fanProfile ) << "\" ,"
-      << "\"autoControlWC\":" << ( profile.fan.autoControlWC ? "true" : "false" ) << ","
-      << "\"enableWaterCooler\":" << ( profile.fan.enableWaterCooler ? "true" : "false" )
-      << "},"
-      << "\"odmProfile\":{"
-      << "\"name\":\"" << jsonEscape( profile.odmProfile.name.value_or( "" ) ) << "\""
-      << "},"
-      << "\"odmPowerLimits\":{"
-      << "\"tdpValues\":[";
+  QVariantMap j;
+  j["id"]          = QString::fromStdString( profile.id );
+  j["name"]        = QString::fromStdString( profile.name );
+  j["editable"]    = editable;
+  j["description"] = QString::fromStdString( profile.description );
 
-  for ( size_t i = 0; i < profile.odmPowerLimits.tdpValues.size(); ++i )
-  {
-    if ( i > 0 )
-      oss << ",";
-    oss << profile.odmPowerLimits.tdpValues[ i ];
-  }
+  QVariantMap display;
+  display["brightness"]    = profile.display.brightness;
+  display["useBrightness"] = profile.display.useBrightness;
+  display["refreshRate"]   = profile.display.refreshRate;
+  display["useRefRate"]    = profile.display.useRefRate;
+  display["xResolution"]   = profile.display.xResolution;
+  display["yResolution"]   = profile.display.yResolution;
+  display["useResolution"] = profile.display.useResolution;
+  j["display"] = display;
 
-  oss << "]}";
+  QVariantMap cpu;
+  cpu["governor"]                    = QString::fromStdString( profile.cpu.governor );
+  cpu["energyPerformancePreference"] = QString::fromStdString( profile.cpu.energyPerformancePreference );
+  cpu["noTurbo"]                     = profile.cpu.noTurbo;
+  cpu["onlineCores"]                 = optionalValueOr( profile.cpu.onlineCores, defaultOnlineCores );
+  cpu["scalingMinFrequency"]         = optionalValueOr( profile.cpu.scalingMinFrequency, defaultScalingMin );
+  cpu["scalingMaxFrequency"]         = optionalValueOr( profile.cpu.scalingMaxFrequency, defaultScalingMax );
+  j["cpu"] = cpu;
 
-  // GPU OC profile — ID reference only
+  QVariantMap webcam;
+  webcam["status"]    = profile.webcam.status;
+  webcam["useStatus"] = profile.webcam.useStatus;
+  j["webcam"] = webcam;
+
+  QVariantMap fan;
+  fan["useControl"]        = profile.fan.useControl;
+  fan["fanProfile"]        = QString::fromStdString( profile.fan.fanProfile );
+  fan["autoControlWC"]     = profile.fan.autoControlWC;
+  fan["enableWaterCooler"] = profile.fan.enableWaterCooler;
+  j["fan"] = fan;
+
+  QVariantMap odmProfile;
+  odmProfile["name"] = QString::fromStdString( profile.odmProfile.name.value_or( "" ) );
+  j["odmProfile"] = odmProfile;
+
+  QVariantList tdpValues;
+  for ( const auto &v : profile.odmPowerLimits.tdpValues )
+    tdpValues.append( v );
+  QVariantMap odmPowerLimits;
+  odmPowerLimits["tdpValues"] = tdpValues;
+  j["odmPowerLimits"] = odmPowerLimits;
+
   if ( !profile.gpuProfileId.empty() )
-  {
-    oss << ",\"gpuProfileId\":\"" << jsonEscape( profile.gpuProfileId ) << "\"";
-  }
-
-  // Keyboard — ID reference only
-  {
-    const std::string &kbRef = profile.keyboard.keyboardProfileId;
-    if ( !kbRef.empty() )
-      oss << ",\"selectedKeyboardProfile\":\"" << jsonEscape( kbRef ) << "\"";
-  }
-
-  // Charging profile (firmware-level mode, per-profile)
+    j["gpuProfileId"] = QString::fromStdString( profile.gpuProfileId );
+  if ( !profile.keyboard.keyboardProfileId.empty() )
+    j["selectedKeyboardProfile"] = QString::fromStdString( profile.keyboard.keyboardProfileId );
   if ( !profile.chargingProfile.empty() )
-  {
-    oss << ",\"chargingProfile\":\"" << jsonEscape( profile.chargingProfile ) << "\"";
-  }
+    j["chargingProfile"] = QString::fromStdString( profile.chargingProfile );
   if ( !profile.chargingPriority.empty() )
-  {
-    oss << ",\"chargingPriority\":\"" << jsonEscape( profile.chargingPriority ) << "\"";
-  }
+    j["chargingPriority"] = QString::fromStdString( profile.chargingPriority );
   if ( !profile.chargeType.empty() )
-  {
-    oss << ",\"chargeType\":\"" << jsonEscape( profile.chargeType ) << "\"";
-  }
+    j["chargeType"] = QString::fromStdString( profile.chargeType );
   if ( profile.chargeStartThreshold >= 0 )
-  {
-    oss << ",\"chargeStartThreshold\":" << profile.chargeStartThreshold;
-  }
+    j["chargeStartThreshold"] = profile.chargeStartThreshold;
   if ( profile.chargeEndThreshold >= 0 )
-  {
-    oss << ",\"chargeEndThreshold\":" << profile.chargeEndThreshold;
-  }
+    j["chargeEndThreshold"] = profile.chargeEndThreshold;
 
-  oss << "}";
-
-  return oss.str();
+  return j;
 }
 
 
-static std::string buildSettingsJSON( const std::string &keyboardBacklightStatesJSON,
-                                      const std::string &chargingProfile,
-                                      const TccSettings &settings )
+static QVariantMap buildSettingsMap( const std::string &keyboardBacklightStatesJSON,
+                                    const std::string &chargingProfile,
+                                    const TccSettings &settings )
 {
-  std::ostringstream oss;
-  oss << "{"
-      << "\"fahrenheit\":" << ( settings.fahrenheit ? "true" : "false" ) << ","
-      << "\"stateMap\":{";
+  QVariantMap m;
+  m["fahrenheit"]    = settings.fahrenheit;
 
-  // Serialize stateMap
-  bool first = true;
-  for ( const auto &[key, value] : settings.stateMap )
-  {
-    if ( !first )
-      oss << ",";
-    first = false;
-    oss << "\"" << jsonEscape( key ) << "\":\"" << jsonEscape( value ) << "\"";
-  }
+  QVariantMap stateMap;
+  for ( const auto &[k, v] : settings.stateMap )
+    stateMap[QString::fromStdString( k )] = QString::fromStdString( v );
+  m["stateMap"] = stateMap;
 
-  oss << "},\"appGpuProfileMap\":{";
+  QVariantMap appGpuMap;
+  for ( const auto &[k, v] : settings.appGpuProfileMap )
+    appGpuMap[QString::fromStdString( k )] = QString::fromStdString( v );
+  m["appGpuProfileMap"] = appGpuMap;
 
-  first = true;
-  for ( const auto &[appKey, profileId] : settings.appGpuProfileMap )
-  {
-    if ( !first )
-      oss << ",";
-    first = false;
-    oss << "\"" << jsonEscape( appKey ) << "\":\"" << jsonEscape( profileId ) << "\"";
-  }
+  m["shutdownTime"]  = settings.shutdownTime.has_value()
+    ? QString::fromStdString( *settings.shutdownTime ) : QString();
+  m["cpuSettingsEnabled"]             = settings.cpuSettingsEnabled;
+  m["fanControlEnabled"]              = settings.fanControlEnabled;
+  m["keyboardBacklightControlEnabled"] = settings.keyboardBacklightControlEnabled;
+  m["ycbcr420Workaround"]             = QVariantList();
+  m["chargingProfile"]                = QString::fromStdString( chargingProfile );
+  m["chargingPriority"]               = settings.chargingPriority.has_value()
+    ? QString::fromStdString( *settings.chargingPriority ) : QString();
 
-  oss << "},"
-      << "\"shutdownTime\":" << ( settings.shutdownTime.has_value() ? "\"" + jsonEscape( *settings.shutdownTime ) + "\"" : "null" ) << ","
-      << "\"cpuSettingsEnabled\":" << ( settings.cpuSettingsEnabled ? "true" : "false" ) << ","
-      << "\"fanControlEnabled\":" << ( settings.fanControlEnabled ? "true" : "false" ) << ","
-      << "\"keyboardBacklightControlEnabled\":" << ( settings.keyboardBacklightControlEnabled ? "true" : "false" ) << ","
-      << "\"ycbcr420Workaround\":[],"
-      << "\"chargingProfile\":\"" << jsonEscape( chargingProfile ) << "\" ,"
-      << "\"chargingPriority\":" << ( settings.chargingPriority.has_value() ? "\"" + jsonEscape( *settings.chargingPriority ) + "\"" : "null" ) << ","
-      << "\"keyboardBacklightStates\":" << keyboardBacklightStatesJSON
-      << "}";
-  return oss.str();
+  QJsonDocument kbDoc = QJsonDocument::fromJson( QByteArray::fromStdString( keyboardBacklightStatesJSON ) );
+  m["keyboardBacklightStates"] = kbDoc.isArray() ? kbDoc.array().toVariantList() : QVariant( QVariantList() );
+
+  return m;
 }
 
 // UccDBusInterfaceAdaptor implementation
@@ -670,10 +586,10 @@ QString UccDBusInterfaceAdaptor::GetDeviceName()
   return QString::fromStdString( m_data.device );
 }
 
-QString UccDBusInterfaceAdaptor::GetSystemInfoJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetSystemInfo()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.systemInfoJSON );
+  return m_data.systemInfo;
 }
 
 bool UccDBusInterfaceAdaptor::IsDeviceSupported()
@@ -681,10 +597,10 @@ bool UccDBusInterfaceAdaptor::IsDeviceSupported()
   return m_data.deviceSupported.load();
 }
 
-QString UccDBusInterfaceAdaptor::GetCapabilitiesJSON()
+QStringList UccDBusInterfaceAdaptor::GetCapabilities()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.capabilitiesJSON );
+  return m_data.capabilities;
 }
 
 QString UccDBusInterfaceAdaptor::GetDisplayModesJSON()
@@ -895,25 +811,25 @@ bool UccDBusInterfaceAdaptor::SetDisplayBrightness( int brightness )
 
 // gpu information methods
 
-QString UccDBusInterfaceAdaptor::GetDGpuInfoValuesJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetDGpuInfoValues()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   resetDataCollectionTimeout();
-  return QString::fromStdString( m_data.dGpuInfoValuesJSON );
+  return m_data.dGpuInfoValues;
 }
 
-QString UccDBusInterfaceAdaptor::GetIGpuInfoValuesJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetIGpuInfoValues()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   resetDataCollectionTimeout();
-  return QString::fromStdString( m_data.iGpuInfoValuesJSON );
+  return m_data.iGpuInfoValues;
 }
 
-QString UccDBusInterfaceAdaptor::GetCpuPowerValuesJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetCpuPowerValues()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   resetDataCollectionTimeout();
-  return QString::fromStdString( m_data.cpuPowerValuesJSON );
+  return m_data.cpuPowerValues;
 }
 
 // graphics methods
@@ -931,10 +847,10 @@ bool UccDBusInterfaceAdaptor::ConsumeModeReapplyPending()
 
 // profile methods
 
-QString UccDBusInterfaceAdaptor::GetActiveProfileJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetActiveProfile()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.activeProfileJSON );
+  return m_data.activeProfile;
 }
 
 QVariantMap UccDBusInterfaceAdaptor::GetAppliedProfiles()
@@ -1162,25 +1078,25 @@ bool UccDBusInterfaceAdaptor::ApplyProfile( const QString &profileJSON )
 
 
 
-QString UccDBusInterfaceAdaptor::GetProfilesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetProfiles()
 {
   // Returns ALL profiles (built-in + custom) with "editable" flag
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.profilesJSON );
+  return m_data.profilesList;
 }
 
-QString UccDBusInterfaceAdaptor::GetCustomProfilesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetCustomProfiles()
 {
   // Backward-compat: returns only editable (custom) profiles
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.customProfilesJSON );
+  return m_data.customProfilesList;
 }
 
-QString UccDBusInterfaceAdaptor::GetDefaultProfilesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetDefaultProfiles()
 {
   // Backward-compat: returns only built-in profiles
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.defaultProfilesJSON );
+  return m_data.defaultProfilesList;
 }
 
 QVariantMap UccDBusInterfaceAdaptor::GetCpuFrequencyLimits()
@@ -1188,10 +1104,10 @@ QVariantMap UccDBusInterfaceAdaptor::GetCpuFrequencyLimits()
   return { { "min", getCpuMinFrequency() }, { "max", getCpuMaxFrequency() } };
 }
 
-QString UccDBusInterfaceAdaptor::GetDefaultValuesProfileJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetDefaultValuesProfile()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.defaultValuesProfileJSON );
+  return m_data.defaultValuesProfile;
 }
 
 // ---------------------------------------------------------------------------
@@ -1570,10 +1486,10 @@ QVariantList UccDBusInterfaceAdaptor::GetHardwareFanDevices()
   return list;
 }
 
-QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
+QVariantList UccDBusInterfaceAdaptor::GetHardwareSensors()
 {
   if ( !m_service )
-    return QStringLiteral( "[]" );
+    return QVariantList();
 
   auto trimCopy = []( const std::string &in ) -> std::string {
     size_t b = 0;
@@ -1959,14 +1875,7 @@ QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
     return "other";
   };
 
-  std::string json = "[";
-  bool first = true;
-
-  auto appendObj = [&]( const std::string &obj ) {
-    if ( !first ) json += ',';
-    json += obj;
-    first = false;
-  };
+  QVariantList arr;
 
   for ( size_t i = 0; i < sensors.size(); ++i )
   {
@@ -1981,48 +1890,46 @@ QString UccDBusInterfaceAdaptor::GetHardwareSensorsJSON()
     else if ( category == "ddr5" )
       displayLabel = buildDdrDisplayLabel( s );
 
-    std::string obj = "{\"id\":\"" + s.id + "\"";
-    obj += ",\"label\":\"" + jsonEscape( s.label ) + "\"";
+    QVariantMap obj;
+    obj["id"]       = QString::fromStdString( s.id );
+    obj["label"]    = QString::fromStdString( s.label );
     if ( !displayLabel.empty() )
-      obj += ",\"displayLabel\":\"" + jsonEscape( displayLabel ) + "\"";
-    obj += ",\"source\":\"" + jsonEscape( s.source ) + "\"";
+      obj["displayLabel"] = QString::fromStdString( displayLabel );
+    obj["source"]   = QString::fromStdString( s.source );
     if ( !sourceDisplay.empty() )
-      obj += ",\"sourceDisplay\":\"" + jsonEscape( sourceDisplay ) + "\"";
-    obj += ",\"category\":\"" + category + "\"";
-    obj += ",\"hwmonPath\":\"" + jsonEscape( s.hwmonPath ) + "\"";
-    obj += ",\"index\":" + std::to_string( s.index );
-    obj += "}";
-    appendObj( obj );
+      obj["sourceDisplay"] = QString::fromStdString( sourceDisplay );
+    obj["category"] = QString::fromStdString( category );
+    obj["hwmonPath"] = QString::fromStdString( s.hwmonPath );
+    obj["index"]    = s.index;
+    arr.append( obj );
   }
 
   // Add iGPU virtual sensor for systems where hwmon doesn't cover integrated GPU.
-  // dGPU temp is provided by NvmlTempProvider as sensor \"gpu-dgpu-temp\".
+  // dGPU temp is provided by NvmlTempProvider as sensor "gpu-dgpu-temp".
   {
     std::lock_guard< std::mutex > lock( m_data.dataMutex );
 
     const QString iGpuModel = QString::fromStdString( m_service->m_systemInfo.iGpuModel ).trimmed();
 
-    auto igpuDoc = QJsonDocument::fromJson( QByteArray::fromStdString( m_data.iGpuInfoValuesJSON ) );
+    const QVariantMap &igpuMap = m_data.iGpuInfoValues;
     if ( !iGpuModel.isEmpty() )
     {
-      const QJsonObject o = igpuDoc.isObject() ? igpuDoc.object() : QJsonObject();
-      const double temp = o.value( QStringLiteral( "temp" ) ).toDouble( -1.0 );
+      const double temp = igpuMap.value( QStringLiteral( "temp" ), -1.0 ).toDouble();
 
-      std::string obj = "{\"id\":\"gpu-igpu-temp\"";
-      obj += ",\"label\":\"Temperature\"";
-      obj += ",\"source\":\"" + jsonEscape( iGpuModel.toStdString() ) + "\"";
-      obj += ",\"category\":\"gpu\"";
-      obj += ",\"hwmonPath\":\"\"";
-      obj += ",\"index\":1";
+      QVariantMap obj;
+      obj["id"]       = QStringLiteral( "gpu-igpu-temp" );
+      obj["label"]    = QStringLiteral( "Temperature" );
+      obj["source"]   = iGpuModel;
+      obj["category"] = QStringLiteral( "gpu" );
+      obj["hwmonPath"] = QString();
+      obj["index"]    = 1;
       if ( temp >= 0.0 )
-        obj += ",\"currentTempC\":" + std::to_string( static_cast< int >( std::lround( temp ) ) );
-      obj += "}";
-      appendObj( obj );
+        obj["currentTempC"] = static_cast< int >( std::lround( temp ) );
+      arr.append( obj );
     }
   }
 
-  json += "]";
-  return QString::fromStdString( json );
+  return arr;
 }
 
 QVariantList UccDBusInterfaceAdaptor::GetFanZones()
@@ -2046,7 +1953,7 @@ QVariantList UccDBusInterfaceAdaptor::GetFanZones()
   return list;
 }
 
-QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
+QVariantMap UccDBusInterfaceAdaptor::GetFanProfile( const QString &id )
 {
   const std::string requestedId = id.toStdString();
 
@@ -2056,17 +1963,17 @@ QString UccDBusInterfaceAdaptor::GetFanProfileJSON( const QString &id )
     for ( const auto &fp : m_service->m_customFanProfiles )
     {
       if ( fp.id == requestedId )
-        return QString::fromStdString( fp.json );
+        return subProfileJsonToMap( fp.json );
     }
 
     for ( const auto &fp : m_service->m_builtinFanProfiles )
     {
       if ( fp.id == requestedId )
-        return QString::fromStdString( fp.json );
+        return subProfileJsonToMap( fp.json );
     }
   }
 
-  return QStringLiteral( "{}" );
+  return {};
 }
 
 bool UccDBusInterfaceAdaptor::SaveFanProfile( const QString &id, const QString &name, const QString &json )
@@ -2149,38 +2056,38 @@ bool UccDBusInterfaceAdaptor::DeleteFanProfile( const QString &id )
 // Unified GPU profile methods (new API)
 // ---------------------------------------------------------------------------
 
-QString UccDBusInterfaceAdaptor::GetGpuProfilesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetGpuProfiles()
 {
-  if ( !m_service ) return QStringLiteral( "[]" );
+  if ( !m_service ) return QVariantList();
 
-  QJsonArray arr;
+  QVariantList list;
 
   // Built-in GPU profiles (editable=false)
   for ( const auto &profile : m_service->m_builtinGpuProfiles )
   {
-    QJsonObject obj;
-    obj[ "id" ] = QString::fromStdString( profile.id );
-    obj[ "name" ] = QString::fromStdString( profile.name );
-    obj[ "editable" ] = false;
-    arr.append( obj );
+    list.append( QVariantMap{
+      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
+      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
+      { QStringLiteral( "editable" ), false }
+    } );
   }
 
   // Custom GPU profiles (editable=true)
   for ( const auto &profile : m_service->m_customGpuProfiles )
   {
-    QJsonObject obj;
-    obj[ "id" ] = QString::fromStdString( profile.id );
-    obj[ "name" ] = QString::fromStdString( profile.name );
-    obj[ "editable" ] = true;
-    arr.append( obj );
+    list.append( QVariantMap{
+      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
+      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
+      { QStringLiteral( "editable" ), true }
+    } );
   }
 
-  return QString::fromUtf8( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  return list;
 }
 
-QString UccDBusInterfaceAdaptor::GetGpuProfileJSON( const QString &id )
+QVariantMap UccDBusInterfaceAdaptor::GetGpuProfile( const QString &id )
 {
-  if ( !m_service ) return QStringLiteral( "{}" );
+  if ( !m_service ) return {};
 
   const std::string requestedId = id.toStdString();
 
@@ -2188,7 +2095,7 @@ QString UccDBusInterfaceAdaptor::GetGpuProfileJSON( const QString &id )
   for ( const auto &profile : m_service->m_customGpuProfiles )
   {
     if ( profile.id == requestedId )
-      return QString::fromStdString( profile.json );
+      return subProfileJsonToMap( profile.json );
   }
 
   // Fall back to built-in GPU profiles
@@ -2198,9 +2105,9 @@ QString UccDBusInterfaceAdaptor::GetGpuProfileJSON( const QString &id )
                             return profile.id == requestedId;
                           } );
   if ( it != m_service->m_builtinGpuProfiles.end() )
-    return QString::fromStdString( it->json );
+    return subProfileJsonToMap( it->json );
 
-  return QStringLiteral( "{}" );
+  return {};
 }
 
 bool UccDBusInterfaceAdaptor::SaveGpuProfile( const QString &id, const QString &name, const QString &json )
@@ -2273,37 +2180,37 @@ bool UccDBusInterfaceAdaptor::DeleteGpuProfile( const QString &id )
 // Unified keyboard profile methods (new API)
 // ---------------------------------------------------------------------------
 
-QString UccDBusInterfaceAdaptor::GetKeyboardProfilesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetKeyboardProfiles()
 {
-  if ( !m_service ) return QStringLiteral( "[]" );
+  if ( !m_service ) return QVariantList();
 
-  QJsonArray arr;
+  QVariantList list;
 
   // Built-in keyboard profiles (editable=false)
   for ( const auto &profile : m_service->m_builtinKeyboardProfiles )
   {
-    QJsonObject obj;
-    obj[ "id" ] = QString::fromStdString( profile.id );
-    obj[ "name" ] = QString::fromStdString( profile.name );
-    obj[ "editable" ] = false;
-    arr.append( obj );
+    list.append( QVariantMap{
+      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
+      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
+      { QStringLiteral( "editable" ), false }
+    } );
   }
 
   // Custom keyboard profiles (editable=true)
   for ( const auto &profile : m_service->m_customKeyboardProfiles )
   {
-    QJsonObject obj;
-    obj[ "id" ] = QString::fromStdString( profile.id );
-    obj[ "name" ] = QString::fromStdString( profile.name );
-    obj[ "editable" ] = true;
-    arr.append( obj );
+    list.append( QVariantMap{
+      { QStringLiteral( "id" ),       QString::fromStdString( profile.id ) },
+      { QStringLiteral( "name" ),     QString::fromStdString( profile.name ) },
+      { QStringLiteral( "editable" ), true }
+    } );
   }
-  return QString::fromUtf8( QJsonDocument( arr ).toJson( QJsonDocument::Compact ) );
+  return list;
 }
 
-QString UccDBusInterfaceAdaptor::GetKeyboardProfileJSON( const QString &id )
+QVariantMap UccDBusInterfaceAdaptor::GetKeyboardProfile( const QString &id )
 {
-  if ( !m_service ) return QStringLiteral( "{}" );
+  if ( !m_service ) return {};
 
   const std::string requestedId = id.toStdString();
 
@@ -2311,17 +2218,17 @@ QString UccDBusInterfaceAdaptor::GetKeyboardProfileJSON( const QString &id )
   for ( const auto &profile : m_service->m_customKeyboardProfiles )
   {
     if ( profile.id == requestedId )
-      return QString::fromStdString( profile.json );
+      return subProfileJsonToMap( profile.json );
   }
 
   // Fall back to built-in keyboard profiles
   for ( const auto &profile : m_service->m_builtinKeyboardProfiles )
   {
     if ( profile.id == requestedId )
-      return QString::fromStdString( profile.json );
+      return subProfileJsonToMap( profile.json );
   }
 
-  return QStringLiteral( "{}" );
+  return {};
 }
 
 bool UccDBusInterfaceAdaptor::SaveKeyboardProfile( const QString &id, const QString &name, const QString &json )
@@ -2391,30 +2298,6 @@ bool UccDBusInterfaceAdaptor::DeleteKeyboardProfile( const QString &id )
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Backward-compatible fan/GPU aliases (deprecated)
-// ---------------------------------------------------------------------------
-
-QString UccDBusInterfaceAdaptor::GetFanProfile( const QString &name )
-{
-  return GetFanProfileJSON( name );
-}
-
-QString UccDBusInterfaceAdaptor::GetFanProfileNames()
-{
-  return QString::fromUtf8( QJsonDocument( QJsonArray::fromVariantList( GetFanProfiles() ) ).toJson( QJsonDocument::Compact ) );
-}
-
-QString UccDBusInterfaceAdaptor::GetGpuProfile( const QString &id )
-{
-  return GetGpuProfileJSON( id );
-}
-
-QString UccDBusInterfaceAdaptor::GetGpuProfileNames()
-{
-  return GetGpuProfilesJSON();
-}
-
 bool UccDBusInterfaceAdaptor::SetFanProfile( const QString & /*name*/, const QString & /*json*/ )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
@@ -2424,10 +2307,10 @@ bool UccDBusInterfaceAdaptor::SetFanProfile( const QString & /*name*/, const QSt
 
 // settings methods
 
-QString UccDBusInterfaceAdaptor::GetSettingsJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetSettings()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.settingsJSON );
+  return m_data.settingsMap;
 }
 
 QString UccDBusInterfaceAdaptor::GetPowerState()
@@ -2620,10 +2503,10 @@ QVariantList UccDBusInterfaceAdaptor::ODMPowerLimits()
 
 // keyboard backlight methods
 
-QString UccDBusInterfaceAdaptor::GetKeyboardBacklightCapabilitiesJSON()
+QVariantMap UccDBusInterfaceAdaptor::GetKeyboardBacklightCapabilities()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.keyboardBacklightCapabilitiesJSON );
+  return m_data.keyboardBacklightCapabilities;
 }
 
 QString UccDBusInterfaceAdaptor::GetKeyboardBacklightStatesJSON()
@@ -2696,10 +2579,10 @@ bool UccDBusInterfaceAdaptor::GetFansOffAvailable()
 
 // charging methods (stubs for now)
 
-QString UccDBusInterfaceAdaptor::GetChargingProfilesAvailable()
+QStringList UccDBusInterfaceAdaptor::GetChargingProfilesAvailable()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.chargingProfilesAvailable );
+  return m_data.chargingProfilesAvailable;
 }
 
 QString UccDBusInterfaceAdaptor::GetCurrentChargingProfile()
@@ -2722,10 +2605,10 @@ bool UccDBusInterfaceAdaptor::SetChargingProfile( const QString &profileDescript
   return result;
 }
 
-QString UccDBusInterfaceAdaptor::GetChargingPrioritiesAvailable()
+QStringList UccDBusInterfaceAdaptor::GetChargingPrioritiesAvailable()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.chargingPrioritiesAvailable );
+  return m_data.chargingPrioritiesAvailable;
 }
 
 QString UccDBusInterfaceAdaptor::GetCurrentChargingPriority()
@@ -2748,16 +2631,16 @@ bool UccDBusInterfaceAdaptor::SetChargingPriority( const QString &priorityDescri
   return result;
 }
 
-QString UccDBusInterfaceAdaptor::GetChargeStartAvailableThresholds()
+QVariantList UccDBusInterfaceAdaptor::GetChargeStartAvailableThresholds()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.chargeStartAvailableThresholds );
+  return m_data.chargeStartAvailableThresholds;
 }
 
-QString UccDBusInterfaceAdaptor::GetChargeEndAvailableThresholds()
+QVariantList UccDBusInterfaceAdaptor::GetChargeEndAvailableThresholds()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
-  return QString::fromStdString( m_data.chargeEndAvailableThresholds );
+  return m_data.chargeEndAvailableThresholds;
 }
 
 int UccDBusInterfaceAdaptor::GetChargeStartThreshold()
@@ -2958,44 +2841,38 @@ bool UccDBusInterfaceAdaptor::SetNVIDIAPowerOffset( int offset )
   return m_service->m_profileSettingsWorker->applyNVIDIAPowerOffset( offset );
 }
 
-QString UccDBusInterfaceAdaptor::GetAvailableGovernors()
+QStringList UccDBusInterfaceAdaptor::GetAvailableGovernors()
 {
   if ( m_service && m_service->getCpuWorker() )
   {
     auto governors = m_service->getCpuWorker()->getAvailableGovernors();
     if ( governors )
     {
-      std::string json = "[";
-      for ( size_t i = 0; i < governors->size(); ++i )
-      {
-        if ( i > 0 ) json += ",";
-        json += "\"" + (*governors)[i] + "\"";
-      }
-      json += "]";
-      return QString::fromStdString( json );
+      QStringList result;
+      result.reserve( static_cast< int >( governors->size() ) );
+      for ( const auto &g : *governors )
+        result.append( QString::fromStdString( g ) );
+      return result;
     }
   }
-  return QStringLiteral("[]");
+  return {};
 }
 
-QString UccDBusInterfaceAdaptor::GetAvailableEPPs()
+QStringList UccDBusInterfaceAdaptor::GetAvailableEPPs()
 {
   if ( m_service && m_service->getCpuWorker() )
   {
     auto epps = m_service->getCpuWorker()->getAvailableEPPs();
     if ( epps )
     {
-      std::string json = "[";
-      for ( size_t i = 0; i < epps->size(); ++i )
-      {
-        if ( i > 0 ) json += ",";
-        json += "\"" + (*epps)[i] + "\"";
-      }
-      json += "]";
-      return QString::fromStdString( json );
+      QStringList result;
+      result.reserve( static_cast< int >( epps->size() ) );
+      for ( const auto &e : *epps )
+        result.append( QString::fromStdString( e ) );
+      return result;
     }
   }
-  return QStringLiteral("[]");
+  return {};
 }
 
 int UccDBusInterfaceAdaptor::GetCpuCoreCount()
@@ -3191,25 +3068,24 @@ int UccDBusInterfaceAdaptor::GetMonitorHistoryHorizon()
   return m_service ? m_service->m_metricsStore.horizonSeconds() : 0;
 }
 
-QString UccDBusInterfaceAdaptor::GetMonitorSourcesJSON()
+QVariantList UccDBusInterfaceAdaptor::GetMonitorSources()
 {
   if ( !m_service )
-    return QStringLiteral( "[]" );
+    return QVariantList();
 
-  // Build a JSON array of all available monitoring sources.
+  // Build a list of all available monitoring sources.
   // Each entry: { "key": "<store-key>", "label": "<human>", "group": "<type>", "unit": "<unit>" }
-  std::string json = "[";
-  bool first = true;
+  QVariantList list;
 
   auto append = [&]( const std::string &key, const std::string &label,
                      const char *group, const char *unit )
   {
-    if ( !first ) json += ',';
-    first = false;
-    json += "{\"key\":\"" + key + "\""
-          + ",\"label\":\"" + label + "\""
-          + ",\"group\":\"" + group + "\""
-          + ",\"unit\":\"" + unit + "\"}";
+    list.append( QVariantMap{
+      { QStringLiteral( "key" ),   QString::fromStdString( key ) },
+      { QStringLiteral( "label" ), QString::fromStdString( label ) },
+      { QStringLiteral( "group" ), QString::fromLatin1( group ) },
+      { QStringLiteral( "unit" ),  QString::fromUtf8( unit ) }
+    } );
   };
 
   // Temperature sensors
@@ -3254,8 +3130,7 @@ QString UccDBusInterfaceAdaptor::GetMonitorSourcesJSON()
   append( "gpuCoreVoltage",   "dGPU Core Voltage", "legacy", "mV" );
   append( "fps",              "FPS",               "legacy", "fps" );
 
-  json += "]";
-  return QString::fromStdString( json );
+  return list;
 }
 
 int UccDBusInterfaceAdaptor::GetCpuFrequencyMHz()
@@ -3331,12 +3206,11 @@ bool UccDBusInterfaceAdaptor::GetNvidiaOCAvailable()
   return m_service && m_service->m_nvidiaOCWorker && m_service->m_nvidiaOCWorker->isAvailable();
 }
 
-QString UccDBusInterfaceAdaptor::GetNvidiaOCState( int deviceIndex )
+QVariantMap UccDBusInterfaceAdaptor::GetNvidiaOCState( int deviceIndex )
 {
   if ( !m_service || !m_service->m_nvidiaOCWorker )
-    return QStringLiteral( "{}" );
-  return QString::fromStdString(
-      m_service->m_nvidiaOCWorker->getOCStateJSON( static_cast< unsigned int >( deviceIndex ) ) );
+    return {};
+  return m_service->m_nvidiaOCWorker->getOCState( static_cast< unsigned int >( deviceIndex ) );
 }
 
 bool UccDBusInterfaceAdaptor::SetNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz )
@@ -3874,23 +3748,23 @@ UccDBusService::UccDBusService()
 
   // detect system hardware info (CPU, GPU, laptop model)
   m_systemInfo = detectSystemInfo( m_deviceId );
-  m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
+  m_dbusData.systemInfo = m_systemInfo.toVariantMap();
 
   // Hardware support is determined dynamically by the HAL provider registry.
   // After m_hw.detect() completes, m_hw.capabilities() tells us exactly what
-  // this machine can do.  Clients query GetCapabilitiesJSON() to adapt their
+  // this machine can do.  Clients query GetCapabilities() to adapt their
   // UI.  The old SKU-whitelist gate is gone — we always continue startup.
 
   // detect display session type and initialize display modes
   initializeDisplayModes();
 
-  // set default system JSON values (sentinels for GPU/CPU monitoring data)
+  // set default system values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
-  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"vramFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999,\"coreVoltageMv\":-1,\"fanSpeedPct\":-1}";
-  m_dbusData.iGpuInfoValuesJSON = "{\"vendor\":\"unknown\",\"temp\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"powerDraw\":-1}";
+  m_dbusData.dGpuInfoValues = dgpuInfoToVariantMap( DGpuInfo{} );
+  m_dbusData.iGpuInfoValues = igpuInfoToVariantMap( IGpuInfo{} );
 
   // Keyboard backlight will be detected during worker initialization
-  m_dbusData.keyboardBacklightCapabilitiesJSON = "null";
+  m_dbusData.keyboardBacklightCapabilities = QVariantMap();
   m_dbusData.keyboardBacklightStatesJSON = "[]";
 
   // Read all hardware capabilities directly using m_io / sysfs BEFORE any
@@ -3944,7 +3818,34 @@ UccDBusService::UccDBusService()
   readHardwareCapabilities();
 
   // Publish capabilities for D-Bus clients
-  m_dbusData.capabilitiesJSON = ucc::hal::capabilitiesToJSON( m_hw.capabilities() );
+  {
+    using ucc::hal::HwCapability;
+    using ucc::hal::hasCapability;
+    const auto caps = m_hw.capabilities();
+    QStringList capList;
+    auto check = [&]( HwCapability flag, const char *name ) {
+      if ( hasCapability( caps, flag ) )
+        capList.append( QString::fromUtf8( name ) );
+    };
+    check( HwCapability::FanMonitoring,       "fanMonitoring" );
+    check( HwCapability::FanControl,          "fanControl" );
+    check( HwCapability::TempMonitoring,      "tempMonitoring" );
+    check( HwCapability::CpuFreqControl,      "cpuFreqControl" );
+    check( HwCapability::CpuTdpControl,       "cpuTdpControl" );
+    check( HwCapability::GpuMonitoring,       "gpuMonitoring" );
+    check( HwCapability::GpuOverclock,        "gpuOverclock" );
+    check( HwCapability::KeyboardBacklight,   "keyboardBacklight" );
+    check( HwCapability::WebcamSwitch,        "webcamSwitch" );
+    check( HwCapability::ChargingControl,     "chargingControl" );
+    check( HwCapability::FnLock,              "fnLock" );
+    check( HwCapability::DisplayControl,      "displayControl" );
+    check( HwCapability::PowerSupply,         "powerSupply" );
+    check( HwCapability::OdmProfiles,         "odmProfiles" );
+    check( HwCapability::PlatformLeds,        "platformLeds" );
+    check( HwCapability::WaterCooler,         "waterCooler" );
+    check( HwCapability::MultiplePowerStates, "multiplePowerStates" );
+    m_dbusData.capabilities = capList;
+  }
   m_dbusData.deviceSupported = ( m_hw.capabilities() != ucc::hal::HwCapability::None );
   m_dbusData.tuxedoWmiAvailable = ( m_hw.platformProvider() != nullptr );
 
@@ -3973,9 +3874,9 @@ UccDBusService::UccDBusService()
   loadSettings();
 
   // Now build settings JSON with actual stateMap
-  m_dbusData.settingsJSON = buildSettingsJSON( m_dbusData.keyboardBacklightStatesJSON,
-                                               m_dbusData.currentChargingProfile,
-                                               m_settings );
+  m_dbusData.settingsMap = buildSettingsMap( m_dbusData.keyboardBacklightStatesJSON,
+                                              m_dbusData.currentChargingProfile,
+                                              m_settings );
 
   // Load autosave
   loadAutosave();
@@ -4035,10 +3936,10 @@ UccDBusService::UccDBusService()
 
   m_hardwareMonitorWorker = std::make_unique< HardwareMonitorWorker >(
     m_nvml,
-    [this]( const std::string &json, double cpuPowerWatts ) {
+    [this]( const QVariantMap &cpuPowerMap, double cpuPowerWatts ) {
       {
         std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-        m_dbusData.cpuPowerValuesJSON = json;
+        m_dbusData.cpuPowerValues = cpuPowerMap;
       }
       // Push CPU power to history store
       if ( cpuPowerWatts > -1.0 )
@@ -4116,8 +4017,22 @@ UccDBusService::UccDBusService()
 
   // Initialize keyboard backlight controller (synchronous — no worker thread)
   {
-    std::string capsJSON = m_keyboardBacklightController.init();
-    m_dbusData.keyboardBacklightCapabilitiesJSON = capsJSON;
+    m_keyboardBacklightController.init();
+    const auto &caps = m_keyboardBacklightController.capabilities();
+    if ( caps.zones > 0 )
+    {
+      QVariantMap capsMap;
+      capsMap["modes"] = QVariantList{ 0 };
+      capsMap["zones"] = caps.zones;
+      capsMap["maxBrightness"] = caps.maxBrightness;
+      if ( caps.maxRed > 0 )
+      {
+        capsMap["maxRed"] = caps.maxRed;
+        capsMap["maxGreen"] = caps.maxGreen;
+        capsMap["maxBlue"] = caps.maxBlue;
+      }
+      m_dbusData.keyboardBacklightCapabilities = capsMap;
+    }
 
     if ( m_keyboardBacklightController.isAvailable() )
     {
@@ -4398,12 +4313,11 @@ void UccDBusService::rebuildBuiltinGpuProfiles()
   if ( !m_nvidiaOCWorker || !m_nvidiaOCWorker->isAvailable() )
     return;
 
-  const std::string ocStateJson = m_nvidiaOCWorker->getOCStateJSON( 0 );
-  QJsonDocument stateDoc = QJsonDocument::fromJson( QByteArray::fromStdString( ocStateJson ) );
-  if ( !stateDoc.isObject() )
+  const QVariantMap ocState = m_nvidiaOCWorker->getOCState( 0 );
+  if ( ocState.isEmpty() )
     return;
 
-  const QJsonObject state = stateDoc.object();
+  const QJsonObject state = QJsonObject::fromVariantMap( ocState );
   QJsonObject profile;
 
   QJsonArray offsets;
@@ -4548,22 +4462,17 @@ void UccDBusService::readHardwareCapabilities()
       auto profiles = SysfsNode< std::vector< std::string > >( CHARGING_PROFILES_AVAILABLE_PATH, " " ).read();
       if ( profiles.has_value() and not profiles->empty() )
       {
-        std::ostringstream oss;
-        oss << "[";
-        for ( size_t i = 0; i < profiles->size(); ++i )
-        {
-          if ( i > 0 ) oss << ",";
-          oss << "\"" << ( *profiles )[ i ] << "\"";
-        }
-        oss << "]";
-        m_dbusData.chargingProfilesAvailable = oss.str();
+        QStringList profileList;
+        for ( const auto &p : *profiles )
+          profileList.append( QString::fromStdString( p ) );
+        m_dbusData.chargingProfilesAvailable = profileList;
 
         auto current = SysfsNode< std::string >( CHARGING_PROFILE_PATH ).read();
         if ( current.has_value() )
           m_dbusData.currentChargingProfile = *current;
 
         syslog( LOG_INFO, "[uccd] Charging profiles: %s, current: %s",
-                m_dbusData.chargingProfilesAvailable.c_str(),
+                profileList.join( ", " ).toStdString().c_str(),
                 m_dbusData.currentChargingProfile.c_str() );
       }
     }
@@ -4575,15 +4484,10 @@ void UccDBusService::readHardwareCapabilities()
       auto prios = SysfsNode< std::vector< std::string > >( CHARGING_PRIORITIES_AVAILABLE_PATH, " " ).read();
       if ( prios.has_value() and not prios->empty() )
       {
-        std::ostringstream oss;
-        oss << "[";
-        for ( size_t i = 0; i < prios->size(); ++i )
-        {
-          if ( i > 0 ) oss << ",";
-          oss << "\"" << ( *prios )[ i ] << "\"";
-        }
-        oss << "]";
-        m_dbusData.chargingPrioritiesAvailable = oss.str();
+        QStringList prioList;
+        for ( const auto &p : *prios )
+          prioList.append( QString::fromStdString( p ) );
+        m_dbusData.chargingPrioritiesAvailable = prioList;
 
         auto current = SysfsNode< std::string >( CHARGING_PRIORITY_PATH ).read();
         if ( current.has_value() )
@@ -4619,28 +4523,18 @@ void UccDBusService::readHardwareCapabilities()
 
       if ( !startThresholds.empty() )
       {
-        std::ostringstream oss;
-        oss << "[";
-        for ( size_t i = 0; i < startThresholds.size(); ++i )
-        {
-          if ( i > 0 ) oss << ",";
-          oss << startThresholds[ i ];
-        }
-        oss << "]";
-        m_dbusData.chargeStartAvailableThresholds = oss.str();
+        QVariantList list;
+        for ( const auto &t : startThresholds )
+          list.append( t );
+        m_dbusData.chargeStartAvailableThresholds = list;
       }
 
       if ( !endThresholds.empty() )
       {
-        std::ostringstream oss;
-        oss << "[";
-        for ( size_t i = 0; i < endThresholds.size(); ++i )
-        {
-          if ( i > 0 ) oss << ",";
-          oss << endThresholds[ i ];
-        }
-        oss << "]";
-        m_dbusData.chargeEndAvailableThresholds = oss.str();
+        QVariantList list;
+        for ( const auto &t : endThresholds )
+          list.append( t );
+        m_dbusData.chargeEndAvailableThresholds = list;
       }
     }
   }
@@ -4671,9 +4565,9 @@ void UccDBusService::readHardwareCapabilities()
   }
 
   // Rebuild settings JSON with real charging data
-  m_dbusData.settingsJSON = buildSettingsJSON( m_dbusData.keyboardBacklightStatesJSON,
-                                               m_dbusData.currentChargingProfile,
-                                               m_settings );
+  m_dbusData.settingsMap = buildSettingsMap( m_dbusData.keyboardBacklightStatesJSON,
+                                              m_dbusData.currentChargingProfile,
+                                              m_settings );
 }
 
 void UccDBusService::setupGpuDataCallback()
@@ -4688,9 +4582,9 @@ void UccDBusService::setupGpuDataCallback()
 
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
 
-      // Convert GPU structures to JSON and update DBus data
-      m_dbusData.iGpuInfoValuesJSON = igpuInfoToJSON( iGpuInfo );
-      m_dbusData.dGpuInfoValuesJSON = dgpuInfoToJSON( dGpuInfo );
+      // Convert GPU structures and update DBus data
+      m_dbusData.iGpuInfoValues = igpuInfoToVariantMap( iGpuInfo );
+      m_dbusData.dGpuInfoValues = dgpuInfoToVariantMap( dGpuInfo );
 
       // Push GPU metrics to history store (outside dataMutex — store has its own lock)
       const auto now = std::chrono::duration_cast< std::chrono::milliseconds >(
@@ -5492,65 +5386,29 @@ void UccDBusService::initializeProfiles()
 
   UccProfile baseCustomProfile = m_profileManager.getDefaultCustomProfiles()[0];
 
-  // serialize all profiles to JSON
-  std::ostringstream allProfilesJSON;
-  allProfilesJSON << "[";
-
+  // Build QVariantList for all profiles
+  QVariantList allProfilesList;
   auto allProfiles = getAllProfiles();
-  for ( size_t i = 0; i < allProfiles.size(); ++i )
-  {
-    if ( i > 0 )
-      allProfilesJSON << ",";
+  for ( const auto &profile : allProfiles )
+    allProfilesList.append( profileToVariantMap( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax ) );
 
-    allProfilesJSON << profileToJSON( allProfiles[ i ],
-                      defaultOnlineCores,
-                      defaultScalingMin,
-                      defaultScalingMax );
-  }
-  allProfilesJSON << "]";
-
-  std::ostringstream defaultProfilesJSON;
-  defaultProfilesJSON << "[";
-  for ( size_t i = 0; i < m_defaultProfiles.size(); ++i )
-  {
-    if ( i > 0 )
-      defaultProfilesJSON << ",";
-
-    defaultProfilesJSON << profileToJSON( m_defaultProfiles[ i ],
-                        defaultOnlineCores,
-                        defaultScalingMin,
-                        defaultScalingMax );
-  }
-  defaultProfilesJSON << "]";
-
-  std::ostringstream customProfilesJSON;
-  customProfilesJSON << "[";
-  for ( size_t i = 0; i < m_customProfiles.size(); ++i )
-  {
-    if ( i > 0 )
-      customProfilesJSON << ",";
-
-    customProfilesJSON << profileToJSON( m_customProfiles[ i ],
-                       defaultOnlineCores,
-                       defaultScalingMin,
-                       defaultScalingMax );
-  }
-  customProfilesJSON << "]";
+  // Default-only list (backward compat)
+  QVariantList defaultProfilesList;
+  for ( const auto &profile : m_defaultProfiles )
+    defaultProfilesList.append( profileToVariantMap( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, false ) );
 
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-  m_dbusData.profilesJSON = defaultProfilesJSON.str();  // Only default profiles now
-  m_dbusData.defaultProfilesJSON = defaultProfilesJSON.str();
-  m_dbusData.customProfilesJSON = "[]";  // Empty array since custom profiles are local
-  m_dbusData.defaultValuesProfileJSON = profileToJSON( baseCustomProfile,
-                                                       defaultOnlineCores,
-                                                       defaultScalingMin,
-                                                       defaultScalingMax );
+  m_dbusData.profilesList = allProfilesList;  // Only default profiles at init
+  m_dbusData.defaultProfilesList = defaultProfilesList;
+  m_dbusData.customProfilesList = QVariantList();  // Empty — custom profiles are local
+  m_dbusData.defaultValuesProfile = profileToVariantMap( baseCustomProfile,
+                                                         defaultOnlineCores,
+                                                         defaultScalingMin,
+                                                         defaultScalingMax );
 
-  std::cout << "[DBus] Updated profile JSONs:" << std::endl;
-  std::cout << "[DBus]   customProfilesJSON: " << m_dbusData.customProfilesJSON.length() << " bytes, "
-            << m_customProfiles.size() << " profiles" << std::endl;
-  std::cout << "[DBus]   defaultProfilesJSON: " << m_dbusData.defaultProfilesJSON.length() << " bytes, "
-            << m_defaultProfiles.size() << " profiles" << std::endl;
+  std::cout << "[DBus] Initialized profile data:" << std::endl;
+  std::cout << "[DBus]   profiles: " << allProfilesList.size() << " entries" << std::endl;
+  std::cout << "[DBus]   defaultProfiles: " << defaultProfilesList.size() << " entries" << std::endl;
 
 }
 
@@ -5620,7 +5478,7 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
         readHardwareCapabilities();
 
         // Apply charging profile if the profile specifies one
-        if ( !profile.chargingProfile.empty() && m_dbusData.chargingProfilesAvailable != "[]" )
+        if ( !profile.chargingProfile.empty() && !m_dbusData.chargingProfilesAvailable.isEmpty() )
         {
           std::cout << "[Profile] Applying charging profile '" << profile.chargingProfile << "'" << std::endl;
           if ( m_profileSettingsWorker->applyChargingProfile( profile.chargingProfile ) )
@@ -5631,7 +5489,7 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
         }
 
         // Apply charging priority if the profile specifies one
-        if ( !profile.chargingPriority.empty() && m_dbusData.chargingPrioritiesAvailable != "[]" )
+        if ( !profile.chargingPriority.empty() && !m_dbusData.chargingPrioritiesAvailable.isEmpty() )
         {
           std::cout << "[Profile] Applying charging priority '" << profile.chargingPriority << "'" << std::endl;
           if ( m_profileSettingsWorker->applyChargingPriority( profile.chargingPriority ) )
@@ -5799,7 +5657,7 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
       readHardwareCapabilities();
 
       // Apply charging profile if the profile specifies one
-      if ( !profile.chargingProfile.empty() && m_dbusData.chargingProfilesAvailable != "[]" )
+      if ( !profile.chargingProfile.empty() && !m_dbusData.chargingProfilesAvailable.isEmpty() )
       {
         std::cout << "[Profile] Applying charging profile '" << profile.chargingProfile << "'" << std::endl;
         if ( m_profileSettingsWorker->applyChargingProfile( profile.chargingProfile ) )
@@ -5810,7 +5668,7 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
       }
 
       // Apply charging priority if the profile specifies one
-      if ( !profile.chargingPriority.empty() && m_dbusData.chargingPrioritiesAvailable != "[]" )
+      if ( !profile.chargingPriority.empty() && !m_dbusData.chargingPrioritiesAvailable.isEmpty() )
       {
         std::cout << "[Profile] Applying charging priority '" << profile.chargingPriority << "'" << std::endl;
         if ( m_profileSettingsWorker->applyChargingPriority( profile.chargingPriority ) )
@@ -5916,20 +5774,20 @@ void UccDBusService::updateDBusActiveProfileData()
   const int32_t defaultScalingMin = -1;
   const int32_t defaultScalingMax = -1;
 
-  std::string profileJSON = profileToJSON( m_activeProfile,
-                                           defaultOnlineCores,
-                                           defaultScalingMin,
-                                           defaultScalingMax );
+  QVariantMap profile = profileToVariantMap( m_activeProfile,
+                                             defaultOnlineCores,
+                                             defaultScalingMin,
+                                             defaultScalingMax );
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-  m_dbusData.activeProfileJSON = profileJSON;
+  m_dbusData.activeProfile = std::move( profile );
 }
 
 void UccDBusService::updateDBusSettingsData()
 {
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-  m_dbusData.settingsJSON = buildSettingsJSON( m_dbusData.keyboardBacklightStatesJSON,
-                                               m_dbusData.currentChargingProfile,
-                                               m_settings );
+  m_dbusData.settingsMap = buildSettingsMap( m_dbusData.keyboardBacklightStatesJSON,
+                                             m_dbusData.currentChargingProfile,
+                                             m_settings );
 }
 
 bool UccDBusService::addCustomProfile( const UccProfile &profile )
@@ -7004,57 +6862,32 @@ void UccDBusService::serializeProfilesJSON()
 
   UccProfile defaultProfile = m_profileManager.getDefaultCustomProfiles()[0];
 
-  // Serialize all profiles — built-in (editable=false) + custom (editable=true)
-  std::ostringstream allProfilesJSON;
-  allProfilesJSON << "[";
-
-  size_t allIdx = 0;
-  // Built-in profiles (not editable)
+  // Build QVariantList for profilesList (all profiles) and customProfilesList
+  QVariantList allProfilesList;
   for ( const auto &profile : m_defaultProfiles )
-  {
-    if ( allIdx > 0 ) allProfilesJSON << ",";
-    allProfilesJSON << profileToJSON( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, false );
-    ++allIdx;
-  }
-  // Custom profiles (editable)
+    allProfilesList.append( profileToVariantMap( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, false ) );
   for ( const auto &profile : m_customProfiles )
-  {
-    if ( allIdx > 0 ) allProfilesJSON << ",";
-    allProfilesJSON << profileToJSON( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, true );
-    ++allIdx;
-  }
-  allProfilesJSON << "]";
+    allProfilesList.append( profileToVariantMap( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, true ) );
+
+  QVariantList customList;
+  for ( const auto &profile : m_customProfiles )
+    customList.append( profileToVariantMap( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, true ) );
 
   // Default-only list (backward compat)
-  std::ostringstream defaultProfilesJSON;
-  defaultProfilesJSON << "[";
-  for ( size_t i = 0; i < m_defaultProfiles.size(); ++i )
-  {
-    if ( i > 0 ) defaultProfilesJSON << ",";
-    defaultProfilesJSON << profileToJSON( m_defaultProfiles[i], defaultOnlineCores, defaultScalingMin, defaultScalingMax, false );
-  }
-  defaultProfilesJSON << "]";
-
-  // Custom-only list (backward compat)
-  std::ostringstream customProfilesJSON;
-  customProfilesJSON << "[";
-  for ( size_t i = 0; i < m_customProfiles.size(); ++i )
-  {
-    if ( i > 0 ) customProfilesJSON << ",";
-    customProfilesJSON << profileToJSON( m_customProfiles[i], defaultOnlineCores, defaultScalingMin, defaultScalingMax, true );
-  }
-  customProfilesJSON << "]";
+  QVariantList defaultProfilesList;
+  for ( const auto &profile : m_defaultProfiles )
+    defaultProfilesList.append( profileToVariantMap( profile, defaultOnlineCores, defaultScalingMin, defaultScalingMax, false ) );
 
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-  m_dbusData.profilesJSON = allProfilesJSON.str();
-  m_dbusData.defaultProfilesJSON = defaultProfilesJSON.str();
-  m_dbusData.customProfilesJSON = customProfilesJSON.str();
-  m_dbusData.defaultValuesProfileJSON = profileToJSON( defaultProfile,
-                                                       defaultOnlineCores,
-                                                       defaultScalingMin,
-                                                       defaultScalingMax );
+  m_dbusData.profilesList = allProfilesList;
+  m_dbusData.defaultProfilesList = defaultProfilesList;
+  m_dbusData.customProfilesList = customList;
+  m_dbusData.defaultValuesProfile = profileToVariantMap( defaultProfile,
+                                                         defaultOnlineCores,
+                                                         defaultScalingMin,
+                                                         defaultScalingMax );
 
-  std::cout << "[DBus] Re-serialized profile JSONs (built-in=" << m_defaultProfiles.size()
+  std::cout << "[DBus] Re-serialized profile data (built-in=" << m_defaultProfiles.size()
             << " custom=" << m_customProfiles.size() << ")" << std::endl;
 }
 

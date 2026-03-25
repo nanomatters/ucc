@@ -62,10 +62,6 @@
 class HardwareMonitorWorker;
 class UccDBusService;
 
-// helper functions for JSON serialization
-std::string dgpuInfoToJSON( const DGpuInfo &info );
-std::string igpuInfoToJSON( const IGpuInfo &info );
-
 /**
  * @brief Time-stamped data structure
  *
@@ -116,35 +112,35 @@ public:
   std::atomic< bool > tuxedoWmiAvailable;
   std::atomic< bool > fanHwmonAvailable;
   std::string uccdVersion;
-  std::string systemInfoJSON;
+  QVariantMap systemInfo;
   std::vector< FanData > fans;
   std::atomic< bool > webcamSwitchAvailable;
   std::atomic< bool > webcamSwitchStatus;
   std::atomic< bool > forceYUV420OutputSwitchAvailable;
-  std::string dGpuInfoValuesJSON;
-  std::string iGpuInfoValuesJSON;
-  std::string cpuPowerValuesJSON;
+  QVariantMap dGpuInfoValues;
+  QVariantMap iGpuInfoValues;
+  QVariantMap cpuPowerValues;
   std::string primeState;
   std::atomic< bool > modeReapplyPending;
   std::string tempProfileName;
   std::string tempProfileId;
-  std::string activeProfileJSON;
-  std::string profilesJSON;
-  std::string customProfilesJSON;
-  std::string defaultProfilesJSON;
-  std::string defaultValuesProfileJSON;
-  std::string settingsJSON;
+  QVariantMap activeProfile;
+  QVariantList profilesList;
+  QVariantList customProfilesList;
+  QVariantList defaultProfilesList;
+  QVariantMap defaultValuesProfile;
+  QVariantMap settingsMap;
   std::vector< std::string > odmProfilesAvailable;
-  std::string keyboardBacklightCapabilitiesJSON;
+  QVariantMap keyboardBacklightCapabilities;
   std::string keyboardBacklightStatesJSON;
   std::atomic< int32_t > fansMinSpeed;
   std::atomic< bool > fansOffAvailable;
-  std::string chargingProfilesAvailable;
+  QStringList chargingProfilesAvailable;
   std::string currentChargingProfile;
-  std::string chargingPrioritiesAvailable;
+  QStringList chargingPrioritiesAvailable;
   std::string currentChargingPriority;
-  std::string chargeStartAvailableThresholds;
-  std::string chargeEndAvailableThresholds;
+  QVariantList chargeStartAvailableThresholds;
+  QVariantList chargeEndAvailableThresholds;
   std::atomic< int32_t > chargeStartThreshold;
   std::atomic< int32_t > chargeEndThreshold;
   std::string chargeType;
@@ -163,7 +159,7 @@ public:
   std::atomic< bool > cTGPAdjustmentSupported;
   std::atomic< bool > deviceSupported{ false };
   std::atomic< int32_t > cpuFrequencyMHz;
-  std::string capabilitiesJSON{ "[]" };   // HAL capability flags as JSON array
+  QStringList capabilities;   // HAL capability flags
 
   // Per-zone fan telemetry: zoneId → (timestamp, temp, duty%, actual_rpm)
   struct ZoneTelemetry { int64_t timestamp = 0; int temp = -1; int duty = -1; int rpm = -1; };
@@ -182,30 +178,30 @@ public:
       webcamSwitchAvailable( false ),
       webcamSwitchStatus( false ),
       forceYUV420OutputSwitchAvailable( false ),
-      dGpuInfoValuesJSON( "{}" ),
-      iGpuInfoValuesJSON( "{}" ),
-      cpuPowerValuesJSON( "{}" ),
+      dGpuInfoValues(),
+      iGpuInfoValues(),
+      cpuPowerValues(),
       primeState( "unknown" ),
       modeReapplyPending( false ),
       tempProfileName( "" ),
       tempProfileId( "" ),
-      activeProfileJSON( "{}" ),
-      profilesJSON( "[]" ),
-      customProfilesJSON( "[]" ),
-      defaultProfilesJSON( "[]" ),
-      defaultValuesProfileJSON( "{}" ),
-      settingsJSON( "{}" ),
+      activeProfile(),
+      profilesList(),
+      customProfilesList(),
+      defaultProfilesList(),
+      defaultValuesProfile(),
+      settingsMap(),
       odmProfilesAvailable(),
-      keyboardBacklightCapabilitiesJSON( "{}" ),
+      keyboardBacklightCapabilities(),
       keyboardBacklightStatesJSON( "{}" ),
       fansMinSpeed( 0 ),
       fansOffAvailable( false ),
-      chargingProfilesAvailable( "[]" ),
+      chargingProfilesAvailable(),
       currentChargingProfile( "" ),
-      chargingPrioritiesAvailable( "[]" ),
+      chargingPrioritiesAvailable(),
       currentChargingPriority( "" ),
-      chargeStartAvailableThresholds( "[]" ),
-      chargeEndAvailableThresholds( "[]" ),
+      chargeStartAvailableThresholds(),
+      chargeEndAvailableThresholds(),
       chargeStartThreshold( -1 ),
       chargeEndThreshold( -1 ),
       chargeType( "Unknown" ),
@@ -271,9 +267,9 @@ public:
 public slots:
   // device and system information
   QString GetDeviceName();
-  QString GetSystemInfoJSON();
+  QVariantMap GetSystemInfo();
   bool IsDeviceSupported();
-  QString GetCapabilitiesJSON();
+  QStringList GetCapabilities();
   QString GetDisplayModesJSON();
   bool GetIsX11();
   bool TuxedoWmiAvailable();
@@ -295,67 +291,64 @@ public slots:
   bool SetDisplayRefreshRate( const QString &display, int refreshRate );
 
   // gpu information methods
-  QString GetDGpuInfoValuesJSON();
-  QString GetIGpuInfoValuesJSON();
-  QString GetCpuPowerValuesJSON();
+  QVariantMap GetDGpuInfoValues();
+  QVariantMap GetIGpuInfoValues();
+  QVariantMap GetCpuPowerValues();
 
   // graphics methods
   QString GetPrimeState();
   bool ConsumeModeReapplyPending();
 
   // profile methods
-  QString GetActiveProfileJSON();
+  QVariantMap GetActiveProfile();
   QVariantMap GetAppliedProfiles();
   QString GetPowerState();
   bool SetTempProfile( const QString &profileName );
   bool SetActiveProfile( const QString &id );
   bool ApplyProfile( const QString &profileJSON );
-  QString GetProfilesJSON();                       // All profiles (built-in + custom) with "editable" flag
+  QVariantList GetProfiles();                       // All profiles (built-in + custom) with "editable" flag
   bool ApplyFanProfiles( const QString &fanProfilesJSON );
   bool RevertFanProfiles();
   QVariantMap GetCpuFrequencyLimits();
-  QString GetDefaultValuesProfileJSON();
+  QVariantMap GetDefaultValuesProfile();
   bool SaveProfile( const QString &profileJSON );  // Save/update any editable profile
   bool DeleteProfile( const QString &profileId );  // Delete an editable profile
 
   // Hardware zone model
   QVariantList GetHardwareFanDevices();              // Raw detected fan/pump devices from hardware
-  QString GetHardwareSensorsJSON();                 // Raw detected temperature sensors from hardware
+  QVariantList GetHardwareSensors();                 // Raw detected temperature sensors from hardware
   QVariantList GetThermalSources();                  // Available thermal sources from hardware
   QVariantMap GetSensorReadings();                   // Live sensor + thermal source readings
   QVariantList GetFanZones();                        // Hardware fan zones (id, name, fanIds, deviceType, thermalSourceId)
 
   // Sub-profile CRUD — all include built-in (editable=false) + custom (editable=true)
   QVariantList GetFanProfiles();                    // Replaces GetFanProfileNames
-  QString GetFanProfileJSON( const QString &id );  // Replaces GetFanProfile
+  QVariantMap GetFanProfile( const QString &id );
   bool SaveFanProfile( const QString &id, const QString &name, const QString &json );
   bool DeleteFanProfile( const QString &id );
 
-  QString GetGpuProfilesJSON();                    // Replaces GetGpuProfileNames
-  QString GetGpuProfileJSON( const QString &id );  // Replaces GetGpuProfile
+  QVariantList GetGpuProfiles();                    // Replaces GetGpuProfileNames
+  QVariantMap GetGpuProfile( const QString &id );
   bool SaveGpuProfile( const QString &id, const QString &name, const QString &json );
   bool DeleteGpuProfile( const QString &id );
 
-  QString GetKeyboardProfilesJSON();
-  QString GetKeyboardProfileJSON( const QString &id );
+  QVariantList GetKeyboardProfiles();
+  QVariantMap GetKeyboardProfile( const QString &id );
   bool SaveKeyboardProfile( const QString &id, const QString &name, const QString &json );
   bool DeleteKeyboardProfile( const QString &id );
 
   // Backward-compatible aliases — deprecated, use unified methods above
-  QString GetDefaultProfilesJSON();  // Returns same as GetProfilesJSON() filtered to !editable
-  QString GetCustomProfilesJSON();   // Returns same as GetProfilesJSON() filtered to editable
+  QVariantList GetDefaultProfiles();  // Returns same as GetProfiles() filtered to !editable
+  QVariantList GetCustomProfiles();   // Returns same as GetProfiles() filtered to editable
   bool SaveCustomProfile( const QString &profileJSON );  // Forwards to SaveProfile
   bool DeleteCustomProfile( const QString &profileId );  // Forwards to DeleteProfile
   bool AddCustomProfile( const QString &profileJSON );   // Forwards to SaveProfile
   bool UpdateCustomProfile( const QString &profileJSON );// Forwards to SaveProfile
-  QString GetFanProfile( const QString &name );          // Forwards to GetFanProfileJSON
-  QString GetFanProfileNames();                          // Forwards to GetFanProfilesJSON
-  QString GetGpuProfile( const QString &id );            // Forwards to GetGpuProfileJSON
-  QString GetGpuProfileNames();                          // Forwards to GetGpuProfilesJSON
+
   bool SetFanProfile( const QString &name, const QString &json );  // Legacy
 
   // settings methods
-  QString GetSettingsJSON();
+  QVariantMap GetSettings();
   bool SetStateMap( const QString &state, const QString &profileId );
   bool SetBatchStateMap( const QString &stateMapJSON );
 
@@ -364,7 +357,7 @@ public slots:
   QVariantList ODMPowerLimits();
 
   // keyboard backlight methods
-  QString GetKeyboardBacklightCapabilitiesJSON();
+  QVariantMap GetKeyboardBacklightCapabilities();
   QString GetKeyboardBacklightStatesJSON();
   bool SetKeyboardBacklightStatesJSON( const QString &keyboardBacklightStatesJSON );
 
@@ -373,14 +366,14 @@ public slots:
   bool GetFansOffAvailable();
 
   // charging methods
-  QString GetChargingProfilesAvailable();
+  QStringList GetChargingProfilesAvailable();
   QString GetCurrentChargingProfile();
   bool SetChargingProfile( const QString &profileDescriptor );
-  QString GetChargingPrioritiesAvailable();
+  QStringList GetChargingPrioritiesAvailable();
   QString GetCurrentChargingPriority();
   bool SetChargingPriority( const QString &priorityDescriptor );
-  QString GetChargeStartAvailableThresholds();
-  QString GetChargeEndAvailableThresholds();
+  QVariantList GetChargeStartAvailableThresholds();
+  QVariantList GetChargeEndAvailableThresholds();
   int GetChargeStartThreshold();
   int GetChargeEndThreshold();
   bool SetChargeStartThreshold( int value );
@@ -405,13 +398,13 @@ public slots:
   bool GetNVIDIAPowerCTRLAvailable();
   int GetNVIDIAPowerOffset();
   bool SetNVIDIAPowerOffset( int offset );
-  QString GetAvailableGovernors();
-  QString GetAvailableEPPs();
+  QStringList GetAvailableGovernors();
+  QStringList GetAvailableEPPs();
   int GetCpuCoreCount();
 
   // NVIDIA GPU OC methods
   bool GetNvidiaOCAvailable();
-  QString GetNvidiaOCState( int deviceIndex );
+  QVariantMap GetNvidiaOCState( int deviceIndex );
   bool SetNvidiaClockOffset( int deviceIndex, int clockType, int pstate, int offsetMHz );
   bool SetNvidiaGpuLockedClocks( int deviceIndex, int minMHz, int maxMHz );
   bool SetNvidiaVramLockedClocks( int deviceIndex, int minMHz, int maxMHz );
@@ -474,7 +467,7 @@ public slots:
   QByteArray GetMonitorDataSince( qlonglong sinceTimestampMs );
   void SetMonitorHistoryHorizon( int seconds );
   int GetMonitorHistoryHorizon();
-  QString GetMonitorSourcesJSON();
+  QVariantList GetMonitorSources();
   int GetCpuFrequencyMHz();
   QVariantMap GetFpsSources();
   QVariantMap GetAutoUvAutoApplyStatus();

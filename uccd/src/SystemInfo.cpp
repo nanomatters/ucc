@@ -26,7 +26,6 @@
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <sstream>
 #include <vector>
 #include <syslog.h>
 
@@ -599,76 +598,49 @@ std::string buildLaptopModel( std::optional< UniwillDeviceID > deviceId,
   return "Unknown System";
 }
 
-// ---------------------------------------------------------------------------
-//  JSON serialisation helper
-// ---------------------------------------------------------------------------
-
-std::string jsonEscapeValue( const std::string &s )
-{
-  std::ostringstream oss;
-  for ( const char c : s )
-  {
-    switch ( c )
-    {
-      case '"':  oss << "\\\""; break;
-      case '\\': oss << "\\\\"; break;
-      case '\n': oss << "\\n";  break;
-      case '\r': oss << "\\r";  break;
-      case '\t': oss << "\\t";  break;
-      default:   oss << c;      break;
-    }
-  }
-  return oss.str();
-}
-
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
 //  Public API
 // ---------------------------------------------------------------------------
 
-std::string SystemInfo::toJSON() const
+QVariantMap SystemInfo::toVariantMap() const
 {
-  std::ostringstream oss;
-  oss << "{"
-      << "\"cpuModel\":\"" << jsonEscapeValue( cpuModel ) << "\","
-      << "\"iGpuModel\":\"" << jsonEscapeValue( iGpuModel ) << "\","
-      << "\"dGpuModel\":\"" << jsonEscapeValue( dGpuModel ) << "\","
-      << "\"manufacturer\":\"" << jsonEscapeValue( manufacturerName ) << "\","
-      << "\"systemModel\":\"" << jsonEscapeValue( systemModel ) << "\","
-      << "\"laptopModel\":\"" << jsonEscapeValue( laptopModel ) << "\","
-      << "\"productSKU\":\"" << jsonEscapeValue( productSKU ) << "\","
-      << "\"boardName\":\"" << jsonEscapeValue( boardName ) << "\","
-      << "\"boardVendor\":\"" << jsonEscapeValue( boardVendor ) << "\","
-      << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\","
-      << "\"productName\":\"" << jsonEscapeValue( productName ) << "\","
-      << "\"chassisType\":\"" << jsonEscapeValue( ucc::hal::chassisTypeToString( chassisType ) ) << "\","
-      << "\"ramTotalMiB\":" << ramTotalMiB << ","
-      << "\"ramAvailableMiB\":" << ramAvailableMiB << ","
-      << "\"ramUsedMiB\":" << ramUsedMiB << ","
-      << "\"ramModules\":[";
+  QVariantMap m;
+  m["cpuModel"]       = QString::fromStdString( cpuModel );
+  m["iGpuModel"]      = QString::fromStdString( iGpuModel );
+  m["dGpuModel"]      = QString::fromStdString( dGpuModel );
+  m["manufacturer"]   = QString::fromStdString( manufacturerName );
+  m["systemModel"]    = QString::fromStdString( systemModel );
+  m["laptopModel"]    = QString::fromStdString( laptopModel );
+  m["productSKU"]     = QString::fromStdString( productSKU );
+  m["boardName"]      = QString::fromStdString( boardName );
+  m["boardVendor"]    = QString::fromStdString( boardVendor );
+  m["sysVendor"]      = QString::fromStdString( sysVendor );
+  m["productName"]    = QString::fromStdString( productName );
+  m["chassisType"]    = QString::fromStdString( ucc::hal::chassisTypeToString( chassisType ) );
+  m["ramTotalMiB"]    = ramTotalMiB;
+  m["ramAvailableMiB"]= ramAvailableMiB;
+  m["ramUsedMiB"]     = ramUsedMiB;
 
-  for ( size_t i = 0; i < ramModules.size(); ++i )
+  QVariantList modules;
+  for ( const auto &mod : ramModules )
   {
-    const auto &m = ramModules[i];
-    if ( i > 0 ) oss << ",";
-    oss << "{"
-        << "\"locator\":\"" << jsonEscapeValue( m.locator ) << "\","
-        << "\"bankLocator\":\"" << jsonEscapeValue( m.bankLocator ) << "\","
-        << "\"type\":\"" << jsonEscapeValue( m.type ) << "\","
-        << "\"manufacturer\":\"" << jsonEscapeValue( m.manufacturer ) << "\","
-        << "\"partNumber\":\"" << jsonEscapeValue( m.partNumber ) << "\","
-        << "\"serialNumber\":\"" << jsonEscapeValue( m.serialNumber ) << "\","
-        << "\"sizeMiB\":" << m.sizeMiB << ","
-        << "\"configuredSpeedMTs\":" << m.configuredSpeedMTs << ","
-        << "\"maxSpeedMTs\":" << m.maxSpeedMTs << ","
-        << "\"configuredVoltageMv\":" << m.configuredVoltageMv
-        << "}";
+    QVariantMap rm;
+    rm["locator"]             = QString::fromStdString( mod.locator );
+    rm["bankLocator"]         = QString::fromStdString( mod.bankLocator );
+    rm["type"]                = QString::fromStdString( mod.type );
+    rm["manufacturer"]        = QString::fromStdString( mod.manufacturer );
+    rm["partNumber"]          = QString::fromStdString( mod.partNumber );
+    rm["serialNumber"]        = QString::fromStdString( mod.serialNumber );
+    rm["sizeMiB"]             = mod.sizeMiB;
+    rm["configuredSpeedMTs"]  = mod.configuredSpeedMTs;
+    rm["maxSpeedMTs"]         = mod.maxSpeedMTs;
+    rm["configuredVoltageMv"] = mod.configuredVoltageMv;
+    modules.append( rm );
   }
-
-  oss << "]"
-      << "}";
-  return oss.str();
+  m["ramModules"] = modules;
+  return m;
 }
 
 SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )

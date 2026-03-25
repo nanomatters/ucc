@@ -111,21 +111,8 @@ MainWindow::MainWindow( QWidget *parent )
     m_gpuDefaultPowerLimit = *gpuDefault;
 
   // Check for MultiplePowerStates capability (battery present)
-  if ( auto capsJson = m_UccdClient->getCapabilitiesJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QString::fromStdString( *capsJson ).toUtf8() );
-    if ( doc.isArray() )
-    {
-      for ( const auto &val : doc.array() )
-      {
-        if ( val.toString() == QStringLiteral( "multiplePowerStates" ) )
-        {
-          m_hasMultiplePowerStates = true;
-          break;
-        }
-      }
-    }
-  }
+  if ( auto caps = m_UccdClient->getCapabilities() )
+    m_hasMultiplePowerStates = caps->contains( QStringLiteral( "multiplePowerStates" ) );
 
   setWindowTitle( "Unified Control Center" );
   setGeometry( 100, 100, 900, 700 );
@@ -199,48 +186,44 @@ void MainWindow::setupUI()
   QString laptopModel, cpuModel, dGpuModel, iGpuModel;
   QString ramSummaryText;
   QString ramModulesText;
-  if ( auto sysInfoJson = m_UccdClient->getSystemInfoJSON() )
+  if ( auto sysInfo = m_UccdClient->getSystemInfo() )
   {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfoJson ) );
-    if ( doc.isObject() )
+    const auto &obj = *sysInfo;
+    laptopModel = obj.value( "laptopModel" ).toString();
+    cpuModel    = obj.value( "cpuModel" ).toString();
+    dGpuModel   = obj.value( "dGpuModel" ).toString();
+    iGpuModel   = obj.value( "iGpuModel" ).toString();
+
+    const int ramTotalMiB = obj.value( "ramTotalMiB" ).toInt();
+    const int ramUsedMiB = obj.value( "ramUsedMiB" ).toInt();
+    const int ramAvailableMiB = obj.value( "ramAvailableMiB" ).toInt();
+    if ( ramTotalMiB > 0 )
     {
-      const QJsonObject obj = doc.object();
-      laptopModel = obj.value( "laptopModel" ).toString();
-      cpuModel    = obj.value( "cpuModel" ).toString();
-      dGpuModel   = obj.value( "dGpuModel" ).toString();
-      iGpuModel   = obj.value( "iGpuModel" ).toString();
-
-      const int ramTotalMiB = obj.value( "ramTotalMiB" ).toInt( 0 );
-      const int ramUsedMiB = obj.value( "ramUsedMiB" ).toInt( 0 );
-      const int ramAvailableMiB = obj.value( "ramAvailableMiB" ).toInt( 0 );
-      if ( ramTotalMiB > 0 )
-      {
-        const double totalGiB = static_cast< double >( ramTotalMiB ) / 1024.0;
-        const double usedGiB = static_cast< double >( ramUsedMiB ) / 1024.0;
-        const double availGiB = static_cast< double >( ramAvailableMiB ) / 1024.0;
-        ramSummaryText = QString( "Total %1 GiB | Used %2 GiB | Available %3 GiB" )
-                           .arg( QString::number( totalGiB, 'f', 1 ) )
-                           .arg( QString::number( usedGiB, 'f', 1 ) )
-                           .arg( QString::number( availGiB, 'f', 1 ) );
-      }
-
-      const QJsonArray modules = obj.value( "ramModules" ).toArray();
-      QStringList moduleLines;
-      for ( int i = 0; i < modules.size(); ++i )
-      {
-        const QJsonObject m = modules[i].toObject();
-        const int sizeMiB = m.value( "sizeMiB" ).toInt( 0 );
-        const int speed = m.value( "configuredSpeedMTs" ).toInt( 0 );
-        const int voltageMv = m.value( "configuredVoltageMv" ).toInt( 0 );
-
-        QString line = QString( "%1 GiB" )
-                         .arg( QString::number( static_cast< double >( sizeMiB ) / 1024.0, 'f', 1 ) );
-        if ( speed > 0 ) line += QString( " @ %1 MT/s" ).arg( speed );
-        if ( voltageMv > 0 ) line += QString( " %1 V" ).arg( QString::number( voltageMv / 1000.0, 'f', 3 ) );
-        moduleLines << line;
-      }
-      ramModulesText = moduleLines.join( QStringLiteral( " | " ) );
+      const double totalGiB = static_cast< double >( ramTotalMiB ) / 1024.0;
+      const double usedGiB = static_cast< double >( ramUsedMiB ) / 1024.0;
+      const double availGiB = static_cast< double >( ramAvailableMiB ) / 1024.0;
+      ramSummaryText = QString( "Total %1 GiB | Used %2 GiB | Available %3 GiB" )
+                         .arg( QString::number( totalGiB, 'f', 1 ) )
+                         .arg( QString::number( usedGiB, 'f', 1 ) )
+                         .arg( QString::number( availGiB, 'f', 1 ) );
     }
+
+    const QVariantList modules = obj.value( "ramModules" ).toList();
+    QStringList moduleLines;
+    for ( int i = 0; i < modules.size(); ++i )
+    {
+      const QVariantMap m = modules[i].toMap();
+      const int sizeMiB = m.value( "sizeMiB" ).toInt();
+      const int speed = m.value( "configuredSpeedMTs" ).toInt();
+      const int voltageMv = m.value( "configuredVoltageMv" ).toInt();
+
+      QString line = QString( "%1 GiB" )
+                       .arg( QString::number( static_cast< double >( sizeMiB ) / 1024.0, 'f', 1 ) );
+      if ( speed > 0 ) line += QString( " @ %1 MT/s" ).arg( speed );
+      if ( voltageMv > 0 ) line += QString( " %1 V" ).arg( QString::number( voltageMv / 1000.0, 'f', 3 ) );
+      moduleLines << line;
+    }
+    ramModulesText = moduleLines.join( QStringLiteral( " | " ) );
   }
 
   // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
@@ -2068,28 +2051,23 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   // the hardware brightness with stale saved values.
 
   // Load power state activation settings
-  if ( QString settingsJson = m_profileManager->getSettingsJSON(); !settingsJson.isEmpty() )
+  if ( QVariantMap settings = m_profileManager->getSettings(); !settings.isEmpty() )
   {
-    if ( QJsonDocument settingsDoc = QJsonDocument::fromJson( settingsJson.toUtf8() );
-         settingsDoc.isObject() )
+    QVariantMap stateMap = settings.value( "stateMap" ).toMap();
+    if ( !stateMap.isEmpty() )
     {
-      QJsonObject settingsObj = settingsDoc.object();
-      if ( settingsObj.contains( "stateMap" ) && settingsObj["stateMap"].isObject() )
-      {
-        QJsonObject stateMap = settingsObj["stateMap"].toObject();
-        QString mainsProfile = stateMap["power_ac"].toString();
-        QString batteryProfile = stateMap["power_bat"].toString();
-        QString wcProfile = stateMap["power_wc"].toString();
+      QString mainsProfile = stateMap.value( "power_ac" ).toString();
+      QString batteryProfile = stateMap.value( "power_bat" ).toString();
+      QString wcProfile = stateMap.value( "power_wc" ).toString();
 
-        m_mainsButton->setChecked( mainsProfile == profileId );
-        m_batteryButton->setChecked( batteryProfile == profileId );
-        m_waterCoolerButton->setChecked( wcProfile == profileId );
+      m_mainsButton->setChecked( mainsProfile == profileId );
+      m_batteryButton->setChecked( batteryProfile == profileId );
+      m_waterCoolerButton->setChecked( wcProfile == profileId );
 
-        // Store the loaded power state assignments
-        m_loadedMainsAssignment = (mainsProfile == profileId);
-        m_loadedBatteryAssignment = (batteryProfile == profileId);
-        m_loadedWaterCoolerAssignment = (wcProfile == profileId);
-      }
+      // Store the loaded power state assignments
+      m_loadedMainsAssignment = (mainsProfile == profileId);
+      m_loadedBatteryAssignment = (batteryProfile == profileId);
+      m_loadedWaterCoolerAssignment = (wcProfile == profileId);
     }
   }
 
