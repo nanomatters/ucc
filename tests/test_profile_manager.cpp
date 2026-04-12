@@ -38,9 +38,7 @@ private:
       "webcam": { "status": true, "useStatus": false },
       "fan": {
         "useControl": true,
-        "fanProfile": "fan-balanced",
-        "autoControlWC": true,
-        "enableWaterCooler": false
+        "fanProfile": "fan-balanced"
       },
       "odmProfile": { "name": "enthusiast" },
       "odmPowerLimits": { "tdpValues": [45, 80] },
@@ -97,8 +95,6 @@ private slots:
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
     QVERIFY( p.fan.useControl );
     QCOMPARE( p.fan.fanProfile, std::string( "fan-balanced" ) );
-    QVERIFY( p.fan.autoControlWC );
-    QVERIFY( !p.fan.enableWaterCooler );
   }
 
   void parseProfile_embeddedFanTables()

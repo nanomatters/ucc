@@ -247,40 +247,6 @@ void SystemMonitor::updateMetrics()
     if ( m_dGpuMemClockOffset != val ) { m_dGpuMemClockOffset = val; emit dGpuMemClockOffsetChanged(); }
   }
 
-  // Get water cooler fan speed (percentage) if available via uccd
-  {
-    QString wcFan = "--";
-    if ( auto pct = m_client->getWaterCoolerFanSpeed() )
-    {
-      wcFan = QString::number( *pct ) + " %";
-    }
-
-    if ( m_waterCoolerFanSpeed != wcFan )
-    {
-      m_waterCoolerFanSpeed = wcFan;
-      emit waterCoolerFanSpeedChanged();
-    }
-  }
-
-  // Get water cooler pump level/voltage if available via uccd
-  {
-    QString wcPump = "--";
-    if ( auto level = m_client->getWaterCoolerPumpLevel() )
-    {
-      wcPump = *level == static_cast< int >( ucc::PumpVoltage::V7 )  ? "Low" :
-               *level == static_cast< int >( ucc::PumpVoltage::V8 )  ? "Med" :
-               *level == static_cast< int >( ucc::PumpVoltage::V11 ) ? "High" :
-               *level == static_cast< int >( ucc::PumpVoltage::V12 ) ? "Max" :
-               *level == static_cast< int >( ucc::PumpVoltage::Off ) ? "Off" : "--";
-    }
-
-    if ( m_waterCoolerPumpLevel != wcPump )
-    {
-      m_waterCoolerPumpLevel = wcPump;
-      emit waterCoolerPumpLevelChanged();
-    }
-  }
-
   // Get display brightness
 
   if ( auto brightness = m_client->getDisplayBrightness() )
@@ -501,8 +467,6 @@ void SystemMonitor::setMonitoringActive( bool active )
       m_gpuPower = "";
       m_fanSpeed = "";
       m_gpuFanSpeed = "";
-      m_waterCoolerFanSpeed = "";
-      m_waterCoolerPumpLevel = "";
 
       // Start timer first - this gives uccd time to collect initial sensor data
       // The first update will happen after 500ms

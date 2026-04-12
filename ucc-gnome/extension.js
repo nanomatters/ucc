@@ -2,8 +2,8 @@
  * UCC GNOME Shell Extension
  *
  * System tray applet for the Unified Control Center daemon (uccd).
- * Provides monitoring, profile switching, hardware toggles, and
- * water cooler control — mirroring the KDE Plasma applet.
+ * Provides monitoring, profile switching, and hardware toggles —
+ * mirroring the KDE Plasma applet.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -55,7 +55,6 @@ function labelRow(labelText) {
 function mapPowerState(raw) {
     if (raw === 'power_ac')  return 'AC';
     if (raw === 'power_bat') return 'Battery';
-    if (raw === 'power_wc')  return 'AC w/ Water Cooler';
     return raw ?? '—';
 }
 
@@ -115,8 +114,6 @@ class UccIndicator extends PanelMenu.Button {
             cpuPower: -1, gpuPower: -1,
             cpuFanRPM: -1, gpuFanRPM: -1,
             cpuFanPct: -1, gpuFanPct: -1,
-            wcFanSpeed: -1, wcPumpLevel: -1,
-            wcConnected: false,
             // Extended NVIDIA dGPU metrics
             gpuComputeUtilPct: -1, gpuMemoryUtilPct: -1,
             gpuVramUsedMiB: -1, gpuVramTotalMiB: -1,
@@ -143,14 +140,6 @@ class UccIndicator extends PanelMenu.Button {
             // Hardware
             webcamEnabled: false, fnLock: false,
             displayBrightness: 50,
-            // Water cooler
-            waterCoolerSupported: false,
-            wcEnabled: false,
-            wcAutoControl: true,
-            wcFanPercent: 50,
-            wcPumpVoltageCode: 4,
-            wcLedEnabled: true,
-            wcLedR: 255, wcLedG: 0, wcLedB: 0, wcLedMode: 0,
         };
 
         // Build the popup UI
@@ -197,7 +186,6 @@ class UccIndicator extends PanelMenu.Button {
             ['profile',   'Profile'],
             ['hardware',  'Hardware'],
         ];
-        // Water cooler tab added conditionally later
 
         for (const [id, label] of tabDefs) {
             this._addTab(id, label);
@@ -222,7 +210,6 @@ class UccIndicator extends PanelMenu.Button {
         this._buildDashboardTab();
         this._buildProfileTab();
         this._buildHardwareTab();
-        this._buildWaterCoolerTab(); // built but hidden until supported
 
         // Separator before footer
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -332,14 +319,6 @@ class UccIndicator extends PanelMenu.Button {
             r.box.visible = false;
         }
         box.add_child(gpuGrid);
-
-        // Water cooler metrics (hidden until supported)
-        this._wcMetricsBox = new St.BoxLayout({ vertical: true, style_class: 'ucc-cpu-gpu-model' });
-        this._wcMetricsBox.visible = false;
-        box.add_child(new St.Label({ text: 'Water Cooler', style_class: 'ucc-section-title' }));
-        this._lWcFan  = labelRow('Fan');   this._wcMetricsBox.add_child(this._lWcFan.box);
-        this._lWcPump = labelRow('Pump');  this._wcMetricsBox.add_child(this._lWcPump.box);
-        box.add_child(this._wcMetricsBox);
 
         this._tabs['dashboard'] = box;
     }
@@ -503,120 +482,6 @@ class UccIndicator extends PanelMenu.Button {
         box.add_child(openBtn);
 
         this._tabs['hardware'] = box;
-    }
-
-    // -----------------------------------------------------------------------
-    // Water Cooler tab
-    // -----------------------------------------------------------------------
-
-    _buildWaterCoolerTab() {
-        const box = new St.BoxLayout({
-            vertical: true,
-            style_class: 'ucc-tab-content',
-            x_expand: true,
-        });
-
-        // Enable toggle
-        const enRow = new St.BoxLayout({ style_class: 'ucc-hw-row', x_expand: true });
-        enRow.add_child(new St.Label({
-            text: 'Water Cooler',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-        this._wcEnableSwitch = new St.Button({
-            style_class: 'ucc-toggle',
-            toggle_mode: true,
-            label: 'OFF',
-        });
-        this._wcEnableSwitch.connect('clicked', () => {
-            const val = this._wcEnableSwitch.checked;
-            this._client.enableWaterCooler(val);
-            this._state.wcEnabled = val;
-            this._wcEnableSwitch.label = val ? 'ON' : 'OFF';
-        });
-        enRow.add_child(this._wcEnableSwitch);
-        box.add_child(enRow);
-
-        // Fan speed slider
-        box.add_child(new St.Label({ text: 'Fan Speed', style_class: 'ucc-section-title' }));
-        const fanRow = new St.BoxLayout({ style_class: 'ucc-hw-row', x_expand: true });
-        this._wcFanSlider = new Slider.Slider(0.5);
-        this._wcFanSlider.x_expand = true;
-        this._wcFanSlider.connect('notify::value', () => {
-            const val = Math.round(this._wcFanSlider.value * 100);
-            this._client.setWaterCoolerFanSpeed(val);
-            this._state.wcFanPercent = val;
-            this._wcFanValueLabel.text = `${val}%`;
-        });
-        this._wcFanValueLabel = new St.Label({
-            text: '50%',
-            style_class: 'ucc-slider-value',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        fanRow.add_child(this._wcFanSlider);
-        fanRow.add_child(this._wcFanValueLabel);
-        box.add_child(fanRow);
-
-        // Pump voltage combo
-        // PumpVoltage enum: V11=0, V12=1(reserved), V7=2, V8=3, Off=4
-        // Ordered as Off / 7V / 8V / 11V to match KDE applet
-        box.add_child(new St.Label({ text: 'Pump Voltage', style_class: 'ucc-section-title' }));
-        this._pumpVoltageBox = new St.BoxLayout({
-            vertical: false,
-            style_class: 'ucc-combo-row',
-            x_expand: true,
-        });
-        const voltageOptions = [
-            [4, 'Off'],  [2, '7 V'],  [3, '8 V'],  [0, '11 V'],
-        ];
-        this._pumpVoltageButtons = [];
-        for (const [code, label] of voltageOptions) {
-            const btn = new St.Button({
-                label,
-                style_class: 'ucc-combo-btn',
-                toggle_mode: true,
-                x_expand: true,
-            });
-            btn._voltageCode = code;
-            btn.connect('clicked', () => {
-                this._client.setWaterCoolerPumpVoltage(code);
-                this._state.wcPumpVoltageCode = code;
-                this._updatePumpVoltageUI();
-            });
-            this._pumpVoltageBox.add_child(btn);
-            this._pumpVoltageButtons.push(btn);
-        }
-        box.add_child(this._pumpVoltageBox);
-
-        // LED toggle
-        const ledRow = new St.BoxLayout({ style_class: 'ucc-hw-row', x_expand: true });
-        ledRow.add_child(new St.Label({
-            text: 'LED',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-        this._wcLedSwitch = new St.Button({
-            style_class: 'ucc-toggle',
-            toggle_mode: true,
-            label: 'OFF',
-        });
-        this._wcLedSwitch.connect('clicked', () => {
-            const val = this._wcLedSwitch.checked;
-            if (val) {
-                this._client.setWaterCoolerLEDColor(
-                    this._state.wcLedR, this._state.wcLedG,
-                    this._state.wcLedB, this._state.wcLedMode,
-                );
-            } else {
-                this._client.turnOffWaterCoolerLED();
-            }
-            this._state.wcLedEnabled = val;
-            this._wcLedSwitch.label = val ? 'ON' : 'OFF';
-        });
-        ledRow.add_child(this._wcLedSwitch);
-        box.add_child(ledRow);
-
-        this._tabs['watercooler'] = box;
     }
 
     // -----------------------------------------------------------------------
@@ -810,12 +675,6 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
-    _updatePumpVoltageUI() {
-        for (const btn of this._pumpVoltageButtons) {
-            btn.checked = (btn._voltageCode === this._state.wcPumpVoltageCode);
-        }
-    }
-
     // -----------------------------------------------------------------------
     // Connection UI
     // -----------------------------------------------------------------------
@@ -842,16 +701,6 @@ class UccIndicator extends PanelMenu.Button {
             this._stopTimers();
             this.visible = false;
             return;
-        }
-
-        const wc = this._client.getWaterCoolerSupported();
-        if (wc !== this._state.waterCoolerSupported) {
-            this._state.waterCoolerSupported = wc;
-            this._wcMetricsBox.visible = wc;
-            // Show/hide water cooler tab
-            if (wc && !this._tabButtons['watercooler']) {
-                this._addTab('watercooler', 'Water Cooler');
-            }
         }
 
         const si = this._client.getSystemInfo();
@@ -908,7 +757,6 @@ class UccIndicator extends PanelMenu.Button {
             s.activeProfileId = ap.id ?? '';
             s.activeProfileName = ap.name ?? '';
             s.activeProfileFanId = ap.fan?.fanProfile ?? '';
-            s.wcAutoControl = ap.fan?.autoControlWC ?? true;
         }
 
         // Fan profiles
@@ -1065,11 +913,6 @@ class UccIndicator extends PanelMenu.Button {
         s.gpuVramFreqMHz      = dgpu?.vramFrequency    ?? -1;
         s.gpuCoreVoltageMv    = dgpu?.coreVoltageMv    ?? -1;
 
-        if (s.waterCoolerSupported) {
-            s.wcFanSpeed  = this._client.getWaterCoolerFanSpeed();
-            s.wcPumpLevel = this._client.getWaterCoolerPumpLevel();
-        }
-
         this._updateDashboard();
     }
 
@@ -1095,11 +938,6 @@ class UccIndicator extends PanelMenu.Button {
                 this._rebuildKeyboardProfileButtons();
                 this._rebuildGpuProfileButtons();
             }
-            const oldAutoControl = s.wcAutoControl;
-            s.wcAutoControl = ap.fan?.autoControlWC ?? true;
-            if (oldAutoControl !== s.wcAutoControl) {
-                this._updateWaterCoolerControlsEnabled();
-            }
         }
 
         // Power state
@@ -1107,12 +945,6 @@ class UccIndicator extends PanelMenu.Button {
         if (ps && ps !== s.powerState) {
             s.powerState = ps;
             this._powerLabel.text = mapPowerState(ps);
-            // Derive wcConnected from power state (matches KDE applet)
-            const wasWcConnected = s.wcConnected;
-            s.wcConnected = (mapPowerState(ps) === 'AC w/ Water Cooler');
-            if (s.wcConnected !== wasWcConnected) {
-                this._updateWaterCoolerControlsEnabled();
-            }
         }
 
         // Hardware toggles
@@ -1135,16 +967,6 @@ class UccIndicator extends PanelMenu.Button {
             s.displayBrightness = br;
             this._brightnessSlider.value = br / 100;
             this._brightnessValueLabel.text = `${br}%`;
-        }
-
-        // Water cooler
-        if (s.waterCoolerSupported) {
-            const wcEn = this._client.isWaterCoolerEnabled();
-            if (wcEn !== s.wcEnabled) {
-                s.wcEnabled = wcEn;
-                this._wcEnableSwitch.checked = wcEn;
-                this._wcEnableSwitch.label = wcEn ? 'ON' : 'OFF';
-            }
         }
 
         // ODM performance profile
@@ -1195,15 +1017,6 @@ class UccIndicator extends PanelMenu.Button {
         showIf(this._lNvencDec,
             s.gpuEncoderUtilPct >= 0 || s.gpuDecoderUtilPct >= 0,
             `${s.gpuEncoderUtilPct >= 0 ? s.gpuEncoderUtilPct : '--'} / ${s.gpuDecoderUtilPct >= 0 ? s.gpuDecoderUtilPct : '--'} %`);
-
-        if (s.waterCoolerSupported) {
-            this._lWcFan.valueLabel.text  = fmt(s.wcFanSpeed, '%');
-            // Display pump level as human-readable label (matches KDE applet)
-            const pumpLabels = ['High', 'Max', 'Low', 'Medium', 'Off'];
-            this._lWcPump.valueLabel.text = (s.wcPumpLevel >= 0 && s.wcPumpLevel < pumpLabels.length)
-                ? pumpLabels[s.wcPumpLevel]
-                : '—';
-        }
     }
 
     _updateSystemInfoLabels() {
@@ -1224,28 +1037,6 @@ class UccIndicator extends PanelMenu.Button {
         if (this._gpuTitleLabel) {
             this._gpuTitleLabel.text = s.gpuModel || 'GPU';
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Lifecycle
-    // -----------------------------------------------------------------------
-
-    // -----------------------------------------------------------------------
-    // Water cooler control enable/disable (matches KDE wcConnected logic)
-    // -----------------------------------------------------------------------
-
-    _updateWaterCoolerControlsEnabled() {
-        const enabled = this._state.wcConnected && !this._state.wcAutoControl;
-        const wcConnected = this._state.wcConnected;
-
-        // Fan slider & pump voltage buttons: require wcConnected AND !autoControl
-        if (this._wcFanSlider) this._wcFanSlider.reactive = enabled;
-        for (const btn of (this._pumpVoltageButtons ?? [])) {
-            btn.reactive = enabled;
-        }
-
-        // Enable/LED toggles: require wcConnected
-        if (this._wcLedSwitch) this._wcLedSwitch.reactive = wcConnected;
     }
 
     // -----------------------------------------------------------------------

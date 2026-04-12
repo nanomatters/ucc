@@ -228,7 +228,6 @@ public:
   bool clearAutoUndervoltCheckpoint();
 
   // Device Capability Queries
-  std::optional< bool > getWaterCoolerSupported();
   std::optional< bool > getCTGPAdjustmentSupported();
 
   // Keyboard Control
@@ -274,17 +273,6 @@ public:
   std::optional< int > getGpuFanSpeedRPM();
   std::optional< int > getFanSpeedPercent();
   std::optional< int > getGpuFanSpeedPercent();
-  // Water cooler readings (if available from daemon)
-  std::optional< int > getWaterCoolerFanSpeed();
-  std::optional< int > getWaterCoolerPumpLevel();
-
-  // Water cooler control
-  bool enableWaterCooler( bool enable );
-  std::optional< bool > isWaterCoolerEnabled();
-  bool setWaterCoolerFanSpeed( int dutyCyclePercent );
-  bool setWaterCoolerPumpVoltage( int voltageCode );   // PumpVoltage enum cast to int
-  bool setWaterCoolerLEDColor( int r, int g, int b, int mode );  // RGBState enum cast to int
-  bool turnOffWaterCoolerLED();
 
   // Monitoring history
   std::optional< QByteArray > getMonitorDataSince( qint64 sinceTimestampMs );

@@ -27,8 +27,8 @@
 /**
  * @brief QML-facing backend that wraps UccdClient for the tray popup.
  *
- * Exposes profiles, system monitoring, hardware toggles, water cooler
- * controls and keyboard backlight state via Q_PROPERTY / Q_INVOKABLE
+ * Exposes profiles, system monitoring, hardware toggles
+ * and keyboard backlight state via Q_PROPERTY / Q_INVOKABLE
  * so that the QML UI can bind to them declaratively.
  */
 class TrayBackend : public QObject
@@ -59,8 +59,6 @@ class TrayBackend : public QObject
   Q_PROPERTY( int gpuFanRPM      READ gpuFanRPM      NOTIFY metricsUpdated )
   Q_PROPERTY( int cpuFanPercent  READ cpuFanPercent   NOTIFY metricsUpdated )
   Q_PROPERTY( int gpuFanPercent  READ gpuFanPercent   NOTIFY metricsUpdated )
-  Q_PROPERTY( int wcFanSpeed     READ wcFanSpeed      NOTIFY metricsUpdated )
-  Q_PROPERTY( int wcPumpLevel    READ wcPumpLevel     NOTIFY metricsUpdated )
   // Extended NVIDIA dGPU metrics
   Q_PROPERTY( int  gpuComputeUtilPct   READ gpuComputeUtilPct   NOTIFY metricsUpdated )
   Q_PROPERTY( int  gpuMemoryUtilPct    READ gpuMemoryUtilPct    NOTIFY metricsUpdated )
@@ -84,21 +82,6 @@ class TrayBackend : public QObject
   Q_PROPERTY( bool webcamEnabled  READ webcamEnabled  WRITE setWebcamEnabled  NOTIFY webcamEnabledChanged )
   Q_PROPERTY( bool fnLock         READ fnLock         WRITE setFnLock         NOTIFY fnLockChanged )
   Q_PROPERTY( int  displayBrightness READ displayBrightness WRITE setDisplayBrightness NOTIFY displayBrightnessChanged )
-
-  // ── Water cooler ──
-  Q_PROPERTY( bool waterCoolerSupported READ waterCoolerSupported NOTIFY waterCoolerSupportedChanged )
-  Q_PROPERTY( bool wcConnected          READ wcConnected          NOTIFY wcConnectedChanged )
-  Q_PROPERTY( bool wcAutoControl        READ wcAutoControl        NOTIFY wcAutoControlChanged )
-  Q_PROPERTY( bool wcEnabled            READ wcEnabled            NOTIFY wcEnabledChanged )
-
-  // Water cooler control state (local cache)
-  Q_PROPERTY( int  wcFanPercent      READ wcFanPercent      NOTIFY wcControlStateChanged )
-  Q_PROPERTY( int  wcPumpVoltageCode READ wcPumpVoltageCode NOTIFY wcControlStateChanged )
-  Q_PROPERTY( bool wcLedEnabled      READ wcLedEnabled      NOTIFY wcControlStateChanged )
-  Q_PROPERTY( int  wcLedMode         READ wcLedMode         NOTIFY wcControlStateChanged )
-  Q_PROPERTY( int  wcLedRed          READ wcLedRed          NOTIFY wcControlStateChanged )
-  Q_PROPERTY( int  wcLedGreen        READ wcLedGreen        NOTIFY wcControlStateChanged )
-  Q_PROPERTY( int  wcLedBlue         READ wcLedBlue         NOTIFY wcControlStateChanged )
 
   // ── ODM Performance Profile ──
   Q_PROPERTY( QStringList availableODMProfiles READ availableODMProfiles NOTIFY odmProfilesAvailableChanged )
@@ -149,8 +132,6 @@ public:
   int gpuFanRPM() const;
   int cpuFanPercent() const;
   int gpuFanPercent() const;
-  int wcFanSpeed() const;
-  int wcPumpLevel() const;
   // Extended NVIDIA dGPU metrics (-1 when unavailable)
   int gpuComputeUtilPct() const;
   int gpuMemoryUtilPct() const;
@@ -179,20 +160,6 @@ public:
   Q_INVOKABLE void setFnLock( bool v );
   int displayBrightness() const;
   Q_INVOKABLE void setDisplayBrightness( int v );
-
-  // ── Water cooler ──
-  bool waterCoolerSupported() const;
-  bool wcConnected() const;
-  bool wcAutoControl() const;
-  bool wcEnabled() const;
-  Q_INVOKABLE void setWcEnabled( bool enabled );
-  int  wcFanPercent() const;
-  int  wcPumpVoltageCode() const;
-  bool wcLedEnabled() const;
-  int  wcLedMode() const;
-  int  wcLedRed() const;
-  int  wcLedGreen() const;
-  int  wcLedBlue() const;
 
   // ── ODM ──
   QStringList availableODMProfiles() const;
@@ -226,11 +193,6 @@ public:
   Q_INVOKABLE void setODMPerformanceProfile( const QString &profile );
   Q_INVOKABLE void openControlCenter();
   Q_INVOKABLE void refreshAll();
-  // Water cooler control
-  Q_INVOKABLE void setWcFanSpeed( int percent );
-  Q_INVOKABLE void setWcPumpVoltageCode( int voltageCode );
-  Q_INVOKABLE void setWcLedEnabled( bool enabled );
-  Q_INVOKABLE void setWcLed( int r, int g, int b, int mode );
 
 signals:
   void connectedChanged();
@@ -243,11 +205,6 @@ signals:
   void webcamEnabledChanged();
   void fnLockChanged();
   void displayBrightnessChanged();
-  void waterCoolerSupportedChanged();
-  void wcConnectedChanged();
-  void wcAutoControlChanged();
-  void wcEnabledChanged();
-  void wcControlStateChanged();
   void odmProfilesAvailableChanged();
   void odmPerformanceProfileChanged();
   void fanProfilesChanged();
@@ -288,8 +245,6 @@ private:
   int m_gpuFanRPM = 0;
   int m_cpuFanPercent = 0;
   int m_gpuFanPercent = 0;
-  int m_wcFanSpeed = 0;
-  int m_wcPumpLevel = -1;
   // Extended NVIDIA dGPU metrics
   int m_gpuComputeUtilPct  = -1;
   int m_gpuMemoryUtilPct   = -1;
@@ -316,15 +271,6 @@ private:
   bool m_fnLock = false;
   int m_displayBrightness = 50;
 
-  // Water cooler control state cache
-  int  m_wcFanPercent = 50;
-  int  m_wcPumpVoltageCode = 4;  // PumpVoltage::Off
-  bool m_wcLedEnabled = true;
-  int  m_wcLedMode = 0;          // RGBState::Static
-  int  m_wcLedRed = 255;
-  int  m_wcLedGreen = 0;
-  int  m_wcLedBlue = 0;
-
   // System info
   QString m_laptopModel;
   QString m_cpuModel;
@@ -333,10 +279,6 @@ private:
 
   // Device capabilities
   bool m_deviceSupported = true;
-  bool m_waterCoolerSupported = false;
-  bool m_wcAutoControl = true;
-  bool m_wcEnabled = true;  // true = daemon controls fan/pump automatically
-  bool m_wcEnabledOverride = false;  // user explicitly toggled — don't overwrite from poll
 
   // ODM profiles
   QStringList m_availableODMProfiles;

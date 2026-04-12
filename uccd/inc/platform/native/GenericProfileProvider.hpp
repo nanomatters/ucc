@@ -74,8 +74,6 @@ public:
 
     profile.fan.useControl = true;
     profile.fan.fanProfile = "fan-platform-default";
-    profile.fan.autoControlWC = false;
-    profile.fan.enableWaterCooler = false;
 
     return profile;
   }
@@ -144,8 +142,6 @@ private:
 
     p.fan.useControl = true;
     p.fan.fanProfile = fanProfileId;
-    p.fan.autoControlWC = false;
-    p.fan.enableWaterCooler = false;
 
     // No ODM profile — generic hardware has none
     // No TDP values — will be filled by fillDeviceSpecificDefaults() if available

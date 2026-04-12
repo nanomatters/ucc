@@ -201,9 +201,6 @@ export class UccdClient {
         return g1 ?? g2 ?? -1;
     }
 
-    getWaterCoolerFanSpeed()  { return this._call('GetWaterCoolerFanSpeed')  ?? -1; }
-    getWaterCoolerPumpLevel() { return this._call('GetWaterCoolerPumpLevel') ?? -1; }
-
     // -----------------------------------------------------------------------
     // Slow poll — profiles, state, hardware toggles
     // -----------------------------------------------------------------------
@@ -219,8 +216,6 @@ export class UccdClient {
 
     getAvailableODMProfiles() { return this._call('ODMProfilesAvailable') ?? []; }
     getODMPerformanceProfile() { return this._call('GetODMPerformanceProfile') ?? ''; }
-    getWaterCoolerSupported() { return this._call('GetWaterCoolerSupported') ?? false; }
-    isWaterCoolerEnabled()    { return this._call('IsWaterCoolerEnabled') ?? false; }
     isDeviceSupported()       { return this._call('IsDeviceSupported') ?? false; }
     getCapabilities()     { return this._call('GetCapabilities'); }
     getSystemInfo()       { return this._call('GetSystemInfo'); }
@@ -307,26 +302,6 @@ export class UccdClient {
 
     setDisplayBrightness(v) {
         return this._callVoid('SetDisplayBrightness', [v], 'i');
-    }
-
-    enableWaterCooler(v) {
-        return this._callVoid('EnableWaterCooler', [v], 'b');
-    }
-
-    setWaterCoolerFanSpeed(percent) {
-        return this._callVoid('SetWaterCoolerFanSpeed', [percent], 'i');
-    }
-
-    setWaterCoolerPumpVoltage(code) {
-        return this._callVoid('SetWaterCoolerPumpVoltage', [code], 'i');
-    }
-
-    setWaterCoolerLEDColor(r, g, b, mode) {
-        return this._callVoid('SetWaterCoolerLEDColor', [r, g, b, mode], 'iiii');
-    }
-
-    turnOffWaterCoolerLED() {
-        return this._callVoid('TurnOffWaterCoolerLED');
     }
 
     // -----------------------------------------------------------------------

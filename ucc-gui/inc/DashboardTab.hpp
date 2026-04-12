@@ -39,7 +39,7 @@ namespace ucc
     Q_OBJECT
 
   public:
-    explicit DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager, bool waterCoolerSupported,
+    explicit DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager,
                           const QString &laptopModel = {},
                           const QString &cpuModel = {},
                           const QString &dGpuModel = {},
@@ -49,16 +49,7 @@ namespace ucc
                           QWidget *parent = nullptr );
     ~DashboardTab() override = default;
 
-    /** Update the water-cooler enable checkbox without re-triggering signals. */
-    void setWaterCoolerEnabled( bool enabled );
-
-    /** Trigger an immediate water-cooler status query and emit waterCoolerStatusChanged. */
-    void refreshWaterCoolerStatus();
-
   signals:
-    void waterCoolerEnableChanged( bool enabled );
-    /** Emitted whenever the water-cooler status changes (rich-text, e.g. for the status bar). */
-    void waterCoolerStatusChanged( const QString &richText );
 
   private slots:
     void onCpuTempChanged();
@@ -76,30 +67,18 @@ namespace ucc
     void onDGpuMemoryUtilChanged();
     void onDGpuPstateChanged();
     void onDGpuClockOffsetsChanged();
-    void onWaterCoolerConnected();
-    void onWaterCoolerDisconnected();
-    void onWaterCoolerDiscoveryStarted();
-    void onWaterCoolerDiscoveryFinished();
-    void onWaterCoolerConnectionError(const QString &error);
-    void onWaterCoolerFanSpeedChanged();
-    void onWaterCoolerPumpLevelChanged();
 
   private:
     void setupUI();
     void connectSignals();
-    void updateWaterCoolerStatus();
     void switchGpuView( bool showIGpu );
     void updateGpuSwitchVisibility();
 
     SystemMonitor *m_systemMonitor;
     ProfileManager *m_profileManager;
-    // DBus interface for water cooler status
-    QDBusInterface *m_waterCoolerDbus = nullptr;
-    QTimer *m_waterCoolerPollTimer = nullptr;
 
     // Dashboard widgets
     QLabel *m_activeProfileLabel = nullptr;
-    QLabel *m_waterCoolerStatusLabel = nullptr;
     QLabel *m_cpuTempLabel = nullptr;
     QLabel *m_cpuFrequencyLabel = nullptr;
     QLabel *m_gpuTempLabel = nullptr;
@@ -122,13 +101,6 @@ namespace ucc
     QWidget *m_dGpuExtraRow  = nullptr;
     QFrame  *m_dGpuExtraHSep = nullptr;
     QWidget *m_dGpuBottomCaps = nullptr;
-    QLabel *m_waterCoolerFanSpeedLabel = nullptr;
-    QLabel *m_waterCoolerPumpLabel = nullptr;
-    QGridLayout *m_waterCoolerGrid = nullptr;
-    QLabel *m_waterCoolerHeader = nullptr;
-    QPushButton *m_waterCoolerEnableCheckBox = nullptr;
-
-    bool m_waterCoolerSupported = false;
 
     // System hardware info strings
     QString m_laptopModel;

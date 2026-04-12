@@ -57,7 +57,6 @@ const UccProfile silent = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
-  profile.fan.autoControlWC = true;
 
   profile.odmProfile.name = "power_save";
   profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
@@ -81,7 +80,6 @@ const UccProfile office = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
-  profile.fan.autoControlWC = true;
 
   profile.odmProfile.name = "enthusiast";
   profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
@@ -105,7 +103,6 @@ const UccProfile highPerformance = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
 
   profile.odmProfile.name = "overboost";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
@@ -130,7 +127,6 @@ const UccProfile defaultCustomProfile = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
 
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
 
@@ -155,7 +151,6 @@ const UccProfile defaultMobileCustomProfileTDP = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
 
   // odmProfile.name is optional, leave unset
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
@@ -181,7 +176,6 @@ const UccProfile defaultMobileCustomProfileCl = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
 
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
 
@@ -204,7 +198,6 @@ const UccProfile highPerformance25WcTGP = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
 
   profile.odmProfile.name = "overboost";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
@@ -229,7 +222,6 @@ const UccProfile defaultCustomProfile25WcTGP = []()
 
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
 
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
 

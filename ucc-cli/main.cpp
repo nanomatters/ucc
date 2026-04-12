@@ -111,7 +111,6 @@ static std::string powerStateLabel( const std::string &raw )
 {
   if ( raw == "power_ac" )  return "AC";
   if ( raw == "power_bat" ) return "Battery";
-  if ( raw == "power_wc" )  return "AC w/ Water Cooler";
   return raw;
 }
 
@@ -171,7 +170,7 @@ static LocalAssignments loadLocalAssignments( ucc::UccdClient &c )
   LocalAssignments result;
   QSettings settings = localSettings();
 
-  // stateMap: { "power_ac": "main-profile-uuid", "power_wc": "...", ... }
+  // stateMap: { "power_ac": "main-profile-uuid", ... }
   QByteArray smData = settings.value( "stateMap", "{}" ).toByteArray();
   QJsonDocument smDoc = QJsonDocument::fromJson( smData );
   if ( smDoc.isObject() )
@@ -317,24 +316,6 @@ static int cmdStatus( ucc::UccdClient &c )
   printVal( "Webcam enabled:",     c.getWebcamEnabled() );
   printVal( "Fn Lock:",            c.getFnLock() );
 
-  auto wcSupported = c.getWaterCoolerSupported();
-  if ( wcSupported && *wcSupported )
-  {
-    std::puts( "" );
-    std::puts( "--- Water Cooler ---" );
-    auto wcEnabled = c.isWaterCoolerEnabled();
-    printVal( "Enabled:",     wcEnabled );
-    if ( wcEnabled && *wcEnabled )
-    {
-      auto wcFan  = c.getWaterCoolerFanSpeed();
-      auto wcPump = c.getWaterCoolerPumpLevel();
-      if ( wcFan && *wcFan >= 0 )
-        printVal( "Fan speed:",   wcFan, "%" );
-      if ( wcPump && *wcPump >= 0 )
-        printVal( "Pump level:",  wcPump );
-    }
-  }
-
   // Charging info — mirror GUI logic: only show if hardware provides data
   auto chargingProfilesAvail = c.getChargingProfilesAvailable();
   bool hasChargingHW = chargingProfilesAvail && !chargingProfilesAvail->isEmpty();
@@ -476,8 +457,6 @@ static void printProfileSummary( const QJsonObject &obj, bool showHeader = true,
     QString fanProf = fan["fanProfile"].toString();
     if ( !fanProf.isEmpty() )
       std::printf( "    %-22s %s\n", "Fan profile:", fanProf.toStdString().c_str() );
-    if ( fan.contains( "enableWaterCooler" ) )
-      std::printf( "    %-22s %s\n", "Water cooler:", fan["enableWaterCooler"].toBool() ? "yes" : "no" );
   }
 
   // Display settings
@@ -1092,67 +1071,6 @@ static int cmdFnLockGet( ucc::UccdClient &c )
 static int cmdFnLockSet( ucc::UccdClient &c, bool enabled )
 {
   ok( c.setFnLock( enabled ) );
-  return 0;
-}
-
-// --- Water Cooler ---
-
-static int cmdWaterCoolerStatus( ucc::UccdClient &c )
-{
-  auto supported = c.getWaterCoolerSupported();
-  if ( !supported || !*supported )
-  {
-    std::puts( "Water cooler: not supported" );
-    return 0;
-  }
-
-  std::puts( "=== Water Cooler ===" );
-  printVal( "Supported:",     supported );
-  auto wcEnabled = c.isWaterCoolerEnabled();
-  printVal( "Enabled:",       wcEnabled );
-  if ( wcEnabled && *wcEnabled )
-  {
-    auto wcFan  = c.getWaterCoolerFanSpeed();
-    auto wcPump = c.getWaterCoolerPumpLevel();
-    if ( wcFan && *wcFan >= 0 )
-      printVal( "Fan speed:",   wcFan, "%" );
-    else
-      std::printf( "  %-24s not connected\n", "Fan speed:" );
-    if ( wcPump && *wcPump >= 0 )
-      printVal( "Pump level:",  wcPump );
-    else
-      std::printf( "  %-24s not connected\n", "Pump level:" );
-  }
-  return 0;
-}
-
-static int cmdWaterCoolerEnable( ucc::UccdClient &c, bool enable )
-{
-  ok( c.enableWaterCooler( enable ) );
-  return 0;
-}
-
-static int cmdWaterCoolerFanSet( ucc::UccdClient &c, int percent )
-{
-  ok( c.setWaterCoolerFanSpeed( percent ) );
-  return 0;
-}
-
-static int cmdWaterCoolerPumpSet( ucc::UccdClient &c, int voltageCode )
-{
-  ok( c.setWaterCoolerPumpVoltage( voltageCode ) );
-  return 0;
-}
-
-static int cmdWaterCoolerLed( ucc::UccdClient &c, int r, int g, int b, int mode )
-{
-  ok( c.setWaterCoolerLEDColor( r, g, b, mode ) );
-  return 0;
-}
-
-static int cmdWaterCoolerLedOff( ucc::UccdClient &c )
-{
-  ok( c.turnOffWaterCoolerLED() );
   return 0;
 }
 
@@ -1841,13 +1759,13 @@ static void printUsage()
     "State map (auto-switch on power state change):\n"
     "  statemap get                  Show current settings/state map\n"
     "  statemap set <STATE> <ID>     Set profile for power state\n"
-    "                                States: power_ac, power_bat, power_wc\n"
+    "                                States: power_ac, power_bat\n"
     "\n"
     "Fan control:\n"
     "  fan list                      List fan profiles\n"
     "  fan get <ID>                  Show fan profile curves (JSON)\n"
     "  fan set <ID>                  Activate a fan profile by ID\n"
-    "  fan apply <JSON>              Apply fan curves (keys: cpu, gpu, pump, waterCoolerFan)\n"
+    "  fan apply <JSON>              Apply fan curves (keys: cpu, gpu, pump)\n"
     "  fan revert                    Revert to saved fan profile\n"
     "\n"
     "GPU info & overclocking:\n"
@@ -1883,17 +1801,6 @@ static void printUsage()
     "  webcam set <on|off>           Enable/disable webcam\n"
     "  fnlock get                    Get Fn Lock status\n"
     "  fnlock set <on|off>           Enable/disable Fn Lock\n"
-    "\n"
-    "Water cooler:\n"
-    "  watercooler status            Show water cooler status\n"
-    "  watercooler enable            Enable water cooler (BLE scanning)\n"
-    "  watercooler disable           Disable water cooler\n"
-    "  watercooler fan <PERCENT>     Set water cooler fan speed (0-100)\n"
-    "  watercooler pump <CODE>       Set pump voltage (0=11V, 1=12V, 2=7V, 3=8V, 4=off)\n"
-    "  watercooler led <R> <G> <B> <MODE>\n"
-    "                                Set LED color (0-255) + mode\n"
-    "                                Modes: 0=static, 1=breathe, 2=colorful, 3=breathe-color\n"
-    "  watercooler led-off           Turn off water cooler LED\n"
     "\n"
     "Charging:\n"
     "  charging status               Show charging info\n"
@@ -1999,23 +1906,6 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   auto w = c.getWebcamEnabled();     if ( w ) hw["webcamEnabled"]     = *w;
   auto f = c.getFnLock();            if ( f ) hw["fnLock"]            = *f;
   root["hardware"] = hw;
-
-  // Water cooler
-  auto wcSupported = c.getWaterCoolerSupported();
-  if ( wcSupported && *wcSupported )
-  {
-    QJsonObject wc;
-    wc["supported"] = true;
-    auto we = c.isWaterCoolerEnabled();   if ( we ) wc["enabled"]   = *we;
-    if ( we && *we )
-    {
-      auto wf = c.getWaterCoolerFanSpeed();
-      auto wp = c.getWaterCoolerPumpLevel();
-      if ( wf && *wf >= 0 ) wc["fanSpeed"]  = *wf;
-      if ( wp && *wp >= 0 ) wc["pumpLevel"] = *wp;
-    }
-    root["waterCooler"] = wc;
-  }
 
   // Charging — mirror GUI logic
   auto chargingProfilesAvail = c.getChargingProfilesAvailable();
@@ -2319,47 +2209,6 @@ int main( int argc, char *argv[] )
       return cmdFnLockSet( client, v );
     }
     std::fprintf( stderr, "Unknown fnlock subcommand: %s\n", sub );
-    return 1;
-  }
-
-  // watercooler ...
-  if ( matchArg( cmd, "watercooler" ) || matchArg( cmd, "wc" ) )
-  {
-    if ( args.size() < 2 )
-    {
-      std::fputs( "Usage: ucc-cli watercooler <status|enable|disable|fan|pump|led|led-off>\n", stderr );
-      return 1;
-    }
-    const char *sub = args[1];
-    if ( matchArg( sub, "status" ) )
-      return cmdWaterCoolerStatus( client );
-    if ( matchArg( sub, "enable" ) || matchArg( sub, "on" ) )
-      return cmdWaterCoolerEnable( client, true );
-    if ( matchArg( sub, "disable" ) || matchArg( sub, "off" ) )
-      return cmdWaterCoolerEnable( client, false );
-    if ( matchArg( sub, "fan" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli watercooler fan <0-100>\n", stderr ); return 1; }
-      return cmdWaterCoolerFanSet( client, std::atoi( args[2] ) );
-    }
-    if ( matchArg( sub, "pump" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli watercooler pump <CODE>\n", stderr ); return 1; }
-      return cmdWaterCoolerPumpSet( client, std::atoi( args[2] ) );
-    }
-    if ( matchArg( sub, "led" ) )
-    {
-      if ( args.size() < 6 )
-      {
-        std::fputs( "Usage: ucc-cli watercooler led <R> <G> <B> <MODE>\n", stderr );
-        return 1;
-      }
-      return cmdWaterCoolerLed( client, std::atoi( args[2] ), std::atoi( args[3] ),
-                                std::atoi( args[4] ), std::atoi( args[5] ) );
-    }
-    if ( matchArg( sub, "led-off" ) )
-      return cmdWaterCoolerLedOff( client );
-    std::fprintf( stderr, "Unknown watercooler subcommand: %s\n", sub );
     return 1;
   }
 

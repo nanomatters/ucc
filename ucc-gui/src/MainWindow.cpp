@@ -20,7 +20,6 @@
 
 #include "FanControlTab.hpp"
 #include "FanCurveEditorWidget.hpp"
-#include "PumpCurveEditorWidget.hpp"
 #include "../libucc-dbus/UccdClient.hpp"
 
 #include "HardwareTab.hpp"
@@ -103,8 +102,6 @@ MainWindow::MainWindow( QWidget *parent )
   m_UccdClient = std::make_unique< UccdClient >( this );
 
   // Query device capabilities from daemon
-  if ( auto waterCooler = m_UccdClient->getWaterCoolerSupported() )
-    m_waterCoolerSupported = *waterCooler;
   if ( auto ctgp = m_UccdClient->getCTGPAdjustmentSupported() )
     m_cTGPAdjustmentSupported = *ctgp;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
@@ -123,24 +120,6 @@ MainWindow::MainWindow( QWidget *parent )
   connectSignals();
 
   // Initialize status bar
-  // Water cooler status indicator (left of the connection indicator)
-  if ( m_waterCoolerSupported )
-  {
-    m_waterCoolerStatusBarLabel = new QLabel( this );
-    m_waterCoolerStatusBarLabel->setTextFormat( Qt::RichText );
-    statusBar()->addPermanentWidget( m_waterCoolerStatusBarLabel );
-
-    QFrame *wcSep = new QFrame( this );
-    wcSep->setFrameShape( QFrame::VLine );
-    wcSep->setFrameShadow( QFrame::Sunken );
-    statusBar()->addPermanentWidget( wcSep );
-
-    connect( m_dashboardTab, &DashboardTab::waterCoolerStatusChanged,
-             m_waterCoolerStatusBarLabel, &QLabel::setText );
-    // Populate the label with the current status immediately
-    m_dashboardTab->refreshWaterCoolerStatus();
-  }
-
   m_connectionLabel = new QLabel( this );
   m_connectionLabel->setTextFormat( Qt::RichText );
   statusBar()->addPermanentWidget( m_connectionLabel );
@@ -226,8 +205,8 @@ void MainWindow::setupUI()
     ramModulesText = moduleLines.join( QStringLiteral( " | " ) );
   }
 
-  // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
-  m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(), m_waterCoolerSupported,
+  // Now create DashboardTab
+  m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(),
                                      laptopModel, cpuModel, dGpuModel, iGpuModel,
                                      ramSummaryText, ramModulesText, this );
   m_tabs->addTab( m_dashboardTab, "Dashboard" );
@@ -255,7 +234,7 @@ void MainWindow::setupHardwarePage()
 
 void MainWindow::setupFanControlTab()
 {
-  m_fanControlTab = new FanControlTab( m_UccdClient.get(), m_profileManager.get(), m_waterCoolerSupported, this );
+  m_fanControlTab = new FanControlTab( m_UccdClient.get(), m_profileManager.get(), this );
   connectFanControlTab();
 
   m_tabs->addTab( m_fanControlTab, "Profile Fan Control" );
@@ -277,8 +256,6 @@ void MainWindow::connectFanControlTab()
            this, &MainWindow::onFanProfileChanged );
   connect( m_fanControlTab, &FanControlTab::fanCurveChanged,
            this, &MainWindow::onFanCurveChanged );
-  connect( m_fanControlTab, &FanControlTab::pumpCurveChanged,
-           this, &MainWindow::onPumpCurveChanged );
   connect( m_fanControlTab, &FanControlTab::applyRequested,
            this, &MainWindow::onApplyFanProfilesClicked );
   connect( m_fanControlTab, &FanControlTab::saveRequested,
@@ -286,16 +263,6 @@ void MainWindow::connectFanControlTab()
   connect( m_fanControlTab, &FanControlTab::copyRequested,
            this, &MainWindow::onCopyFanProfileClicked );
 
-  // Bidirectional water-cooler enable checkbox sync
-  // FanControlTab toggle → D-Bus + sync dashboard checkbox
-  connect( m_fanControlTab, &FanControlTab::waterCoolerEnableChanged,
-           m_dashboardTab, &DashboardTab::setWaterCoolerEnabled );
-  // DashboardTab toggle → D-Bus call + sync fan tab checkbox
-  connect( m_dashboardTab, &DashboardTab::waterCoolerEnableChanged,
-           this, [this]( bool enabled ) {
-             m_fanControlTab->setWaterCoolerEnabled( enabled );
-             m_fanControlTab->sendWaterCoolerEnable( enabled );
-           } );
   connect( m_fanControlTab, &FanControlTab::removeRequested,
            this, &MainWindow::onRemoveFanProfileClicked );
 
@@ -450,25 +417,14 @@ void MainWindow::setupProfilesPage()
   m_mainsButton->setCheckable( true );
   m_batteryButton = new QPushButton( "Battery" );
   m_batteryButton->setCheckable( true );
-  m_waterCoolerButton = new QPushButton( "Water Cooler" );
-  m_waterCoolerButton->setCheckable( true );
-  m_waterCoolerButton->setCheckable( true );
   m_mainsButton->setMaximumWidth( 100 );
   m_batteryButton->setMaximumWidth( 100 );
-  m_waterCoolerButton->setMaximumWidth( 100 );
   buttonLayout->addWidget( m_mainsButton );
   buttonLayout->addWidget( m_batteryButton );
-  buttonLayout->addWidget( m_waterCoolerButton );
   buttonLayout->addStretch();
   detailsLayout->addWidget( autoActivateLabel, row, 0, Qt::AlignTop );
   detailsLayout->addLayout( buttonLayout, row, 1 );
   row++;
-
-  // Hide water cooler profile activation button if water cooler not supported
-  if ( !m_waterCoolerSupported )
-  {
-    m_waterCoolerButton->setVisible( false );
-  }
 
   // Hide entire "Activate profile automatically on" section when no battery
   if ( !m_hasMultiplePowerStates )
@@ -476,7 +432,6 @@ void MainWindow::setupProfilesPage()
     autoActivateLabel->setVisible( false );
     m_mainsButton->setVisible( false );
     m_batteryButton->setVisible( false );
-    m_waterCoolerButton->setVisible( false );
   }
 
   // Add spacer/separator
@@ -659,21 +614,6 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( fanProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileFanProfileCombo, row, 1 );
   row++;
-
-  QLabel *autoWaterLabel = new QLabel( "Water cooler auto control" );
-  m_autoWaterControlCheckBox = new QCheckBox();
-  m_autoWaterControlCheckBox->setChecked( true );
-  m_autoWaterControlCheckBox->setToolTip( tr( "When enabled the daemon will control the water cooler automatically" ) );
-  detailsLayout->addWidget( autoWaterLabel, row, 0 );
-  detailsLayout->addWidget( m_autoWaterControlCheckBox, row, 1, Qt::AlignLeft );
-  row++;
-
-  // Hide water cooler auto control if water cooler not supported
-  if ( !m_waterCoolerSupported )
-  {
-    autoWaterLabel->setVisible( false );
-    m_autoWaterControlCheckBox->setVisible( false );
-  }
 
   // Add spacer
   detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
@@ -1011,17 +951,6 @@ void MainWindow::connectSignals()
   connect( m_profileFanProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, &MainWindow::onProfileFanProfileComboChanged );
 
-  if ( m_autoWaterControlCheckBox )
-  {
-    connect( m_autoWaterControlCheckBox, &QCheckBox::toggled,
-             this, &MainWindow::markChanged );
-    connect( m_autoWaterControlCheckBox, &QCheckBox::toggled,
-             this, [this]( bool autoControl ) {
-               if ( m_fanControlTab )
-                 m_fanControlTab->setWaterCoolerAutoControl( autoControl );
-             } );
-  }
-
   if ( m_cpuCoresSlider )
     connect( m_cpuCoresSlider, &QSlider::valueChanged,
              this, [this]() { markChanged(); } );
@@ -1082,10 +1011,6 @@ void MainWindow::connectSignals()
     connect( m_batteryButton, &QPushButton::toggled,
              this, &MainWindow::markChanged );
 
-  if ( m_waterCoolerButton )
-    connect( m_waterCoolerButton, &QPushButton::toggled,
-             this, &MainWindow::markChanged );
-
   // Error handling
 
   connect( m_profileManager.get(), QOverload< const QString & >::of( &ProfileManager::error ),
@@ -1123,8 +1048,6 @@ void MainWindow::connectSignals()
   connect( m_systemMonitor.get(), &SystemMonitor::fanSpeedChanged,             this, &MainWindow::updateFanCrosshairs );
   connect( m_systemMonitor.get(), &SystemMonitor::gpuTempChanged,              this, &MainWindow::updateFanCrosshairs );
   connect( m_systemMonitor.get(), &SystemMonitor::gpuFanSpeedChanged,          this, &MainWindow::updateFanCrosshairs );
-  connect( m_systemMonitor.get(), &SystemMonitor::waterCoolerFanSpeedChanged,  this, &MainWindow::updateFanCrosshairs );
-  connect( m_systemMonitor.get(), &SystemMonitor::waterCoolerPumpLevelChanged,  this, &MainWindow::updateFanCrosshairs );
 }
 
 void MainWindow::populateGovernorCombo()
@@ -1219,29 +1142,6 @@ void MainWindow::updateFanCrosshairs()
       editor->clearCrosshair();
     }
   }
-
-  // Update pump editors
-  for ( auto it = m_fanControlTab->pumpEditors().constBegin();
-        it != m_fanControlTab->pumpEditors().constEnd(); ++it )
-  {
-    const QString &zoneId = it.key();
-    auto *editor = it.value();
-    QVariant ztVar = root.value( zoneId );
-    if ( ztVar.canConvert< QVariantMap >() )
-    {
-      QVariantMap zt = ztVar.toMap();
-      int temp = zt.value( "temp", -1 ).toInt();
-      int duty = zt.value( "duty", -1 ).toInt();
-      if ( temp >= 0 && duty >= 0 )
-        editor->setCrosshair( temp, duty );
-      else
-        editor->clearCrosshair();
-    }
-    else
-    {
-      editor->clearCrosshair();
-    }
-  }
 }
 
 void MainWindow::onTabChanged( int index )
@@ -1268,8 +1168,6 @@ void MainWindow::onTabChanged( int index )
   else if ( m_fanControlTab )
   {
     for ( auto *ed : m_fanControlTab->fanEditors() )
-      ed->clearCrosshair();
-    for ( auto *ed : m_fanControlTab->pumpEditors() )
       ed->clearCrosshair();
   }
 
@@ -1709,7 +1607,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_setBrightnessCheckBox->blockSignals( true );
   m_profileFanProfileCombo->blockSignals( true );
   m_fanControlTab->fanProfileCombo()->blockSignals( true );
-  if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( true );
   m_cpuCoresSlider->blockSignals( true );
   m_governorCombo->blockSignals( true );
   m_minFrequencySlider->blockSignals( true );
@@ -1724,7 +1621,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->blockSignals( true );
   m_mainsButton->blockSignals( true );
   m_batteryButton->blockSignals( true );
-  m_waterCoolerButton->blockSignals( true );
   if ( m_descriptionEdit ) m_descriptionEdit->blockSignals( true );
 
   // Load Display settings (nested in display object)
@@ -1788,26 +1684,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
         missingFanProfile = fanProfileRef;
       }
     }
-
-    if ( fanObj.contains( "autoControlWC" ) )
-    {
-      bool autoControl = fanObj["autoControlWC"].toBool( true );
-      m_autoWaterControlCheckBox->setChecked( autoControl );
-      if ( m_fanControlTab )
-        m_fanControlTab->setWaterCoolerAutoControl( autoControl );
-    }
-    else
-    {
-      m_autoWaterControlCheckBox->setChecked( true );
-      if ( m_fanControlTab )
-        m_fanControlTab->setWaterCoolerAutoControl( true );
-    }
-
-    // Query the daemon directly for the runtime water-cooler enable state
-    bool wcEnable = m_UccdClient->isWaterCoolerEnabled().value_or(
-        fanObj["enableWaterCooler"].toBool( true ) );
-    m_fanControlTab->setWaterCoolerEnabled( wcEnable );
-    m_dashboardTab->setWaterCoolerEnabled( wcEnable );
   }
 
   // Load CPU settings (nested in cpu object)
@@ -2058,16 +1934,13 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     {
       QString mainsProfile = stateMap.value( "power_ac" ).toString();
       QString batteryProfile = stateMap.value( "power_bat" ).toString();
-      QString wcProfile = stateMap.value( "power_wc" ).toString();
 
       m_mainsButton->setChecked( mainsProfile == profileId );
       m_batteryButton->setChecked( batteryProfile == profileId );
-      m_waterCoolerButton->setChecked( wcProfile == profileId );
 
       // Store the loaded power state assignments
       m_loadedMainsAssignment = (mainsProfile == profileId);
       m_loadedBatteryAssignment = (batteryProfile == profileId);
-      m_loadedWaterCoolerAssignment = (wcProfile == profileId);
     }
   }
 
@@ -2076,11 +1949,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_setBrightnessCheckBox->blockSignals( false );
   m_profileFanProfileCombo->blockSignals( false );
   m_fanControlTab->fanProfileCombo()->blockSignals( false );
-  if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( false );
-
-  // Set initial auto control state for water cooler
-  if ( m_fanControlTab && m_autoWaterControlCheckBox )
-    m_fanControlTab->setWaterCoolerAutoControl( m_autoWaterControlCheckBox->isChecked() );
   m_cpuCoresSlider->blockSignals( false );
   m_governorCombo->blockSignals( false );
   m_minFrequencySlider->blockSignals( false );
@@ -2095,7 +1963,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->blockSignals( false );
   m_mainsButton->blockSignals( false );
   m_batteryButton->blockSignals( false );
-  m_waterCoolerButton->blockSignals( false );
   if ( m_descriptionEdit ) m_descriptionEdit->blockSignals( false );
 
   // Trigger label updates by calling the slots directly
@@ -2170,7 +2037,6 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   // Fan controls
   if ( m_profileFanProfileCombo ) m_profileFanProfileCombo->setEnabled( isCustom );
-  if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->setEnabled( isCustom );
 
   // CPU controls
   if ( m_cpuCoresSlider ) m_cpuCoresSlider->setEnabled( isCustom );
@@ -2243,8 +2109,6 @@ QString MainWindow::buildProfileJSON() const
   QJsonObject fanObj;
   QString fanProfileId  = m_profileFanProfileCombo->currentData().toString();
   fanObj["fanProfile"]       = fanProfileId;
-  fanObj["autoControlWC"]    = m_autoWaterControlCheckBox ? m_autoWaterControlCheckBox->isChecked() : true;
-  fanObj["enableWaterCooler"] = m_fanControlTab          ? m_fanControlTab->isWaterCoolerEnabled() : true;
   profileObj["fan"] = fanObj;
 
   // CPU
@@ -2329,11 +2193,6 @@ void MainWindow::onApplyClicked()
   QString profileJSON = buildProfileJSON();
   m_profileManager->getClient()->applyProfile( profileJSON.toStdString() );
 
-  // Re-send the current water cooler enable state so that
-  // the profile apply doesn't override the user's checkbox state.
-  if ( m_fanControlTab )
-    m_fanControlTab->sendWaterCoolerEnable( m_fanControlTab->isWaterCoolerEnabled() );
-
   statusBar()->showMessage( "Profile applied: " + m_profileCombo->currentText() );
 }
 
@@ -2372,8 +2231,6 @@ void MainWindow::onSaveClicked()
       stateMapUpdates["power_ac"] = profileId;
     if ( m_batteryButton->isChecked() )
       stateMapUpdates["power_bat"] = profileId;
-    if ( m_waterCoolerButton->isChecked() )
-      stateMapUpdates["power_wc"] = profileId;
   }
 
   if ( !stateMapUpdates.isEmpty() )
@@ -2717,14 +2574,8 @@ void MainWindow::onFanProfileChanged(const QString& fanProfileId)
         m_fanControlTab->setThermalSourceForZone( pz.id, pz.thermalSourceId );
 
       if ( pz.deviceType == QStringLiteral( "stagedPump" ) )
-      {
-        QVector< PumpCurveEditorWidget::Point > pts;
-        for ( const auto &cp : pz.curve )
-          pts.append( { static_cast< double >( cp.temp ), cp.speed } );
-        if ( auto *ed = m_fanControlTab->pumpEditor( pz.id ); ed && !pts.isEmpty() )
-          ed->setPoints( pts );
-      }
-      else
+        continue;
+
       {
         QVector< FanCurveEditorWidget::Point > pts;
         for ( const auto &cp : pz.curve )
@@ -2811,8 +2662,6 @@ void MainWindow::onUccdConnectionChanged( bool connected )
     return;
 
   // Re-query capabilities that are only set at startup
-  if ( auto waterCooler = m_UccdClient->getWaterCoolerSupported() )
-    m_waterCoolerSupported = *waterCooler;
   if ( auto ctgp = m_UccdClient->getCTGPAdjustmentSupported() )
     m_cTGPAdjustmentSupported = *ctgp;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
@@ -2833,18 +2682,6 @@ void MainWindow::onFanCurveChanged( const QString &zoneId, const QVector< FanCur
   for ( const auto &p : points )
     cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
   m_fanZonePoints[zoneId] = cached;
-}
-
-void MainWindow::onPumpCurveChanged( const QString &zoneId, const QVector< PumpCurveEditorWidget::Point > &points )
-{
-  Q_UNUSED( zoneId )
-  Q_UNUSED( points )
-  // Pump points changed – mark the fan profile as modified so it can be saved
-  if ( m_fanControlTab )
-  {
-    m_fanControlTab->saveButton()->setEnabled( true );
-    m_fanControlTab->applyButton()->setEnabled( true );
-  }
 }
 
 void MainWindow::onCopyFanProfileClicked()
@@ -2896,7 +2733,7 @@ void MainWindow::onCopyFanProfileClicked()
 
 void MainWindow::onApplyFanProfilesClicked()
 {
-  if ( m_fanControlTab->fanEditors().isEmpty() && m_fanControlTab->pumpEditors().isEmpty() )
+  if ( m_fanControlTab->fanEditors().isEmpty() )
   {
     QMessageBox::warning( this, "No Editors", "No fan curve editors available to apply fan profiles." );
     return;
@@ -2926,12 +2763,6 @@ void MainWindow::onApplyFanProfilesClicked()
       for ( const auto &p : fanIt.value()->points() )
         dto.curve.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
     }
-    else if ( auto pumpIt = m_fanControlTab->pumpEditors().find( z.id );
-              pumpIt != m_fanControlTab->pumpEditors().end() )
-    {
-      for ( const auto &p : pumpIt.value()->points() )
-        dto.curve.append( { static_cast< int >( p.temp ), p.level } );
-    }
 
     zones.append( dto );
   }
@@ -2952,12 +2783,6 @@ void MainWindow::onApplyFanProfilesClicked()
         cached.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
       m_fanZonePoints[it.key()] = cached;
     }
-
-    // Re-send the current water cooler enable state to the daemon so that
-    // the profile apply (which may set enableWaterCooler from profile data)
-    // doesn't override the user's current checkbox state.
-    if ( m_fanControlTab )
-      m_fanControlTab->sendWaterCoolerEnable( m_fanControlTab->isWaterCoolerEnabled() );
   }
   else
   {
@@ -2985,14 +2810,8 @@ void MainWindow::loadFanPoints()
     if ( pz.curve.isEmpty() ) continue;
 
     if ( pz.deviceType == QStringLiteral( "stagedPump" ) )
-    {
-      QVector< PumpCurveEditorWidget::Point > pts;
-      for ( const auto &cp : pz.curve )
-        pts.append( { static_cast< double >( cp.temp ), cp.speed } );
-      if ( auto *ed = m_fanControlTab->pumpEditor( pz.id ) )
-        ed->setPoints( pts );
-    }
-    else
+      continue;
+
     {
       QVector< FanPoint > cached;
       QVector< FanCurveEditorWidget::Point > pts;
@@ -3026,11 +2845,6 @@ bool MainWindow::saveFanPoints()
     {
       for ( const auto &p : fanEd->points() )
         dto.curve.append( { static_cast< int >( p.temp ), static_cast< int >( p.duty ) } );
-    }
-    else if ( auto *pumpEd = m_fanControlTab->pumpEditor( z.id ) )
-    {
-      for ( const auto &p : pumpEd->points() )
-        dto.curve.append( { static_cast< int >( p.temp ), p.level } );
     }
 
     zones.append( dto );

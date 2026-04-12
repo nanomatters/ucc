@@ -34,13 +34,11 @@ add_executable(uccd
   src/workers/AutoOCWorker.cpp
   src/workers/AutoUndervoltWorker.cpp
   src/FpsServer.cpp
-  src/platform/uniwill/LCTWaterCoolerWorker.cpp
   src/platform/uniwill/UniwillDefaultProfiles.cpp
   src/platform/gpu/nvidia/NvidiaGpuPowerProvider.cpp
   src/workers/DisplayWorker.cpp
   src/workers/HardwareMonitorWorker.cpp
   inc/UccDBusService.hpp
-  inc/platform/uniwill/LCTWaterCoolerWorker.hpp
   inc/platform/uniwill/UniwillDefaultProfiles.hpp
   inc/workers/DaemonWorker.hpp
   inc/workers/NvidiaOCWorker.hpp

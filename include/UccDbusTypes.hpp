@@ -241,7 +241,6 @@ struct AppliedProfilesDto
   QString profileId;
   QString profileName;
   QString fanProfileId;
-  bool wcAutoControl = false;
   QString keyboardProfileId;
   QString savedGpuProfileId;
   QString appliedGpuProfileId;
@@ -251,7 +250,7 @@ struct AppliedProfilesDto
   QJsonObject toJson() const
   {
     return { { "profileId", profileId }, { "profileName", profileName },
-             { "fanProfileId", fanProfileId }, { "wcAutoControl", wcAutoControl },
+             { "fanProfileId", fanProfileId },
              { "keyboardProfileId", keyboardProfileId }, { "savedGpuProfileId", savedGpuProfileId },
              { "appliedGpuProfileId", appliedGpuProfileId }, { "appliedByApp", appliedByApp },
              { "appliedByPid", appliedByPid } };
@@ -496,10 +495,10 @@ UCC_DBUS_DEFINE_STRUCT_STREAM_OPERATORS( ZoneTelemetryDto,
   argument >> value.temp >> value.duty >> value.rpm; )
 
 UCC_DBUS_DEFINE_STRUCT_STREAM_OPERATORS( AppliedProfilesDto,
-  argument << value.profileId << value.profileName << value.fanProfileId << value.wcAutoControl
+  argument << value.profileId << value.profileName << value.fanProfileId
            << value.keyboardProfileId << value.savedGpuProfileId << value.appliedGpuProfileId
            << value.appliedByApp << value.appliedByPid;,
-  argument >> value.profileId >> value.profileName >> value.fanProfileId >> value.wcAutoControl
+  argument >> value.profileId >> value.profileName >> value.fanProfileId
            >> value.keyboardProfileId >> value.savedGpuProfileId >> value.appliedGpuProfileId
            >> value.appliedByApp >> value.appliedByPid; )
 

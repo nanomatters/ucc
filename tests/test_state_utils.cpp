@@ -27,11 +27,6 @@ private slots:
     QCOMPARE( profileStateToString( ProfileState::BAT ), std::string( "power_bat" ) );
   }
 
-  void toStringWC()
-  {
-    QCOMPARE( profileStateToString( ProfileState::WC ), std::string( "power_wc" ) );
-  }
-
   void toStringDefault()
   {
     // Any unknown value should fall through to "power_ac"

@@ -202,7 +202,6 @@ private:
         auto& stateMap = j["stateMap"];
         if (stateMap.contains("power_ac")) settings.stateMap["power_ac"] = stateMap["power_ac"];
         if (stateMap.contains("power_bat")) settings.stateMap["power_bat"] = stateMap["power_bat"];
-        if (stateMap.contains("power_wc")) settings.stateMap["power_wc"] = stateMap["power_wc"];
       }
 
       // Parse profiles map

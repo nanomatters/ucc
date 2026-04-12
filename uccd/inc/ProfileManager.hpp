@@ -285,8 +285,6 @@ public:
       {
         profile.fan.useControl      = it->value( "useControl", true );
         profile.fan.fanProfile      = it->value( "fanProfile", "fan-balanced" );
-        profile.fan.autoControlWC   = it->value( "autoControlWC", true );
-        profile.fan.enableWaterCooler = it->value( "enableWaterCooler", ucc::WATER_COOLER_INITIAL_STATE );
         std::cout << "[ProfileManager] Parsed profile '" << profile.name << "'" << std::endl;
       }
 
@@ -539,8 +537,6 @@ public:
     j["fan"] = {
       { "useControl",       profile.fan.useControl },
       { "fanProfile",       profile.fan.fanProfile },
-      { "autoControlWC",    profile.fan.autoControlWC },
-      { "enableWaterCooler", profile.fan.enableWaterCooler },
     };
 
     j["odmProfile"]    = {{ "name", profile.odmProfile.name.value_or( "" ) }};

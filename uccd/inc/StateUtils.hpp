@@ -96,8 +96,6 @@ inline std::string profileStateToString( ProfileState state ) noexcept
       return "power_ac";
     case ProfileState::BAT:
       return "power_bat";
-    case ProfileState::WC:
-      return "power_wc";
     default:
       return "power_ac";
   }

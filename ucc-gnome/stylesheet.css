@@ -205,32 +205,6 @@
     padding-left: 6px;
 }
 
-/* ── Combo buttons (pump voltage) ── */
-
-.ucc-combo-row {
-    spacing: 4px;
-    padding: 2px 0;
-}
-
-.ucc-combo-btn {
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    color: #ccc;
-    background-color: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.ucc-combo-btn:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.ucc-combo-btn:checked {
-    background-color: rgba(53, 132, 228, 0.3);
-    color: #fff;
-    border-color: rgba(53, 132, 228, 0.5);
-}
-
 /* ── Open Control Center button ── */
 
 .ucc-open-btn {

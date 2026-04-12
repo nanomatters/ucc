@@ -94,7 +94,7 @@ QString formatFanSpeed( const QString &fanSpeed )
 namespace ucc
 {
 
-DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager, bool waterCoolerSupported,
+DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager,
                             const QString &laptopModel, const QString &cpuModel,
                             const QString &dGpuModel, const QString &iGpuModel,
                             const QString &ramSummary, const QString &ramModules,
@@ -102,7 +102,6 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   : QWidget( parent )
   , m_systemMonitor( systemMonitor )
   , m_profileManager( profileManager )
-  , m_waterCoolerSupported( waterCoolerSupported )
   , m_laptopModel( laptopModel )
   , m_cpuModel( cpuModel )
   , m_dGpuModel( dGpuModel )
@@ -114,16 +113,6 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   connectSignals();
 
   // m_activeProfileLabel is created but hidden; it's only for internal use
-
-  // Initialize water cooler status polling only if supported
-  if ( m_waterCoolerSupported )
-  {
-    m_waterCoolerDbus = new QDBusInterface(QStringLiteral("com.uniwill.uccd"), QStringLiteral("/com/uniwill/uccd"), QStringLiteral("com.uniwill.uccd"), QDBusConnection::systemBus(), this);
-    m_waterCoolerPollTimer = new QTimer(this);
-    connect(m_waterCoolerPollTimer, &QTimer::timeout, this, &DashboardTab::updateWaterCoolerStatus);
-    m_waterCoolerPollTimer->start(1000);
-    updateWaterCoolerStatus();
-  }
 }
 
 void DashboardTab::setupUI()
@@ -154,44 +143,14 @@ void DashboardTab::setupUI()
   QLabel *titleLabel = new QLabel( titleText );
   titleLabel->setStyleSheet( QString("font-size: 22px; font-weight: bold;") );
 
-  // Water Cooler Enable toggle button (synced with FanControlTab)
-  m_waterCoolerEnableCheckBox = new QPushButton( "Water Cooler" );
-  m_waterCoolerEnableCheckBox->setCheckable( true );
-  m_waterCoolerEnableCheckBox->setChecked( ucc::WATER_COOLER_INITIAL_STATE );
-  m_waterCoolerEnableCheckBox->setToolTip( tr( "When enabled the daemon will scan for water cooler devices" ) );
-  m_waterCoolerEnableCheckBox->setFixedHeight( 24 );
-
-  {
-    QPalette pal_ = this->palette();
-    const QString midHex_ = pal_.color(QPalette::Mid).name();
-    const QString enabledColorHex = QStringLiteral("#4caf50"); // green
-    const QString disabledColorHex = QStringLiteral("#d32f2f"); // red
-    m_waterCoolerEnableCheckBox->setStyleSheet(
-      QString("QPushButton { font-size: 11px; padding: 2px 16px; border: 1px solid %1; border-radius: 4px; background-color: %2; }"
-              "QPushButton:checked { background-color: %3; font-weight: bold; padding: 2px 12px; }")
-        .arg(midHex_, disabledColorHex, enabledColorHex) );
-  }
-
-  // Hide water cooler checkbox if water cooler not supported
-  if ( !m_waterCoolerSupported )
-  {
-    m_waterCoolerEnableCheckBox->setVisible( false );
-  }
-
   // Both widgets share the same cell — title centered, checkbox right-aligned
   titleLayout->addWidget( titleLabel,                0, 0, Qt::AlignCenter );
-  titleLayout->addWidget( m_waterCoolerEnableCheckBox, 0, 0, Qt::AlignRight | Qt::AlignVCenter );
   layout->addLayout( titleLayout );
 
   // Active Profile label (created but not shown; only used in status bar)
   m_activeProfileLabel = new QLabel( "Loading..." );
   m_activeProfileLabel->setStyleSheet( QString("font-weight: bold; color: %1;").arg(textHex) );
   m_activeProfileLabel->setVisible( false );
-
-  // Water Cooler Status label (created but not shown; only used in status bar)
-  m_waterCoolerStatusLabel = new QLabel( "Disconnected" );
-  m_waterCoolerStatusLabel->setStyleSheet( QString("font-weight: bold; color: %1;").arg(m_ringColorHex) );
-  m_waterCoolerStatusLabel->setVisible( false );
 
   // makeCard: compact value-only cell — units are shown in caption badges
   auto makeCard = [&]( QLabel *&valueLabel ) -> QWidget * {
@@ -505,35 +464,6 @@ void DashboardTab::setupUI()
   m_iGpuGaugeContainer->setVisible( false );
   layout->addWidget( m_iGpuGaugeContainer );
 
-  // Water cooler section
-  m_waterCoolerHeader = new QLabel( "Water Cooler Monitor" );
-  m_waterCoolerHeader->setStyleSheet( "font-size: 14px; font-weight: bold;" );
-  m_waterCoolerHeader->setAlignment( Qt::AlignCenter );
-  layout->addWidget( m_waterCoolerHeader );
-
-  m_waterCoolerGrid = new QGridLayout();
-  m_waterCoolerGrid->setContentsMargins( 0, 0, 0, 0 );
-  m_waterCoolerGrid->addWidget( makePanelWithCaps(
-    makeCardRow({
-      makeCard( m_waterCoolerFanSpeedLabel ),
-      makeCard( m_waterCoolerPumpLabel )
-    }),
-    makeCaptionRow({ makeCaptionBadge("Fan (%)"), makeCaptionBadge("Pump (Level)") })
-  ), 0, 0 );
-  layout->addLayout( m_waterCoolerGrid );
-
-  // Hide water cooler monitor section if water cooler not supported
-  if ( !m_waterCoolerSupported )
-  {
-    m_waterCoolerHeader->setVisible( false );
-    // Hide all widgets in the water cooler grid
-    for ( int i = 0; i < m_waterCoolerGrid->count(); ++i )
-    {
-      if ( auto *w = m_waterCoolerGrid->itemAt( i )->widget() )
-        w->setVisible( false );
-    }
-  }
-
   layout->addStretch();
 }
 
@@ -571,10 +501,6 @@ void DashboardTab::connectSignals()
            this, &DashboardTab::onDGpuClockOffsetsChanged );
   connect( m_systemMonitor, &SystemMonitor::dGpuMemClockOffsetChanged,
            this, &DashboardTab::onDGpuClockOffsetsChanged );
-  connect( m_systemMonitor, &SystemMonitor::waterCoolerFanSpeedChanged,
-           this, &DashboardTab::onWaterCoolerFanSpeedChanged );
-  connect( m_systemMonitor, &SystemMonitor::waterCoolerPumpLevelChanged,
-           this, &DashboardTab::onWaterCoolerPumpLevelChanged );
 
   // Connect to profile manager for active profile changes
   connect( m_profileManager, &ProfileManager::activeProfileIndexChanged,
@@ -582,87 +508,10 @@ void DashboardTab::connectSignals()
              m_activeProfileLabel->setText( m_profileManager->activeProfileName() );
            } );
 
-  Q_UNUSED(m_waterCoolerDbus)
-
-  // Water cooler enable toggle button → emit signal for cross-tab sync and update status
-  connect( m_waterCoolerEnableCheckBox, &QPushButton::toggled,
-           this, [this]() {
-             updateWaterCoolerStatus();
-             emit waterCoolerEnableChanged( m_waterCoolerEnableCheckBox->isChecked() );
-           } );
-
   // GPU toggle button switches between dGPU and iGPU views
   connect( m_gpuToggleButton, &QPushButton::clicked, this, [this]() {
     switchGpuView( !m_showingIGpu );
   } );
-}
-
-void DashboardTab::updateWaterCoolerStatus()
-{
-  if ( not m_waterCoolerDbus || not m_waterCoolerHeader )
-    return;
-
-  auto setWCStatus = [ this ]( const bool connected )
-  {
-    for ( int i = 0; i < m_waterCoolerGrid->count(); ++i )
-    {
-      if ( QWidget *w = m_waterCoolerGrid->itemAt( i )->widget() )
-        w->setVisible( connected );
-    }
-
-    m_waterCoolerHeader->setVisible( connected );
-  };
-
-  // Check if water cooler is enabled
-  bool wcEnabled = m_waterCoolerEnableCheckBox ? m_waterCoolerEnableCheckBox->isChecked() : false;
-
-  // Get water cooler state from daemon
-  // Note: GetWaterCoolerAvailable returns true when scanning is active (not when a device is found)
-  // GetWaterCoolerConnected returns true only when a device is actually connected
-  QDBusReply<bool> scanning = m_waterCoolerDbus->call(QStringLiteral("GetWaterCoolerAvailable"));
-  QDBusReply<bool> connected = m_waterCoolerDbus->call(QStringLiteral("GetWaterCoolerConnected"));
-
-  // Compute explicit hex colors from the current palette so styles are consistent.
-  QPalette pal = this->palette();
-  const QString textHex = pal.color(QPalette::WindowText).name();
-  const QString midHex = pal.color(QPalette::Mid).name();
-  const QString highlightHex = pal.color(QPalette::Highlight).name();
-  const QString searchingColorHex = QStringLiteral("#0066cc");  // Dark blue for searching
-
-  // Helper: emit status bar signal (dashboard label is hidden).
-  auto emitStatus = [this]( const QString &statusText, const QString &colorHex )
-  {
-    emit waterCoolerStatusChanged(
-      QString("<span style='color: %1;'>&#9679;</span> Water Cooler: %2").arg( colorHex, statusText ) );
-  };
-
-  // Status progression: Disabled → Disconnected → Searching → Connected
-  if ( !wcEnabled )
-  {
-    emitStatus( QStringLiteral("Disabled"), m_ringColorHex );
-    setWCStatus( false );
-  }
-  else if ( connected.isValid() && connected.value() )
-  {
-    emitStatus( QStringLiteral("Connected"), highlightHex );
-    setWCStatus( true );
-  }
-  else if ( scanning.isValid() && scanning.value() )
-  {
-    // GetWaterCoolerAvailable == true means the daemon is actively scanning
-    emitStatus( QStringLiteral("Searching..."), searchingColorHex );
-    setWCStatus( false );
-  }
-  else
-  {
-    emitStatus( QStringLiteral("Disconnected"), m_ringColorHex );
-    setWCStatus( false );
-  }
-}
-
-void DashboardTab::refreshWaterCoolerStatus()
-{
-  updateWaterCoolerStatus();
 }
 
 // Dashboard slots
@@ -836,35 +685,6 @@ void DashboardTab::onIGpuTempChanged()
   }
 }
 
-// Water cooler status slots
-void DashboardTab::onWaterCoolerConnected()
-{
-  updateWaterCoolerStatus();
-}
-
-void DashboardTab::onWaterCoolerDisconnected()
-{
-  updateWaterCoolerStatus();
-}
-
-void DashboardTab::onWaterCoolerDiscoveryStarted()
-{
-  updateWaterCoolerStatus();
-}
-
-void DashboardTab::onWaterCoolerDiscoveryFinished()
-{
-  updateWaterCoolerStatus();
-}
-
-void DashboardTab::onWaterCoolerConnectionError( const QString &error )
-{
-  Q_UNUSED( error );
-  updateWaterCoolerStatus();
-}
-
-// Note: status is determined by daemon; this function queries it and updates label/color
-// (The DBus-backed implementation is the single source of truth.)
 
 void DashboardTab::onFanSpeedChanged()
 {
@@ -934,30 +754,6 @@ void DashboardTab::onDGpuClockOffsetsChanged()
   }
   else
     m_gpuClockOffsetLabel->setText( "--" );
-}
-
-void DashboardTab::onWaterCoolerFanSpeedChanged()
-{
-  if ( m_waterCoolerFanSpeedLabel )
-    m_waterCoolerFanSpeedLabel->setText( formatFanSpeed( m_systemMonitor->waterCoolerFanSpeed() ) );
-}
-
-void DashboardTab::onWaterCoolerPumpLevelChanged()
-{
-  if ( m_waterCoolerPumpLabel )
-  {
-    QString val = m_systemMonitor->waterCoolerPumpLevel();
-    if ( val.isEmpty() )
-      val = "--";
-    m_waterCoolerPumpLabel->setText( val );
-  }
-}
-
-void DashboardTab::setWaterCoolerEnabled( bool enabled )
-{
-  m_waterCoolerEnableCheckBox->blockSignals( true );
-  m_waterCoolerEnableCheckBox->setChecked( enabled );
-  m_waterCoolerEnableCheckBox->blockSignals( false );
 }
 
 void DashboardTab::switchGpuView( bool showIGpu )

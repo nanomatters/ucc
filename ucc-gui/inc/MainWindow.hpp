@@ -38,7 +38,6 @@
 #include "SystemMonitor.hpp"
 #include "../libucc-dbus/UccdClient.hpp"
 #include "FanCurveEditorWidget.hpp"
-#include "PumpCurveEditorWidget.hpp"
 #include "KeyboardVisualizerWidget.hpp"
 #include "DashboardTab.hpp"
 #include "HardwareTab.hpp"
@@ -84,7 +83,6 @@ namespace ucc
     void onRemoveProfileClicked();
     void onRemoveFanProfileClicked();
     void onFanCurveChanged(const QString &zoneId, const QVector<FanCurveEditorWidget::Point>& points);
-    void onPumpCurveChanged(const QString &zoneId, const QVector<PumpCurveEditorWidget::Point>& points);
     void onFanProfileChanged(const QString& fanProfileId);
     void onCopyFanProfileClicked();
 
@@ -181,7 +179,6 @@ namespace ucc
     QTextEdit *m_descriptionEdit = nullptr;
     QPushButton *m_mainsButton = nullptr;
     QPushButton *m_batteryButton = nullptr;
-    QPushButton *m_waterCoolerButton = nullptr;
 
     constexpr bool profileTopWidgetsAvailable() const
     { return m_applyButton && m_saveButton && m_copyProfileButton && m_removeProfileButton && m_profileCombo; }
@@ -198,11 +195,10 @@ namespace ucc
     QComboBox *m_profileChargeLimitCombo = nullptr;
 
     // Fan control widgets (profile page)
-    QCheckBox *m_autoWaterControlCheckBox = nullptr;
     QComboBox *m_profileFanProfileCombo = nullptr;
     QMap< QString, QVector< FanPoint > > m_fanZonePoints;   // zoneId → cached fan curve
 
-    // Fan control tab (owns editors, combo, buttons, water cooler hw controls)
+    // Fan control tab (owns editors, combo, buttons)
     FanControlTab *m_fanControlTab = nullptr;
 
     // GPU OC profile tab
@@ -250,20 +246,15 @@ namespace ucc
     QString m_currentFanProfile;
     bool m_loadedMainsAssignment = false;
     bool m_loadedBatteryAssignment = false;
-    bool m_loadedWaterCoolerAssignment = false;
     bool m_saveInProgress = false;
     bool m_initializing = true;  // true during constructor, prevents hardware writes
 
     // Device capability flags (queried from daemon at startup)
-    bool m_waterCoolerSupported = false;
     bool m_hasMultiplePowerStates = false;
     bool m_cTGPAdjustmentSupported = true;
     int m_gpuDefaultPowerLimit = 0;  // Default GPU power limit in watts, queried from daemon
 
     // Statusbar connection indicator
     QLabel *m_connectionLabel = nullptr;
-
-    // Statusbar water-cooler status indicator (shown only when water-cooler is supported)
-    QLabel *m_waterCoolerStatusBarLabel = nullptr;
   };
 }

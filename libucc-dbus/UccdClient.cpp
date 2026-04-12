@@ -578,11 +578,6 @@ std::optional< std::string > UccdClient::getGpuInfo()
 }
 
 // Device Capability Queries
-std::optional< bool > UccdClient::getWaterCoolerSupported()
-{
-  return callMethod< bool >( "GetWaterCoolerSupported" );
-}
-
 std::optional< bool > UccdClient::getCTGPAdjustmentSupported()
 {
   return callMethod< bool >( "GetCTGPAdjustmentSupported" );
@@ -664,16 +659,6 @@ std::optional< std::vector< std::string > > UccdClient::getAvailableEPPs()
 std::optional< int > UccdClient::getCpuCoreCount()
 {
   return callMethod< int >( "GetCpuCoreCount" );
-}
-
-bool UccdClient::enableWaterCooler( bool enable )
-{
-  return callMethod< bool, bool >( "EnableWaterCooler", enable ).value_or( false );
-}
-
-std::optional< bool > UccdClient::isWaterCoolerEnabled()
-{
-  return callMethod< bool >( "IsWaterCoolerEnabled" );
 }
 
 bool UccdClient::applyFanProfiles( const ucc::dbus::FanZoneCurveDtoList &zones,
@@ -1434,38 +1419,6 @@ std::optional< int > UccdClient::getGpuFanSpeedPercent()
     return *gpu2;
   }
   return std::nullopt;
-}
-
-// Water cooler control
-bool UccdClient::setWaterCoolerFanSpeed( int dutyCyclePercent )
-{
-  return callMethod< bool, int >( "SetWaterCoolerFanSpeed", dutyCyclePercent ).value_or( false );
-}
-
-bool UccdClient::setWaterCoolerPumpVoltage( int voltageCode )
-{
-  return callMethod< bool, int >( "SetWaterCoolerPumpVoltage", voltageCode ).value_or( false );
-}
-
-bool UccdClient::setWaterCoolerLEDColor( int r, int g, int b, int mode )
-{
-  return callMethod< bool, int, int, int, int >( "SetWaterCoolerLEDColor", r, g, b, mode ).value_or( false );
-}
-
-bool UccdClient::turnOffWaterCoolerLED()
-{
-  return callMethod< bool >( "TurnOffWaterCoolerLED" ).value_or( false );
-}
-
-// Water cooler readings
-std::optional< int > UccdClient::getWaterCoolerFanSpeed()
-{
-  return callMethod< int >( "GetWaterCoolerFanSpeed" );
-}
-
-std::optional< int > UccdClient::getWaterCoolerPumpLevel()
-{
-  return callMethod< int >( "GetWaterCoolerPumpLevel" );
 }
 
 // --- Monitoring history ---

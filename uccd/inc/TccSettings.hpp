@@ -23,8 +23,7 @@
 enum class ProfileState
 {
   AC,  // power_ac - plugged in
-  BAT, // power_bat - on battery
-  WC   // power_wc - water cooler connected
+  BAT  // power_bat - on battery
 };
 
 /**

@@ -43,7 +43,6 @@
 #include "workers/FanControlWorker.hpp"
 #include "KeyboardBacklightController.hpp"
 #include "workers/ProfileSettingsWorker.hpp"
-#include "platform/uniwill/LCTWaterCoolerWorker.hpp"
 #include "workers/NvidiaOCWorker.hpp"
 #include "workers/AutoOCWorker.hpp"
 #include "workers/AutoUndervoltWorker.hpp"
@@ -154,10 +153,6 @@ public:
   std::atomic< int32_t > nvidiaPowerCTRLMinPowerLimit;
   std::atomic< int32_t > nvidiaPowerCTRLMaxPowerLimit;
   std::atomic< bool > nvidiaPowerCTRLAvailable;
-  std::atomic< bool > waterCoolerAvailable;
-  std::atomic< bool > waterCoolerConnected;
-  std::atomic< bool > waterCoolerScanningEnabled;
-  std::atomic< bool > waterCoolerSupported;
   std::atomic< bool > cTGPAdjustmentSupported;
   std::atomic< bool > deviceSupported{ false };
   std::atomic< int32_t > cpuFrequencyMHz;
@@ -215,10 +210,7 @@ public:
       nvidiaPowerCTRLMinPowerLimit( 0 ),
       nvidiaPowerCTRLMaxPowerLimit( 1000 ),
       nvidiaPowerCTRLAvailable( false ),
-        waterCoolerAvailable( false ),
-        waterCoolerConnected( false ),
-        waterCoolerScanningEnabled( ucc::WATER_COOLER_INITIAL_STATE ),
-        waterCoolerSupported( false ),
+
         cTGPAdjustmentSupported( false ),
         cpuFrequencyMHz( -1 )
   {
@@ -451,23 +443,7 @@ public slots:
   bool HasAutoUndervoltCheckpoint();
   bool ClearAutoUndervoltCheckpoint();
 
-  // water cooler methods
-  bool GetWaterCoolerAvailable();
-  bool GetWaterCoolerConnected();
-  int GetWaterCoolerFanSpeed();
-  int GetWaterCoolerPumpLevel();
-  bool EnableWaterCooler( bool enable );
-  bool IsWaterCoolerEnabled();
-  bool SetWaterCoolerFanSpeed( int dutyCyclePercent );
-  bool SetWaterCoolerPumpVoltage( int voltage );
-  bool SetWaterCoolerLEDColor( int red, int green, int blue, int mode );
-  bool TurnOffWaterCoolerLED();
-  bool TurnOffWaterCoolerFan();
-  bool TurnOffWaterCoolerPump();
-  bool IsWaterCoolerAutoControlEnabled();
-
   // device capability methods
-  bool GetWaterCoolerSupported();
   bool GetCTGPAdjustmentSupported();
 
   // monitoring history methods
@@ -489,7 +465,6 @@ signals:
   void ProfilesListChanged();
   void ModeReapplyPendingChanged( bool pending );
   void PowerStateChanged( const QString &state );
-  void WaterCoolerStatusChanged( const QString &status );
   void AutoOCProgressChanged( const QVariantMap &progress );
   void AutoOCFinished( int coreOffsetMHz, int vramOffsetMHz,
                        bool success, const QString &message );
@@ -506,7 +481,6 @@ public:
                            const std::string &gpuProfileId = {} );
   void emitProfilesListChanged();
   void emitPowerStateChanged( const std::string &state );
-  void emitWaterCoolerStatusChanged( const std::string &status );
 
   // allow UccDBusService to access timeout handling
   friend class UccDBusService;
@@ -582,9 +556,6 @@ public:
   {
     return m_adaptor.get();
   }
-
-  // Control water cooler scanning (can be called by DBus adaptor)
-  void setWaterCoolerScanningEnabled( bool enable );
 
   /**
    * @brief Get the CPU worker
@@ -680,33 +651,6 @@ private:
   ProfileState m_currentState;
   std::string m_currentStateProfileId;
 
-  // water cooler state tracking
-  bool m_previousWaterCoolerConnected;
-  std::atomic< int32_t > m_waterCoolerLedMode{ 0 };  // Tracks the GUI-requested LED mode (may be Temperature)
-
-  // Pump hysteresis: on the way up the table threshold is used directly;
-  // on the way down the pump only steps down once the temperature has fallen
-  // at least PUMP_HYSTERESIS_DEG below the threshold that caused the last step-up.
-  static constexpr int PUMP_HYSTERESIS_DEG = 3;
-  int m_pumpHysSpeedIdx{ 0 };    // last applied speed index (0=Off … 4=V12)
-  int m_pumpHysThreshold{ 0 };   // table entryTemp that last triggered a step-up
-
-  // EWMA filter for the temperature fed to water-cooler fan + pump auto-control.
-  // The FanControlWorker has its own EWMA per fan, but the WC callback receives
-  // the raw sensor reading.  This filter smooths it with the same asymmetric
-  // weights (fast rise, slow fall) so the pump doesn't bounce on noisy sensors.
-  double m_wcTempFiltered{ -1.0 };
-  static constexpr double WC_TEMP_ALPHA_RISING  = 0.5;
-  static constexpr double WC_TEMP_ALPHA_FALLING = 0.15;
-
-  // Water cooler debounce – avoids reacting to brief BLE connect/disconnect
-  // glitches that cause rapid power-state oscillation.
-  bool m_wcDebouncePending = false;
-  bool m_wcDebouncedTarget = false;                           // the state we are debouncing towards
-  std::chrono::steady_clock::time_point m_wcDebounceStart{};  // when the pending change was first seen
-  static constexpr int WC_CONNECT_DEBOUNCE_S    = 3;          // seconds stable before accepting "connected"
-  static constexpr int WC_DISCONNECT_DEBOUNCE_S = 10;         // seconds stable before accepting "disconnected"
-
   void setupGpuDataCallback();
   void rebuildBuiltinFanProfiles();
   void rebuildBuiltinGpuProfiles();
@@ -727,7 +671,6 @@ private:
   void applyProfileForCurrentState();
   void applyFullProfile( const UccProfile &profile );
   void onFanTemperatureUpdate( size_t fanIndex, int64_t timestamp, int temp );
-  void updateWaterCoolerAutoControl( int temp );
   void onAutoUndervoltFinished( const UndervoltResult &result );
   void persistAutoUndervoltProfile( const UndervoltResult &result );
   void applyFanAndPumpSettings( const UccProfile &profile );
@@ -755,7 +698,6 @@ private:
   std::unique_ptr< ProfileSettingsWorker > m_profileSettingsWorker;
   std::unique_ptr< FanControlWorker > m_fanControlWorker;
   KeyboardBacklightController m_keyboardBacklightController;
-  std::unique_ptr< LCTWaterCoolerWorker > m_waterCoolerWorker;
   std::unique_ptr< NvidiaOCWorker > m_nvidiaOCWorker;
   std::unique_ptr< AutoOCWorker > m_autoOCWorker;
   std::unique_ptr< AutoUndervoltWorker > m_autoUndervoltWorker;

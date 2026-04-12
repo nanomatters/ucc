@@ -37,8 +37,6 @@ set( UCC_GUI_SOURCES
   inc/DashboardTab.hpp
   src/HardwareTab.cpp
   inc/HardwareTab.hpp
-  src/LCTWaterCoolerController.cpp
-  inc/LCTWaterCoolerController.hpp
   src/KeyboardTab.cpp
   src/ProfileManager.cpp
   inc/ProfileManager.hpp
@@ -46,8 +44,6 @@ set( UCC_GUI_SOURCES
   inc/SystemMonitor.hpp
   src/FanCurveEditorWidget.cpp
   inc/FanCurveEditorWidget.hpp
-  src/PumpCurveEditorWidget.cpp
-  inc/PumpCurveEditorWidget.hpp
   src/KeyboardVisualizerWidget.cpp
   inc/KeyboardVisualizerWidget.hpp
   src/DetectLayout.cpp

@@ -73,7 +73,6 @@ inline constexpr auto savedGpuProfileId = QLatin1StringView( "savedGpuProfileId"
 inline constexpr auto appliedGpuProfileId = QLatin1StringView( "appliedGpuProfileId" );
 inline constexpr auto appliedByApp = QLatin1StringView( "appliedByApp" );
 inline constexpr auto appliedByPid = QLatin1StringView( "appliedByPid" );
-inline constexpr auto wcAutoControl = QLatin1StringView( "wcAutoControl" );
 }
 
 namespace telemetry

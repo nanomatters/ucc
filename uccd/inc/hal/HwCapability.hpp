@@ -47,8 +47,7 @@ enum class HwCapability : uint32_t
   PowerSupply       = 1 << 12,  // battery / AC status
   OdmProfiles       = 1 << 13,  // vendor perf profiles (Uniwill/TDP modes)
   PlatformLeds      = 1 << 14,  // chassis RGB, logo LED, etc.
-  WaterCooler       = 1 << 15,  // external water cooler (BLE)
-  MultiplePowerStates = 1 << 16, // device has battery → AC/BAT/WC power states
+  MultiplePowerStates = 1 << 15, // device has battery → AC/BAT power states
 };
 
 inline constexpr HwCapability operator|( HwCapability a, HwCapability b ) noexcept
@@ -154,7 +153,6 @@ inline std::string capabilitiesToJSON( HwCapability caps )
   check( HwCapability::PowerSupply,       "powerSupply" );
   check( HwCapability::OdmProfiles,       "odmProfiles" );
   check( HwCapability::PlatformLeds,      "platformLeds" );
-  check( HwCapability::WaterCooler,       "waterCooler" );
   check( HwCapability::MultiplePowerStates, "multiplePowerStates" );
 
   std::string result = "[";

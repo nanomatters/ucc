@@ -32,8 +32,6 @@
 #include <QMap>
 
 #include "FanCurveEditorWidget.hpp"
-#include "PumpCurveEditorWidget.hpp"
-#include "LCTWaterCoolerController.hpp"
 #include "CommonTypes.hpp"
 #include "UccDbusTypes.hpp"
 #include "../../libucc-dbus/UccdClient.hpp"
@@ -50,9 +48,7 @@ namespace ucc
  * @brief Fan control tab widget.
  *
  * Contains the fan profile selection bar, dynamic sub-tabs for system
- * and water-cooler zones, all fan curve editors, pump voltage curve
- * editors, and the hardware water-cooler controls (enable, pump manual,
- * LED, colour).
+ * zones, and all fan curve editors.
  *
  * Zone editors are created dynamically from profile data via
  * buildZoneEditors().
@@ -64,7 +60,6 @@ class FanControlTab : public QWidget
 public:
   explicit FanControlTab( UccdClient *client,
                           ProfileManager *profileManager,
-                          bool waterCoolerSupported,
                           QWidget *parent = nullptr );
   ~FanControlTab() override = default;
 
@@ -73,9 +68,7 @@ public:
 
   // Dynamic zone editor accessors (return nullptr if zone not present)
   FanCurveEditorWidget *fanEditor( const QString &zoneId ) const;
-  PumpCurveEditorWidget *pumpEditor( const QString &zoneId ) const;
   const QMap< QString, FanCurveEditorWidget * > &fanEditors() const { return m_fanEditors; }
-  const QMap< QString, PumpCurveEditorWidget * > &pumpEditors() const { return m_pumpEditors; }
 
   /** Build/rebuild zone editors from topology/source metadata and raw hardware inventory. */
   void buildZoneEditors( const ucc::dbus::FanZoneDtoList &zones,
@@ -104,17 +97,6 @@ public:
   QPushButton *removeButton() const { return m_removeFanProfileButton; }
   QPushButton *revertButton() const { return m_revertFanProfilesButton; }
 
-  /** Update the water-cooler enable checkbox without re-triggering signals. */
-  void setWaterCoolerEnabled( bool enabled );
-  void sendWaterCoolerEnable( bool enabled );
-  bool isWaterCoolerEnabled() const;
-
-  /** Update water cooler manual control state based on auto control setting. */
-  void setWaterCoolerAutoControl( bool autoControl );
-
-  /** Start/stop water cooler polling based on enable state. */
-  void updateWaterCoolerPolling();
-
   QString currentFanProfile() const { return m_currentFanProfile; }
   void setCurrentFanProfile( const QString &name ) { m_currentFanProfile = name; }
 
@@ -139,28 +121,14 @@ signals:
   void fanProfileChanged( const QString &fanProfileId );
   void fanProfileRenamed( const QString &oldName, const QString &newName );
   void fanCurveChanged( const QString &zoneId, const QVector<FanCurveEditorWidget::Point> &points );
-  void pumpCurveChanged( const QString &zoneId, const QVector<PumpCurveEditorWidget::Point> &points );
   void thermalSourceChanged( const QString &zoneId, const QString &thermalSourceId );
-  void waterCoolerEnableChanged( bool enabled );
 
 private slots:
-  // Water cooler hardware slots
-  void onWaterCoolerEnableToggled( bool enabled );
-  void onConnected();
-  void onDisconnected();
-  void onPumpVoltageChanged( int index );
-  void onFanSpeedChanged( int speed );
-  void onLEDOnOffChanged( bool enabled );
-  void onLEDModeChanged( int index );
-  void onColorPickerClicked();
   void onFanProfileComboRenamed();
-  void onWaterCoolerPollTimeout();
 
 private:
   void setupUI();
   void connectSignals();
-  void updateColorButtonState();
-  void updateManualControlState();
   void populateZoneTemplateCombo( QComboBox *combo ) const;
   void applyCurveTemplateToZone( const QString &zoneId,
                                  const QString &templateId );
@@ -194,7 +162,6 @@ private:
   void onFanEditorPointsChanged( const QString &zoneId, const QVector< FanCurveEditorWidget::Point > &pts );
   void rebuildZoneEditorsWithState( const ucc::dbus::FanZoneDtoList &zones,
                                     const QMap< QString, QVector< FanCurveEditorWidget::Point > > &fanPoints,
-                                    const QMap< QString, QVector< PumpCurveEditorWidget::Point > > &pumpPoints,
                                     const QMap< QString, QString > &sourceByZone );
   void onZoneContextMenu( const QPoint &pos );
   void onDeviceDroppedOnZone( int row, const QString &deviceId );
@@ -218,7 +185,6 @@ private:
 
   // Dynamic zone editors (created by buildZoneEditors)
   QMap< QString, FanCurveEditorWidget * > m_fanEditors;
-  QMap< QString, PumpCurveEditorWidget * > m_pumpEditors;
   QMap< QString, QComboBox * > m_thermalSourceCombos;
   QMap< QString, QComboBox * > m_templateSourceCombos;
   QMap< QString, QString > m_selectedTemplateByZone;
@@ -227,25 +193,6 @@ private:
 
   // Sub-tab infrastructure (one tab per zone, created by buildZoneEditors)
   QTabWidget *m_subTabs = nullptr;
-
-  // Water cooler hardware controls (moved from HardwareTab)
-  QDBusInterface *m_waterCoolerDbus = nullptr;
-  QTimer *m_waterCoolerPollTimer = nullptr;
-  bool m_isWcConnected = false;
-  QPushButton *m_waterCoolerEnableCheckBox = nullptr;
-  QComboBox *m_pumpVoltageCombo = nullptr;
-  QCheckBox *m_ledOnOffCheckBox = nullptr;
-  QPushButton *m_colorPickerButton = nullptr;
-  QComboBox *m_ledModeCombo = nullptr;
-  QSlider *m_fanSpeedSlider = nullptr;
-  int m_currentRed = 255;
-  int m_currentGreen = 0;
-  int m_currentBlue = 0;
-
-  bool m_autoControl = true;
-  bool m_manualControlInitialized = false;
-  bool m_waterCoolerSupported = false;
-  QWidget *m_wcHardwareWidget = nullptr;
 
   // ── Source editor state (populated by buildZoneEditors) ──
   QVector< ucc::dbus::ThermalSourceDto > m_sourceEditorModel;

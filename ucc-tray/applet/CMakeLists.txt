@@ -10,7 +10,6 @@ plasma_add_applet( com.uniwill.ucc
     DashboardTab.qml
     PowerProfileTab.qml
     HardwareTab.qml
-    WaterCoolerTab.qml
   CPP_SOURCES
     ../src/TrayBackend.cpp
     ../src/TrayBackend.hpp

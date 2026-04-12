@@ -55,7 +55,6 @@ UccProfile makeSilent()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
-  profile.fan.autoControlWC = true;
   profile.odmProfile.name = "power_save";
   profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
   return profile;
@@ -73,7 +72,6 @@ UccProfile makeOffice()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
-  profile.fan.autoControlWC = true;
   profile.odmProfile.name = "enthusiast";
   profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
   return profile;
@@ -91,7 +89,6 @@ UccProfile makeHighPerformance()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
   profile.odmProfile.name = "overboost";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
   return profile;
@@ -116,7 +113,6 @@ UccProfile makeDefaultCustomProfile()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
   return profile;
 }
@@ -135,7 +131,6 @@ UccProfile makeDefaultMobileCustomProfileTDP()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
   return profile;
 }
@@ -159,7 +154,6 @@ UccProfile makeDefaultCustomProfile25WcTGP()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.fan.autoControlWC = true;
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
   return profile;
 }

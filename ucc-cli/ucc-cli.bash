@@ -19,7 +19,7 @@ _ucc_cli()
     local cur prev words cword
     _init_completion || return
 
-    local commands="status monitor cpu gpu power-limits odm profile statemap fan keyboard brightness webcam fnlock watercooler charging help version"
+    local commands="status monitor cpu gpu power-limits odm profile statemap fan keyboard brightness webcam fnlock charging help version"
 
     # Sub-commands per top-level command
     local profile_cmds="list get set defaults customs apply save delete"
@@ -33,7 +33,6 @@ _ucc_cli()
     local brightness_cmds="get set"
     local webcam_cmds="get set"
     local fnlock_cmds="get set"
-    local watercooler_cmds="status enable disable fan pump led led-off"
     local charging_cmds="status set-profile set-priority set-thresholds"
 
     # Global flags
@@ -92,9 +91,6 @@ _ucc_cli()
                 return ;;
             fnlock|fn-lock)
                 COMPREPLY=( $(compgen -W "$fnlock_cmds" -- "$cur") )
-                return ;;
-            watercooler|wc)
-                COMPREPLY=( $(compgen -W "$watercooler_cmds" -- "$cur") )
                 return ;;
             charging|charge)
                 COMPREPLY=( $(compgen -W "$charging_cmds" -- "$cur") )
@@ -188,11 +184,6 @@ _ucc_cli()
                 set) COMPREPLY=( $(compgen -W "on off" -- "$cur") ); return ;;
             esac
             ;;
-        watercooler|wc)
-            case "$subcmd" in
-                enable|on|disable|off|fan|pump|led|led-off) ;;  # no further completion
-            esac
-            ;;
         charging|charge)
             case "$subcmd" in
                 set-profile|set-priority)
@@ -209,7 +200,7 @@ _ucc_cli()
                         (( nargs++ ))
                     done
                     if [[ $nargs -eq 0 ]]; then
-                        COMPREPLY=( $(compgen -W "ac ac_wc" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "ac" -- "$cur") )
                     elif [[ $nargs -eq 1 ]]; then
                         local -a ids
                         mapfile -t ids < <(ucc-cli profile list 2>/dev/null | _ucc_cli_ids)

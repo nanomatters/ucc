@@ -132,8 +132,6 @@ int    TrayBackend::cpuFanRPM()    const { return m_cpuFanRPM; }
 int    TrayBackend::gpuFanRPM()    const { return m_gpuFanRPM; }
 int    TrayBackend::cpuFanPercent() const { return m_cpuFanPercent; }
 int    TrayBackend::gpuFanPercent() const { return m_gpuFanPercent; }
-int    TrayBackend::wcFanSpeed()   const { return m_wcFanSpeed; }
-int    TrayBackend::wcPumpLevel()  const { return m_wcPumpLevel; }
 int    TrayBackend::gpuComputeUtilPct()   const { return m_gpuComputeUtilPct; }
 int    TrayBackend::gpuMemoryUtilPct()    const { return m_gpuMemoryUtilPct; }
 int    TrayBackend::gpuVramUsedMiB()      const { return m_gpuVramUsedMiB; }
@@ -191,81 +189,6 @@ void TrayBackend::setDisplayBrightness( int v )
   {
     m_displayBrightness = v;
     emit displayBrightnessChanged();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Water cooler
-// ---------------------------------------------------------------------------
-
-bool TrayBackend::waterCoolerSupported() const { return m_waterCoolerSupported; }
-bool TrayBackend::wcConnected()           const { return m_powerState == QStringLiteral( "AC w/ Water Cooler" ); }
-bool TrayBackend::wcAutoControl()         const { return m_wcAutoControl; }
-bool TrayBackend::wcEnabled()             const { return m_wcEnabled; }
-int  TrayBackend::wcFanPercent()      const { return m_wcFanPercent; }
-int  TrayBackend::wcPumpVoltageCode() const { return m_wcPumpVoltageCode; }
-bool TrayBackend::wcLedEnabled()      const { return m_wcLedEnabled; }
-int  TrayBackend::wcLedMode()         const { return m_wcLedMode; }
-int  TrayBackend::wcLedRed()          const { return m_wcLedRed; }
-int  TrayBackend::wcLedGreen()        const { return m_wcLedGreen; }
-int  TrayBackend::wcLedBlue()         const { return m_wcLedBlue; }
-
-void TrayBackend::setWcFanSpeed( int percent )
-{
-  if ( m_client->setWaterCoolerFanSpeed( percent ) )
-  {
-    m_wcFanPercent = percent;
-    emit wcControlStateChanged();
-  }
-}
-
-void TrayBackend::setWcEnabled( bool enabled )
-{
-  m_client->enableWaterCooler( enabled );
-  m_wcEnabled = enabled;
-  m_wcEnabledOverride = true;
-  emit wcEnabledChanged();
-}
-
-void TrayBackend::setWcPumpVoltageCode( int voltageCode )
-{
-  if ( m_client->setWaterCoolerPumpVoltage( voltageCode ) )
-  {
-    m_wcPumpVoltageCode = voltageCode;
-    emit wcControlStateChanged();
-  }
-}
-
-void TrayBackend::setWcLedEnabled( bool enabled )
-{
-  if ( !enabled )
-  {
-    if ( m_client->turnOffWaterCoolerLED() )
-    {
-      m_wcLedEnabled = false;
-      emit wcControlStateChanged();
-    }
-  }
-  else
-  {
-    // Re-send the current colour/mode to turn the LED back on
-    if ( m_client->setWaterCoolerLEDColor( m_wcLedRed, m_wcLedGreen, m_wcLedBlue, m_wcLedMode ) )
-    {
-      m_wcLedEnabled = true;
-      emit wcControlStateChanged();
-    }
-  }
-}
-
-void TrayBackend::setWcLed( int r, int g, int b, int mode )
-{
-  if ( m_client->setWaterCoolerLEDColor( r, g, b, mode ) )
-  {
-    m_wcLedMode  = mode;
-    m_wcLedRed   = r;
-    m_wcLedGreen = g;
-    m_wcLedBlue  = b;
-    emit wcControlStateChanged();
   }
 }
 
@@ -472,12 +395,6 @@ void TrayBackend::pollMetrics()
   update( m_gpuVramFreqMHz,      m_client->getDGpuVramFrequencyMHz() );
   update( m_gpuCoreVoltageMv,    m_client->getDGpuCoreVoltageMv() );
 
-  if ( m_waterCoolerSupported )
-  {
-    update( m_wcFanSpeed,  m_client->getWaterCoolerFanSpeed() );
-    update( m_wcPumpLevel, m_client->getWaterCoolerPumpLevel() );
-  }
-
   if ( changed )
     emit metricsUpdated();
 }
@@ -491,13 +408,11 @@ void TrayBackend::pollSlowState()
     using namespace Qt::StringLiterals;
     auto s = raw == "power_ac"_L1  ? u"AC"_s
            : raw == "power_bat"_L1 ? u"Battery"_s
-           : raw == "power_wc"_L1  ? u"AC w/ Water Cooler"_s
            : raw;
     if ( s != m_powerState )
     {
       m_powerState = s;
       emit powerStateChanged();
-      emit wcConnectedChanged();  // derived from powerState
     }
   }
 
@@ -551,7 +466,6 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
     m_fanProfileOverride = false;
     m_keyboardProfileOverride = false;
     m_gpuProfileOverride = false;
-    m_wcEnabledOverride = false;
     changed = true;
   }
 
@@ -582,16 +496,6 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
   if ( changed )
   {
     emit activeProfileChanged();
-
-    if ( auto applied = m_client->getAppliedProfiles() )
-    {
-      const bool autoWC = applied->value( "wcAutoControl" ).toBool();
-      if ( autoWC != m_wcAutoControl )
-      {
-        m_wcAutoControl = autoWC;
-        emit wcAutoControlChanged();
-      }
-    }
   }
 }
 
@@ -745,14 +649,6 @@ void TrayBackend::loadCapabilities()
 
   if ( !m_deviceSupported )
     return;
-
-  if ( auto v = m_client->getWaterCoolerSupported() )
-  {
-    bool was = m_waterCoolerSupported;
-    m_waterCoolerSupported = *v;
-    if ( was != m_waterCoolerSupported )
-      emit waterCoolerSupportedChanged();
-  }
 
   if ( auto sysInfo = m_client->getSystemInfo() )
   {

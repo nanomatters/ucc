@@ -134,10 +134,6 @@ PlasmoidItem {
 
                     PC3.TabButton { text: i18n("Dashboard") }
                     PC3.TabButton { text: i18n("Profile") }
-                    PC3.TabButton {
-                        text: i18n("Water Cooler")
-                        visible: trayBackend.waterCoolerSupported
-                    }
                     PC3.TabButton { text: i18n("Hardware") }
                 }
 
@@ -161,7 +157,6 @@ PlasmoidItem {
 
             DashboardTab    { backend: trayBackend }
             PowerProfileTab { backend: trayBackend }
-            WaterCoolerTab  { backend: trayBackend }
             HardwareTab     { backend: trayBackend }
         }
 

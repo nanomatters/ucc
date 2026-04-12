@@ -18,8 +18,7 @@ private:
       "fahrenheit": true,
       "stateMap": {
         "power_ac":  "profile-perf",
-        "power_bat": "profile-quiet",
-        "power_wc":  "profile-cool"
+        "power_bat": "profile-quiet"
       },
       "profiles": {
         "profile-perf":  {"id":"profile-perf","name":"Performance"},
@@ -48,7 +47,6 @@ private slots:
     auto &s = *opt;
     QCOMPARE( s.stateMap.at( "power_ac" ),  std::string( "profile-perf" ) );
     QCOMPARE( s.stateMap.at( "power_bat" ), std::string( "profile-quiet" ) );
-    QCOMPARE( s.stateMap.at( "power_wc" ),  std::string( "profile-cool" ) );
   }
 
   void parse_profiles()
@@ -113,7 +111,6 @@ private slots:
     s.fahrenheit = true;
     s.stateMap["power_ac"]  = "profile-perf";
     s.stateMap["power_bat"] = "profile-quiet";
-    s.stateMap["power_wc"]  = "profile-cool";
     s.profiles["profile-perf"]  = R"({"id":"profile-perf","name":"Performance"})";
     s.profiles["profile-quiet"] = R"({"id":"profile-quiet","name":"Quiet"})";
     s.shutdownTime = "22:30";

@@ -24,13 +24,11 @@ cTGP (configurable Total Graphics Power) offset
 .IP \(bu 2
 ODM performance modes (firmware-level power profiles)
 .IP \(bu 2
-Fan curve management (CPU, GPU, pump, water cooler fans)
+Fan curve management (CPU, GPU, pump)
 .IP \(bu 2
 Per-zone keyboard backlight control (colours, modes, brightness)
 .IP \(bu 2
 Display brightness, webcam toggle, Fn Lock
-.IP \(bu 2
-Water cooler hardware (fan, pump, LED)
 .IP \(bu 2
 Battery charging profiles, priorities, and charge thresholds
 .SS Architecture
@@ -63,7 +61,7 @@ activated atomically:
 .IP \(bu 2
 CPU: governor, EPP, core count, turbo, frequency limits
 .IP \(bu 2
-Fan: which fan curve profile to use, lock fans together, water cooler
+Fan: which fan curve profile to use, lock fans together
 .IP \(bu 2
 Display: brightness, refresh rate
 .IP \(bu 2
@@ -90,9 +88,9 @@ Both types are identified by a UUID.
 The
 .B state map
 assigns a profile UUID to each power state
-.RB ( power_ac , " power_bat" , " power_wc" ),
-enabling automatic profile switching when the laptop is plugged in,
-on battery, or docked to a water cooler.
+.RB ( power_ac , " power_bat" ),
+enabling automatic profile switching when the laptop is plugged in
+or on battery.
 .PP
 .B Fan profiles
 and
@@ -131,7 +129,7 @@ Print a full system dashboard covering every hardware subsystem:
 system model, CPU/GPU model names, active profile, CPU and GPU
 temperatures, frequencies, power draw, fan speeds, extended NVIDIA metrics
 (if a discrete NVIDIA GPU is present), hardware toggles (brightness, webcam,
-Fn Lock), water cooler state (if supported), and charging information.
+Fn Lock), and charging information.
 .IP
 When NVIDIA extended metrics are available, the GPU section additionally
 shows GPU load, VRAM bus load, VRAM usage, P-state, core voltage, and clock
@@ -177,7 +175,7 @@ are annotated with the state labels (e.g.\& \fB[AC, WC]\fR).
 Print the active profile in a human-readable summary.
 The output covers every embedded section: CPU settings (governor, EPP,
 online cores, turbo, frequency limits), fan settings (profile UUID,
-same-speed, water cooler), display (brightness, refresh rate), webcam,
+same-speed), display (brightness, refresh rate), webcam,
 ODM power limits (PL1/PL2/PL4), cTGP offset, ODM performance mode,
 charging profile, and keyboard profile.
 .TP
@@ -226,9 +224,6 @@ Mains / AC adapter
 .TP
 .B power_bat
 Battery
-.TP
-.B power_wc
-AC with water cooler connected
 .RE
 .\" -------------------------------------------------------------------
 .SS "Fan Control \fR(fan)"
@@ -246,7 +241,7 @@ Custom profiles assigned to a power state are annotated with state labels.
 .TP
 .B fan get \fIFAN_PROFILE_ID\fR \fR(\fBshow\fR)
 Print the fan profile's curve data as a formatted table for each channel
-(CPU, GPU, Pump, Water cooler fan).
+(CPU, GPU, Pump).
 Works with both built-in and custom fan profiles; custom profiles are
 resolved from
 .IR ~/.config/uccrc .
@@ -254,9 +249,9 @@ resolved from
 .B fan set \fIFAN_PROFILE_ID\fR \fR(\fBactivate\fR)
 Activate a fan profile by its UUID.
 The stored curve keys
-.RB ( tableCPU ", " tableGPU ", " tablePump ", " tableWaterCoolerFan )
+.RB ( tableCPU ", " tableGPU ", " tablePump )
 are remapped to the daemon's apply format
-.RB ( cpu ", " gpu ", " pump ", " waterCoolerFan )
+.RB ( cpu ", " gpu ", " pump )
 and sent to the daemon.
 Works with both built-in and custom fan profiles.
 .TP
@@ -269,8 +264,7 @@ The JSON must contain one or more of the keys:
 {
   "cpu":            [ {"temp": 40, "speed": 20}, {"temp": 80, "speed": 100} ],
   "gpu":            [ {"temp": 40, "speed": 20}, {"temp": 80, "speed": 100} ],
-  "pump":           [ {"temp": 40, "speed": 30}, {"temp": 80, "speed": 100} ],
-  "waterCoolerFan": [ {"temp": 40, "speed": 20}, {"temp": 80, "speed": 100} ]
+  "pump":           [ {"temp": 40, "speed": 30}, {"temp": 80, "speed": 100} ]
 }
 .fi
 .RE
@@ -518,57 +512,6 @@ or
 Enable or disable Fn Lock (same boolean values as
 .BR "webcam set" ).
 .\" -------------------------------------------------------------------
-.SS "Water Cooler \fR(watercooler, wc)"
-These commands control the Uniwill LCT water cooling system.
-When the hardware does not support a water cooler, commands report
-\(lqnot supported.\(rq
-.TP
-.B watercooler status
-Print water cooler state: supported, enabled, fan speed and pump level.
-Fan speed and pump level are only shown when the cooler is enabled and
-the BLE connection is active.
-.TP
-.B watercooler enable \fR(\fBon\fR)
-Enable the water cooler (starts BLE scanning for the cooling unit).
-.TP
-.B watercooler disable \fR(\fBoff\fR)
-Disable the water cooler.
-.TP
-.B watercooler fan \fIPERCENT\fR
-Set the water cooler fan duty cycle (0\-100%).
-.TP
-.B watercooler pump \fICODE\fR
-Set the pump voltage.
-.I CODE
-values:
-.RS
-.TS
-tab(|);
-c c
-n l.
-Code|Voltage
-_
-0|11 V
-1|12 V
-2|7 V
-3|8 V
-4|off
-.TE
-.RE
-.TP
-.B watercooler led \fIR\fR \fIG\fR \fIB\fR \fIMODE\fR
-Set the water cooler LED colour and mode.
-.IR R ,
-.IR G ,
-.I B
-are 0\-255.
-.I MODE
-values:
-0\ =\ static, 1\ =\ breathe, 2\ =\ colorful, 3\ =\ breathe-color.
-.TP
-.B watercooler led-off
-Turn off the water cooler LED.
-.\" -------------------------------------------------------------------
 .SS "Charging \fR(charging, charge)"
 .TP
 .B charging status
@@ -630,7 +573,7 @@ the value is valid (>= 0 or non-empty).
 .nf
 {
   "connected":      bool,
-  "powerState":     "power_ac" | "power_bat" | "power_wc",
+  "powerState":     "power_ac" | "power_bat",
   "activeProfile":  { \fI...full profile object...\fR },
   "cpu": {
     "temperature":  int,     // °C
@@ -667,12 +610,6 @@ the value is valid (>= 0 or non-empty).
     "displayBrightness": int,
     "webcamEnabled":     bool,
     "fnLock":            bool
-  },
-  "waterCooler": {               // only if supported
-    "supported":  true,
-    "enabled":    bool,
-    "fanSpeed":   int,           // only if enabled
-    "pumpLevel":  int
   },
   "charging": {                  // only if hardware supports it
     "profile":        string,
@@ -923,17 +860,6 @@ ucc-cli kb activate <keyboard-profile-uuid>
 ucc-cli charging status
 ucc-cli charging set-thresholds 40 80
 ucc-cli charging set-profile balanced
-.fi
-.RE
-.SS Water Cooler
-.PP
-.RS
-.nf
-ucc-cli wc status
-ucc-cli wc enable
-ucc-cli wc fan 70
-ucc-cli wc led 0 255 0 1   # green, breathe mode
-ucc-cli wc led-off
 .fi
 .RE
 .\" ===================================================================

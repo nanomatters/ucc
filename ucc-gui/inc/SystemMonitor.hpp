@@ -50,8 +50,7 @@ class SystemMonitor : public QObject
   Q_PROPERTY( int dGpuPstate        READ dGpuPstate        NOTIFY dGpuPstateChanged )
   Q_PROPERTY( int dGpuGrClockOffset  READ dGpuGrClockOffset  NOTIFY dGpuGrClockOffsetChanged )
   Q_PROPERTY( int dGpuMemClockOffset READ dGpuMemClockOffset NOTIFY dGpuMemClockOffsetChanged )
-  Q_PROPERTY( QString waterCoolerFanSpeed READ waterCoolerFanSpeed NOTIFY waterCoolerFanSpeedChanged )
-  Q_PROPERTY( QString waterCoolerPumpLevel READ waterCoolerPumpLevel NOTIFY waterCoolerPumpLevelChanged )
+
   Q_PROPERTY( int displayBrightness READ displayBrightness WRITE setDisplayBrightness NOTIFY displayBrightnessChanged )
   Q_PROPERTY( bool webcamEnabled READ webcamEnabled WRITE setWebcamEnabled NOTIFY webcamEnabledChanged )
   Q_PROPERTY( bool fnLock READ fnLock WRITE setFnLock NOTIFY fnLockChanged )
@@ -89,8 +88,7 @@ public:
   int dGpuPstate()         const { return m_dGpuPstate; }
   int dGpuGrClockOffset()  const { return m_dGpuGrClockOffset; }
   int dGpuMemClockOffset() const { return m_dGpuMemClockOffset; }
-  QString waterCoolerFanSpeed() const { return m_waterCoolerFanSpeed; }
-  QString waterCoolerPumpLevel() const { return m_waterCoolerPumpLevel; }
+
   int displayBrightness() const { return m_displayBrightness; }
   bool webcamEnabled() const { return m_webcamEnabled; }
   bool fnLock() const { return m_fnLock; }
@@ -139,8 +137,6 @@ signals:
   void dGpuPstateChanged();
   void dGpuGrClockOffsetChanged();
   void dGpuMemClockOffsetChanged();
-  void waterCoolerFanSpeedChanged();
-  void waterCoolerPumpLevelChanged();
   void displayBrightnessChanged();
   void webcamEnabledChanged();
   void fnLockChanged();
@@ -183,8 +179,6 @@ private:
   int m_dGpuPstate         = -1;
   int m_dGpuGrClockOffset  = -999;
   int m_dGpuMemClockOffset = -999;
-  QString m_waterCoolerFanSpeed = "--";
-  QString m_waterCoolerPumpLevel = "--";
   int m_displayBrightness = 50;
   bool m_webcamEnabled = true;
   bool m_fnLock = false;

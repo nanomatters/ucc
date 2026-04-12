@@ -66,10 +66,6 @@ constexpr const char *AUTO_OC_CHECKPOINT_PATH = "/etc/ucc/autooc_checkpoint.json
 constexpr const char *AUTO_UV_CHECKPOINT_PATH = "/etc/ucc/autouv_checkpoint.json";
 }
 
-// Water cooler zone IDs — these are the zone IDs created by the BLE water cooler subsystem
-static constexpr const char *kWCFanZoneId  = "wc-fan";
-static constexpr const char *kWCPumpZoneId = "wc-pump";
-
 static std::string fanProfileToJSON( const FanProfile &fp,
                                      const std::unordered_map< std::string, std::string > &hwDeviceTypes,
                                      const std::unordered_map< std::string, std::string > &zoneNames )
@@ -256,8 +252,6 @@ static QVariantMap profileToVariantMap( const UccProfile &profile,
   QVariantMap fan;
   fan["useControl"]        = profile.fan.useControl;
   fan["fanProfile"]        = QString::fromStdString( profile.fan.fanProfile );
-  fan["autoControlWC"]     = profile.fan.autoControlWC;
-  fan["enableWaterCooler"] = profile.fan.enableWaterCooler;
   j["fan"] = fan;
 
   QVariantMap odmProfile;
@@ -867,7 +861,6 @@ QVariantMap UccDBusInterfaceAdaptor::GetAppliedProfiles()
   root[ "profileId" ] = QString::fromStdString( m_service->m_activeProfile.id );
   root[ "profileName" ] = QString::fromStdString( m_service->m_activeProfile.name );
   root[ "fanProfileId" ] = QString::fromStdString( m_service->m_activeProfile.fan.fanProfile );
-  root[ "wcAutoControl" ] = m_service->m_activeProfile.fan.autoControlWC;
   root[ "keyboardProfileId" ] = QString::fromStdString( m_service->m_activeProfile.keyboard.keyboardProfileId );
   root[ "savedGpuProfileId" ] = QString::fromStdString( m_service->m_activeProfile.gpuProfileId );
 
@@ -2421,7 +2414,7 @@ bool UccDBusInterfaceAdaptor::SetStateMap( const QString &state, const QString &
   std::cout << "[DBus] SetStateMap: " << stateStr << " -> " << profileIdStr << std::endl;
 
   // Verify the profile exists before updating stateMap
-  if ( stateStr == "power_ac" || stateStr == "power_bat" || stateStr == "power_wc" )
+  if ( stateStr == "power_ac" || stateStr == "power_bat" )
   {
     // Check if profile exists in:
     // 1. m_customProfiles (parsed objects)
@@ -2479,7 +2472,7 @@ bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QMap< QString, QString > &
   if ( !m_service )
     return false;
 
-  static const QStringList validStates = { "power_ac", "power_bat", "power_wc" };
+  static const QStringList validStates = { "power_ac", "power_bat" };
   bool anyChanged = false;
 
   for ( auto it = stateMap.constBegin(); it != stateMap.constEnd(); ++it )
@@ -2950,164 +2943,6 @@ int UccDBusInterfaceAdaptor::GetCpuCoreCount()
   if ( m_service && m_service->getCpuWorker() )
     return m_service->getCpuWorker()->getCoreCount();
   return -1;
-}
-
-// water cooler methods
-
-bool UccDBusInterfaceAdaptor::GetWaterCoolerAvailable()
-{
-  return m_data.waterCoolerAvailable;
-}
-
-bool UccDBusInterfaceAdaptor::GetWaterCoolerConnected()
-{
-  return m_data.waterCoolerConnected;
-}
-
-int UccDBusInterfaceAdaptor::GetWaterCoolerFanSpeed()
-{
-  if ( !m_service ) return -1;
-  auto *wc = m_service->m_waterCoolerWorker.get();
-  return wc ? static_cast< int >( wc->getLastFanSpeed() ) : -1;
-}
-
-int UccDBusInterfaceAdaptor::GetWaterCoolerPumpLevel()
-{
-  if ( !m_service ) return -1;
-  auto *wc = m_service->m_waterCoolerWorker.get();
-  return wc ? static_cast< int >( wc->getLastPumpVoltage() ) : -1;
-}
-
-bool UccDBusInterfaceAdaptor::EnableWaterCooler( bool enable )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  // Update shared DBus flag and request service to perform actions when disabling
-  m_data.waterCoolerScanningEnabled = enable;
-
-  // When scanning is disabled, mark unavailable and disconnected so clients
-  // immediately see the device as gone
-  if ( not enable )
-  {
-    m_data.waterCoolerAvailable = false;
-    m_data.waterCoolerConnected = false;
-  }
-
-  // Update the active profile so that subsequent profile re-applications
-  // (e.g. resume from suspend, autosave reload) don't override the runtime state.
-  if ( m_service )
-  {
-    m_service->m_activeProfile.fan.enableWaterCooler = enable;
-    m_service->setWaterCoolerScanningEnabled( enable );
-  }
-
-  return true;
-}
-
-bool UccDBusInterfaceAdaptor::IsWaterCoolerEnabled()
-{
-  if ( m_service )
-    return m_service->m_activeProfile.fan.enableWaterCooler;
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::SetWaterCoolerFanSpeed( int dutyCyclePercent )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( dutyCyclePercent < 0 || dutyCyclePercent > 100 )
-    return false;
-  if ( m_service )
-  {
-    auto *wc = m_service->m_waterCoolerWorker.get();
-    if ( wc )
-      return wc->setFanSpeed( dutyCyclePercent );
-  }
-
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int voltage )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  // V12(1) is reserved and V1bis excluded. Valid: {0, 2, 3, 4}
-  if ( voltage != 0 && voltage != 2 && voltage != 3 && voltage != 4 )
-    return false;
-  if ( m_service )
-  {
-    auto *wc = m_service->m_waterCoolerWorker.get();
-    if ( wc )
-      return wc->setPumpVoltage( voltage );
-  }
-
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int red, int green, int blue, int mode )
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service )
-  {
-    m_service->m_waterCoolerLedMode.store( mode );
-
-    // Temperature mode: internally use Static, daemon auto-sets color from fan speed
-    const int hwMode = ( mode == static_cast< int >( ucc::RGBState::Temperature ) )
-                             ? static_cast< int >( ucc::RGBState::Static )
-                             : mode;
-
-    auto *wc = m_service->m_waterCoolerWorker.get();
-    if ( wc )
-      return wc->setLEDColor( red, green, blue, hwMode );
-  }
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerLED()
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service )
-  {
-    auto *wc = m_service->m_waterCoolerWorker.get();
-    if ( wc )
-      return wc->turnOffLED();
-  }
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerFan()
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service )
-  {
-    auto *wc = m_service->m_waterCoolerWorker.get();
-    if ( wc )
-      return wc->turnOffFan();
-  }
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerPump()
-{
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service )
-  {
-    auto *wc = m_service->m_waterCoolerWorker.get();
-    if ( wc )
-      return wc->turnOffPump();
-  }
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::IsWaterCoolerAutoControlEnabled()
-{
-  if ( m_service )
-  {
-    return m_service->m_activeProfile.fan.autoControlWC;
-  }
-  return false;
-}
-
-bool UccDBusInterfaceAdaptor::GetWaterCoolerSupported()
-{
-  return m_data.waterCoolerSupported;
 }
 
 bool UccDBusInterfaceAdaptor::GetCTGPAdjustmentSupported()
@@ -3772,14 +3607,6 @@ void UccDBusInterfaceAdaptor::emitPowerStateChanged( const std::string &state )
   }, Qt::QueuedConnection );
 }
 
-void UccDBusInterfaceAdaptor::emitWaterCoolerStatusChanged( const std::string &status )
-{
-  QString s = QString::fromStdString( status );
-  QMetaObject::invokeMethod( this, [this, s]() {
-    emit WaterCoolerStatusChanged( s );
-  }, Qt::QueuedConnection );
-}
-
 // UccDBusService implementation
 
 UccDBusService::UccDBusService()
@@ -3796,9 +3623,7 @@ UccDBusService::UccDBusService()
     m_defaultProfiles(),
     m_customProfiles(),
     m_currentState( ProfileState::AC ),
-    m_currentStateProfileId(),
-    m_previousWaterCoolerConnected( false ),
-    m_waterCoolerWorker( std::make_unique<LCTWaterCoolerWorker>( m_dbusData ) )
+    m_currentStateProfileId()
 {
   // set daemon version
   m_dbusData.uccdVersion = "2.1.21";
@@ -3912,7 +3737,6 @@ UccDBusService::UccDBusService()
     check( HwCapability::PowerSupply,         "powerSupply" );
     check( HwCapability::OdmProfiles,         "odmProfiles" );
     check( HwCapability::PlatformLeds,        "platformLeds" );
-    check( HwCapability::WaterCooler,         "waterCooler" );
     check( HwCapability::MultiplePowerStates, "multiplePowerStates" );
     m_dbusData.capabilities = capList;
   }
@@ -5037,7 +4861,7 @@ void UccDBusService::shutdown()
 
   // Phase 2: Wait for all threads to finish while keeping the Qt event
   // loop alive.  Workers may have pending BlockingQueuedConnection calls
-  // (e.g. LCTWaterCoolerWorker) that need the main thread to dispatch.
+  // that need the main thread to dispatch.
   // Pumping events here prevents deadlocks.
   auto waitPumpingEvents = []( QThread *t ) {
     if ( !t || !t->isRunning() )
@@ -5195,8 +5019,6 @@ void UccDBusService::onWork()
   // UCC handles all profile decisions
 
   // Monitor power state and emit signals for UCC to handle
-  // Skip AC/BAT changes when water cooler is connected (power_wc takes priority)
-  if ( m_currentState != ProfileState::WC )
   {
     const ProfileState newState = determineState();
     const std::string stateKey = profileStateToString( newState );
@@ -5283,105 +5105,6 @@ void UccDBusService::onWork()
   // emit signal if mode reapply is pending
   if ( m_dbusData.modeReapplyPending and m_adaptor )
     m_adaptor->emitModeReapplyPendingChanged( true );
-
-  // Check water cooler connection state changes and switch power state.
-  // Debounce: BLE connections are inherently unstable – the water cooler
-  // may briefly disconnect (UART error) and reconnect within seconds.
-  // We only act on a state change once it has been stable for a
-  // configurable number of seconds (shorter for connect, longer for
-  // disconnect so a quick reconnect does not trigger a power-state flip).
-  bool wcConnected = m_dbusData.waterCoolerConnected;
-
-  if ( wcConnected != m_previousWaterCoolerConnected )
-  {
-    // Raw flag differs from the last accepted state.
-    if ( !m_wcDebouncePending || m_wcDebouncedTarget != wcConnected )
-    {
-      // First time we see this new value (or direction changed) – start timer.
-      m_wcDebouncePending  = true;
-      m_wcDebouncedTarget  = wcConnected;
-      m_wcDebounceStart    = std::chrono::steady_clock::now();
-    }
-    else
-    {
-      // Still waiting for the same direction – check elapsed time.
-      const int requiredSeconds = wcConnected ? WC_CONNECT_DEBOUNCE_S
-                                              : WC_DISCONNECT_DEBOUNCE_S;
-      auto elapsed = std::chrono::steady_clock::now() - m_wcDebounceStart;
-      if ( std::chrono::duration_cast< std::chrono::seconds >( elapsed ).count()
-           >= requiredSeconds )
-      {
-        // Stable long enough – accept the change.
-        m_wcDebouncePending = false;
-        m_previousWaterCoolerConnected = wcConnected;
-
-        const std::string status = wcConnected ? "connected" : "disconnected";
-        syslog( LOG_INFO, "Water cooler status changed to: %s (debounced)", status.c_str() );
-
-        // Emit signal for applications to handle water cooler status changes
-        m_adaptor->emitWaterCoolerStatusChanged( status );
-
-        // Switch power state based on water cooler connection and apply the
-        // corresponding profile so the system actually transitions.
-        if ( wcConnected )
-        {
-          m_currentState = ProfileState::WC;
-          const std::string stateKey = "power_wc";
-          std::cout << "[State] Water cooler connected, switching to " << stateKey << std::endl;
-          m_adaptor->emitPowerStateChanged( stateKey );
-        }
-        else
-        {
-          m_currentState = determineState();
-          const std::string stateKey = profileStateToString( m_currentState );
-          std::cout << "[State] Water cooler disconnected, reverting to " << stateKey << std::endl;
-          m_adaptor->emitPowerStateChanged( stateKey );
-        }
-
-        // Reset pump hysteresis so the auto-control loop picks up the correct
-        // level for the new profile from a clean state.
-        m_pumpHysSpeedIdx = 0;
-        m_pumpHysThreshold = 0;
-        m_wcTempFiltered = -1.0;  // reset EWMA so next sample seeds immediately
-
-        applyProfileForCurrentState();
-      }
-    }
-  }
-  else
-  {
-    // Raw flag matches accepted state – cancel any pending debounce.
-    m_wcDebouncePending = false;
-  }
-}
-
-void UccDBusService::setWaterCoolerScanningEnabled( bool enable )
-{
-  // Caller may hold no locks; update dbus data and request worker actions.
-  m_dbusData.waterCoolerScanningEnabled = enable;
-
-  if ( not enable )
-  {
-    m_dbusData.waterCoolerAvailable = false;
-    m_dbusData.waterCoolerConnected = false;
-  }
-
-  if ( not m_waterCoolerWorker )
-    return;
-
-  if ( enable )
-  {
-    // Only start scanning if not already scanning/connected.
-    // startScanning() calls cleanupBleController() which would tear down
-    // an active BLE connection, causing pump/fan commands to fail.
-    if ( not m_dbusData.waterCoolerAvailable.load() and not m_dbusData.waterCoolerConnected.load() )
-      m_waterCoolerWorker->startScanning();
-  }
-  else
-  {
-    // Stop discovery and disconnect; stopScanning() now also disconnects the device
-    m_waterCoolerWorker->stopScanning();
-  }
 }
 
 void UccDBusService::onExit()
@@ -5495,9 +5218,7 @@ bool UccDBusService::setCurrentProfileByName( const std::string &profileName )
   {
     if ( profile.name == profileName )
     {
-      const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
       m_activeProfile = profile;
-      m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
       snapProfileFrequencies( m_activeProfile );
       updateDBusActiveProfileData();
       return true;
@@ -5505,9 +5226,7 @@ bool UccDBusService::setCurrentProfileByName( const std::string &profileName )
   }
 
   // fallback to default profile
-  const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
   m_activeProfile = getDefaultProfile();
-  m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
   snapProfileFrequencies( m_activeProfile );
   updateDBusActiveProfileData();
   return false;
@@ -5523,10 +5242,7 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
     {
       std::cout << "[Profile] Switching to profile: " << profile.name << " (ID: " << id << ")" << std::endl;
       // Preserve runtime water cooler enable state across profile switches.
-      // The user's explicit EnableWaterCooler() D-Bus call is authoritative.
-      const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
       m_activeProfile = profile;
-      m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
       snapProfileFrequencies( m_activeProfile );
       updateDBusActiveProfileData();
 
@@ -5626,9 +5342,7 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
   // fallback to default profile
   std::cout << "[Profile] Profile ID not found: " << id << ", using default" << std::endl;
   {
-    const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
     m_activeProfile = getDefaultProfile();
-    m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
   }
   snapProfileFrequencies( m_activeProfile );
   updateDBusActiveProfileData();
@@ -5654,11 +5368,7 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
     std::cout << "[Profile] Applying profile from GUI: " << profile.name << std::endl;
 
     // Set as active profile, but preserve the runtime water cooler enable state.
-    // The user's explicit EnableWaterCooler() D-Bus call is authoritative;
-    // the stored profile may have a stale enableWaterCooler value.
-    const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
     m_activeProfile = profile;
-    m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
     snapProfileFrequencies( m_activeProfile );
     updateDBusActiveProfileData();
 
@@ -5679,34 +5389,6 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         {
           m_fanControlWorker->applyTemporaryZoneCurves( zoneCurves );
           std::cout << "[Profile] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
-        }
-
-        // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-        const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
-        if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-             && pumpZone && !pumpZone->curve.empty() )
-        {
-          int maxTemp = 0;
-          {
-            std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-            for ( const auto &fan : m_dbusData.fans )
-              maxTemp = std::max( maxTemp, fan.temp.data );
-          }
-          // Lookup pump voltage from the wc-pump zone curve
-          int pumpIdx = 0;
-          for ( const auto &pt : pumpZone->curve )
-          {
-            if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
-            else                      break;
-          }
-          // Reset hysteresis before a one-shot profile apply
-          m_pumpHysSpeedIdx = 0;
-          m_pumpHysThreshold = 0;
-          static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
-            ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-            ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-          m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
-          std::cout << "[Profile] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
         }
       }
     }
@@ -5944,9 +5626,7 @@ bool UccDBusService::updateCustomProfile( const UccProfile &profile )
     if ( m_activeProfile.id == profile.id )
     {
       std::cout << "[ProfileManager] Updated profile is active, reapplying to system" << std::endl;
-      const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
       m_activeProfile = profile;
-      m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
       snapProfileFrequencies( m_activeProfile );
       // Reapply the profile to actually update the hardware/system settings
       if ( setCurrentProfileById( profile.id ) )
@@ -6134,14 +5814,10 @@ void UccDBusService::computeDeviceCapabilities()
   // Delegate to UniwillProfileProvider when available
   if ( auto *uwProvider = dynamic_cast< ucc::hal::UniwillProfileProvider * >( m_hw.profileProvider() ) )
   {
-    m_dbusData.waterCoolerSupported = uwProvider->supportsWaterCooler();
     m_dbusData.cTGPAdjustmentSupported = uwProvider->supportsCTGPAdjustment();
   }
   else
   {
-    // Generic / non-Uniwill device: no water cooler, cTGP depends on sysfs
-    m_dbusData.waterCoolerSupported = false;
-
     std::error_code ec;
     const std::string ctgpPath = "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
     bool hardwareExists = std::filesystem::exists( ctgpPath, ec ) &&
@@ -6149,8 +5825,7 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.cTGPAdjustmentSupported = hardwareExists;
   }
 
-  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s",
-          m_dbusData.waterCoolerSupported.load() ? "supported" : "not supported",
+  syslog( LOG_INFO, "Device capabilities: cTGP=%s",
           m_dbusData.cTGPAdjustmentSupported.load() ? "supported" : "hidden" );
 }
 
@@ -6193,7 +5868,6 @@ void UccDBusService::loadSettings()
     {
       m_settings.stateMap[ "power_ac" ]  = bestProfileId;
       m_settings.stateMap[ "power_bat" ] = bestProfileId;
-      m_settings.stateMap[ "power_wc" ]  = bestProfileId;
     }
 
     std::cout << "[Settings] No settings file found — initialized default stateMap "
@@ -6253,7 +5927,7 @@ void UccDBusService::loadSettings()
 
   // validate and fix state map if needed
   auto allProfiles = getAllProfiles();
-  for ( const auto &stateKey : { "power_ac", "power_bat", "power_wc" } )
+  for ( const auto &stateKey : { "power_ac", "power_bat" } )
   {
     // check if state key exists in map – if not, leave it unassigned
     if ( m_settings.stateMap.find( stateKey ) == m_settings.stateMap.end() )
@@ -6388,9 +6062,6 @@ void UccDBusService::applyStartupProfile()
   applyKeyboardFromProfile( profile );
 
   applyGpuOCFromProfile( profile );
-
-  if ( m_dbusData.waterCoolerSupported )
-    setWaterCoolerScanningEnabled( profile.fan.enableWaterCooler );
 }
 
 void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
@@ -6456,32 +6127,6 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
             thermalSources[zc.zoneId] = zc.thermalSourceId;
         if ( m_fanControlWorker && !thermalSources.empty() )
           m_fanControlWorker->applyZoneThermalSources( thermalSources );
-      }
-
-      // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
-      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-           && pumpZone && !pumpZone->curve.empty() )
-      {
-        int maxTemp = 0;
-        {
-          std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-          for ( const auto &fan : m_dbusData.fans )
-            maxTemp = std::max( maxTemp, fan.temp.data );
-        }
-        int pumpIdx = 0;
-        for ( const auto &pt : pumpZone->curve )
-        {
-          if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
-          else                      break;
-        }
-        m_pumpHysSpeedIdx = 0;
-        m_pumpHysThreshold = 0;
-        static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
-          ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-          ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
-        std::cout << "[FanPump] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
       }
     }
   }
@@ -6652,135 +6297,11 @@ void UccDBusService::onFanTemperatureUpdate( size_t fanIndex, int64_t timestamp,
     m_metricsStore.push( "cpuTemp", timestamp, temp );
   else if ( fanIndex == 1 )
     m_metricsStore.push( "gpuTemp", timestamp, temp );
-
-  // Auto-control water cooler fan and pump voltage based on CPU temperature
-  if ( !m_dbusData.waterCoolerConnected.load() || !m_activeProfile.fan.autoControlWC || fanIndex != 0 )
-    return;
-
-  try
-  {
-    updateWaterCoolerAutoControl( temp );
-  }
-  catch ( ... ) { /* ignore errors in water cooler auto-control */ }
-}
-
-void UccDBusService::updateWaterCoolerAutoControl( int temp )
-{
-  // Apply asymmetric EWMA to the raw sensor reading so that the
-  // water-cooler fan and pump see a smooth temperature signal,
-  // matching the filtering the main fan control loop uses.
-  if ( m_wcTempFiltered < 0.0 )
-    m_wcTempFiltered = static_cast< double >( temp );
-  else
-  {
-    const double alpha = ( temp > m_wcTempFiltered )
-                           ? WC_TEMP_ALPHA_RISING : WC_TEMP_ALPHA_FALLING;
-    m_wcTempFiltered += alpha * ( static_cast< double >( temp ) - m_wcTempFiltered );
-  }
-  const int wcTemp = static_cast< int >( std::round( m_wcTempFiltered ) );
-
-  const std::string &fpName = m_activeProfile.fan.fanProfile;
-  FanProfile fp = resolveFanProfile( fpName );
-
-  // Overlay water cooler fan curve from temporary curves if active
-  if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
-  {
-    const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
-    auto wcFanIt = tempCurves.find( kWCFanZoneId );
-    if ( wcFanIt != tempCurves.end() && !wcFanIt->second.empty() )
-    {
-      auto *wcFanZone = fp.findZoneCurve( kWCFanZoneId );
-      if ( wcFanZone )
-        wcFanZone->curve = wcFanIt->second;
-    }
-  }
-
-  // Overlay pump curve from temporary curves if active
-  if ( m_fanControlWorker && m_fanControlWorker->hasTemporaryCurves() )
-  {
-    const auto &tempCurves = m_fanControlWorker->tempZoneCurves();
-    auto wcPumpIt = tempCurves.find( kWCPumpZoneId );
-    if ( wcPumpIt != tempCurves.end() && !wcPumpIt->second.empty() )
-    {
-      auto *wcPumpZone = fp.findZoneCurve( kWCPumpZoneId );
-      if ( wcPumpZone )
-        wcPumpZone->curve = wcPumpIt->second;
-    }
-  }
-
-  const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
-  const int wcFanSpeed = fp.getSpeedForZone( snappedTemp, kWCFanZoneId );
-  if ( m_waterCoolerWorker )
-    m_waterCoolerWorker->setFanSpeed( std::max( wcFanSpeed, 0 ) );
-
-  // Temperature LED mode: compute gradient color from fan speed
-  if ( m_waterCoolerLedMode.load() == static_cast< int32_t >( ucc::RGBState::Temperature ) )
-  {
-    const float t = static_cast< float >( std::clamp( wcFanSpeed, 0, 100 ) ) / 100.0f;
-    const int ledR = static_cast< int >( t * 255.0f );
-    const int ledG = 0;
-    const int ledB = static_cast< int >( ( 1.0f - t ) * 255.0f );
-    if ( m_waterCoolerWorker )
-      m_waterCoolerWorker->setLEDColor( ledR, ledG, ledB,
-        static_cast< int >( ucc::RGBState::Static ) );
-  }
-
-  // Auto-control pump voltage with hysteresis.
-  // Step-up happens immediately at the table threshold; step-down requires
-  // the temperature to fall at least PUMP_HYSTERESIS_DEG below the
-  // threshold that last triggered an upward transition.
-  static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
-      ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-      ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-
-  // Read pump curve from the wc-pump zone
-  const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
-  int rawIdx = 0;
-  if ( pumpZone )
-  {
-    for ( const auto &pt : pumpZone->curve )
-    {
-      if ( wcTemp >= pt.temp ) rawIdx = std::min( pt.speed, 4 );
-      else                     break;
-    }
-  }
-
-  if ( rawIdx > m_pumpHysSpeedIdx )
-  {
-    // Temperature rising – apply new level and record its table threshold.
-    m_pumpHysSpeedIdx = rawIdx;
-    m_pumpHysThreshold = 0;
-    if ( pumpZone )
-      for ( const auto &pt : pumpZone->curve )
-        if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
-  }
-  else if ( rawIdx < m_pumpHysSpeedIdx )
-  {
-    // Temperature falling – only step down once we are past the dead-band.
-    if ( wcTemp < m_pumpHysThreshold - PUMP_HYSTERESIS_DEG )
-    {
-      m_pumpHysSpeedIdx = rawIdx;
-      m_pumpHysThreshold = 0;
-      if ( pumpZone )
-        for ( const auto &pt : pumpZone->curve )
-          if ( std::min( pt.speed, 4 ) == rawIdx ) { m_pumpHysThreshold = pt.temp; break; }
-    }
-  }
-
-  const ucc::PumpVoltage pumpSpeedValue =
-      pumpIdxToVoltage[ std::clamp( m_pumpHysSpeedIdx, 0, 4 ) ];
-  if ( m_waterCoolerWorker )
-    m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
 }
 
 void UccDBusService::applyFullProfile( const UccProfile &profile )
 {
-  // Preserve runtime water cooler enable state across profile re-application.
-  // The user's explicit EnableWaterCooler() D-Bus call is authoritative;
-  // the stored profile may have a stale enableWaterCooler value.
-  const bool preservedWcEnable = m_dbusData.waterCoolerScanningEnabled.load();
   m_activeProfile = profile;
-  m_activeProfile.fan.enableWaterCooler = preservedWcEnable;
   snapProfileFrequencies( m_activeProfile );
   updateDBusActiveProfileData();
 
@@ -6803,31 +6324,6 @@ void UccDBusService::applyFullProfile( const UccProfile &profile )
         std::cout << "[State] Applied fan zones (" << zoneCurves.size() << " zones)" << std::endl;
       }
 
-      // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      const auto *pumpZone = fp.findZoneCurve( kWCPumpZoneId );
-      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
-           && pumpZone && !pumpZone->curve.empty() )
-      {
-        int maxTemp = 0;
-        {
-          std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-          for ( const auto &fan : m_dbusData.fans )
-            maxTemp = std::max( maxTemp, fan.temp.data );
-        }
-        int pumpIdx = 0;
-        for ( const auto &pt : pumpZone->curve )
-        {
-          if ( maxTemp >= pt.temp ) pumpIdx = std::min( pt.speed, 4 );
-          else                      break;
-        }
-        m_pumpHysSpeedIdx = 0;
-        m_pumpHysThreshold = 0;
-        static constexpr ucc::PumpVoltage pumpIdxToVoltage[] = {
-          ucc::PumpVoltage::Off, ucc::PumpVoltage::V7, ucc::PumpVoltage::V8,
-          ucc::PumpVoltage::V11, ucc::PumpVoltage::V12 };
-        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpIdxToVoltage[ std::clamp( pumpIdx, 0, 4 ) ] ) );
-        std::cout << "[State] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
-      }
     }
   }
   catch ( const std::exception &e )
@@ -6844,10 +6340,6 @@ void UccDBusService::applyFullProfile( const UccProfile &profile )
 
   // Apply GPU OC and cTGP from the profile
   applyGpuOCFromProfile( profile );
-
-  // Water cooler scanning state is preserved from the runtime flag
-  // (set via EnableWaterCooler D-Bus call). Do NOT re-read enableWaterCooler
-  // from the stored profile — it may be stale.
 
   // Emit ProfileChanged signal for DBus clients
   if ( m_adaptor )

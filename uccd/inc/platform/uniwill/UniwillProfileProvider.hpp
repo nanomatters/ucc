@@ -89,22 +89,6 @@ public:
 
   std::optional< UniwillDeviceID > deviceId() const noexcept { return m_deviceId; }
 
-  bool supportsWaterCooler() const noexcept
-  {
-    static const std::set< UniwillDeviceID > waterCoolerDevices = {
-      UniwillDeviceID::STELLARIS1XI04,
-      UniwillDeviceID::STEPOL1XA04,
-      UniwillDeviceID::STELLARIS1XI05,
-      UniwillDeviceID::STELLARIS16I06,
-      UniwillDeviceID::STELLARIS17I06,
-      UniwillDeviceID::STELLARIS16A07,
-      UniwillDeviceID::XNE16A25,
-      UniwillDeviceID::XNE16E25,
-      UniwillDeviceID::STELLARIS16I07,
-    };
-    return m_deviceId.has_value() && waterCoolerDevices.count( *m_deviceId ) > 0;
-  }
-
   bool supportsCTGPAdjustment() const noexcept
   {
     static const std::set< UniwillDeviceID > cTGPHiddenDevices = {

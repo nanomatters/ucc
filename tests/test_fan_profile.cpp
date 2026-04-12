@@ -140,55 +140,6 @@ private slots:
     QCOMPARE( fp.getSpeedForZone( 60, "zone-gpu" ), 55 );
   }
 
-  // ---- WC fan zone -----------------------------------------------------
-
-  void wcFan_ownCurve()
-  {
-    auto fp = makeSimple();
-    fp.zoneCurves.push_back( makeCurve( "wc-fan",
-      { {30,10}, {70,50} } ) );
-    QCOMPARE( fp.getSpeedForZone( 30, "wc-fan" ), 10 );
-  }
-
-  void wcFan_interpolate()
-  {
-    auto fp = makeSimple();
-    fp.zoneCurves.push_back( makeCurve( "wc-fan",
-      { {30,10}, {70,50} } ) );
-    // 50° → midpoint: 10 + 0.5*40 = 30
-    QCOMPARE( fp.getSpeedForZone( 50, "wc-fan" ), 30 );
-  }
-
-  // ---- WC pump zone (discrete voltage levels) --------------------------
-
-  void pump_lookup()
-  {
-    auto fp = makeSimple();
-    fp.zoneCurves.push_back( makeCurve( "wc-pump",
-      { {40,1}, {60,2}, {80,3} } ) );
-    // interpolateCurve uses linear, so exact matches just return the speed value
-    QCOMPARE( fp.getSpeedForZone( 40, "wc-pump" ), 1 );
-    QCOMPARE( fp.getSpeedForZone( 60, "wc-pump" ), 2 );
-    QCOMPARE( fp.getSpeedForZone( 80, "wc-pump" ), 3 );
-  }
-
-  void pump_beyondLast()
-  {
-    auto fp = makeSimple();
-    fp.zoneCurves.push_back( makeCurve( "wc-pump",
-      { {40,1}, {60,2}, {80,3} } ) );
-    // 100° beyond 80° → clamp to last (3)
-    QCOMPARE( fp.getSpeedForZone( 100, "wc-pump" ), 3 );
-  }
-
-  void pump_belowFirst()
-  {
-    auto fp = makeSimple();
-    fp.zoneCurves.push_back( makeCurve( "wc-pump",
-      { {40,1}, {60,2}, {80,3} } ) );
-    // 30° below 40° → clamp to first (1)
-    QCOMPARE( fp.getSpeedForZone( 30, "wc-pump" ), 1 );
-  }
 };
 
 QTEST_GUILESS_MAIN( TestFanProfile )
