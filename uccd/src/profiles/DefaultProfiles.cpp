@@ -35,7 +35,7 @@ const UccProfile maxEnergySave = []()
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
 
-  profile.odmProfile.name = "power_save";
+  profile.odmProfile.name = "quiet";
   profile.odmPowerLimits.tdpValues = { 5, 10, 15 };
 
   return profile;
@@ -58,7 +58,7 @@ const UccProfile silent = []()
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
 
-  profile.odmProfile.name = "power_save";
+  profile.odmProfile.name = "quiet";
   profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
 
   return profile;
@@ -81,7 +81,7 @@ const UccProfile office = []()
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
 
-  profile.odmProfile.name = "enthusiast";
+  profile.odmProfile.name = "balanced";
   profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
 
   return profile;
@@ -104,7 +104,7 @@ const UccProfile highPerformance = []()
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
 
-  profile.odmProfile.name = "overboost";
+  profile.odmProfile.name = "performance";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
 
   return profile;
@@ -199,7 +199,7 @@ const UccProfile highPerformance25WcTGP = []()
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
 
-  profile.odmProfile.name = "overboost";
+  profile.odmProfile.name = "performance";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
 
   return profile;

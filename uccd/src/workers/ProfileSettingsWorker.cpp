@@ -130,13 +130,13 @@ bool ProfileSettingsWorker::applyChargingPriority( const std::string &priorityDe
   try
   {
     const std::string prioToSet = m_currentChargingPriority;
-    const std::string currentPrio = SysfsNode< std::string >( CHARGING_PRIORITY ).read().value_or( "" );
+    const std::string currentPrio = SysfsNode< std::string >( m_chargingPriorityPath ).read().value_or( "" );
     const auto priosAvailable = getChargingPrioritiesAvailable();
 
     if ( auto it = std::ranges::find( priosAvailable, prioToSet );
          not prioToSet.empty() and prioToSet != currentPrio and it != priosAvailable.end() )
     {
-      if ( SysfsNode< std::string >( CHARGING_PRIORITY ).write( prioToSet ) )
+      if ( SysfsNode< std::string >( m_chargingPriorityPath ).write( prioToSet ) )
       {
         syslog( LOG_INFO, "Applied charging priority '%s'", prioToSet.c_str() );
         return true;
@@ -204,7 +204,7 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
   if ( !m_nvidiaPowerCTRLAvailable )
     return;
 
-  std::ifstream file( NVIDIA_CTGP_OFFSET );
+  std::ifstream file( m_nvidiaCTGPOffsetPath );
   if ( file.is_open() )
   {
     int32_t currentValue = 0;
@@ -228,14 +228,6 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
 
 void ProfileSettingsWorker::detectODMProfileType()
 {
-  if ( SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE ).isAvailable() and
-       SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE_CHOICES ).isAvailable() )
-  {
-    m_odmProfileType = ODMProfileType::TuxedoPlatformProfile;
-    syslog( LOG_INFO, "ProfileSettingsWorker: Using TUXEDO platform_profile" );
-    return;
-  }
-
   if ( not m_skipAcpiPlatformProfile and
        SysfsNode< std::string >( ACPI_PLATFORM_PROFILE ).isAvailable() and
        SysfsNode< std::string >( ACPI_PLATFORM_PROFILE_CHOICES ).isAvailable() )
@@ -247,14 +239,6 @@ void ProfileSettingsWorker::detectODMProfileType()
   else if ( m_skipAcpiPlatformProfile )
   {
     syslog( LOG_INFO, "ProfileSettingsWorker: Skipping ACPI platform_profile (device quirk)" );
-  }
-
-  std::vector< std::string > availableProfiles;
-  if ( getAvailableProfilesViaAPI( availableProfiles ) and not availableProfiles.empty() )
-  {
-    m_odmProfileType = ODMProfileType::TuxedoIOAPI;
-    syslog( LOG_INFO, "ProfileSettingsWorker: Using Tuxedo IO API" );
-    return;
   }
 
   m_odmProfileType = ODMProfileType::None;
@@ -291,18 +275,9 @@ void ProfileSettingsWorker::applyODMProfile()
 
   switch ( m_odmProfileType )
   {
-    case ODMProfileType::TuxedoPlatformProfile:
-      applyPlatformProfile(
-        TUXEDO_PLATFORM_PROFILE, TUXEDO_PLATFORM_PROFILE_CHOICES, chosenProfileName );
-      break;
-
     case ODMProfileType::AcpiPlatformProfile:
       applyPlatformProfile(
         ACPI_PLATFORM_PROFILE, ACPI_PLATFORM_PROFILE_CHOICES, chosenProfileName );
-      break;
-
-    case ODMProfileType::TuxedoIOAPI:
-      applyProfileViaAPI( chosenProfileName );
       break;
 
     case ODMProfileType::None:
@@ -487,10 +462,21 @@ void ProfileSettingsWorker::initializeChargingSettings() noexcept
 
   if ( hasChargingPriority() )
   {
-    if ( auto currentPrio = SysfsNode< std::string >( CHARGING_PRIORITY ).read().value_or( "" );
-         not currentPrio.empty() )
+    // usb_c_power_priority returns "charging [performance]" or "[charging] performance"
+    if ( auto raw = SysfsNode< std::string >( m_chargingPriorityPath ).read().value_or( "" );
+         not raw.empty() )
     {
-      m_currentChargingPriority = currentPrio;
+      // Extract currently active value (inside brackets)
+      std::istringstream iss( raw );
+      std::string token;
+      while ( iss >> token )
+      {
+        if ( token.front() == '[' && token.back() == ']' )
+        {
+          m_currentChargingPriority = token.substr( 1, token.size() - 2 );
+          break;
+        }
+      }
       syslog( LOG_INFO, "Initialized charging priority: %s", m_currentChargingPriority.c_str() );
     }
   }
@@ -622,10 +608,10 @@ bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
   const int32_t maxAdjustment = m_nvidiaPowerCTRLMaxPowerLimit - m_nvidiaPowerCTRLDefaultPowerLimit;
   ctgpOffset = std::clamp( ctgpOffset, -maxAdjustment, maxAdjustment );
 
-  std::ofstream file( NVIDIA_CTGP_OFFSET );
+  std::ofstream file( m_nvidiaCTGPOffsetPath );
   if ( !file.is_open() )
   {
-    std::cerr << "[NVIDIAPowerCTRL] Failed to open " << NVIDIA_CTGP_OFFSET << " for writing"
+    std::cerr << "[NVIDIAPowerCTRL] Failed to open " << m_nvidiaCTGPOffsetPath << " for writing"
               << std::endl;
     return false;
   }
@@ -635,7 +621,7 @@ bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
 
   if ( !file.good() )
   {
-    std::cerr << "[NVIDIAPowerCTRL] Failed to write cTGP offset to " << NVIDIA_CTGP_OFFSET
+    std::cerr << "[NVIDIAPowerCTRL] Failed to write cTGP offset to " << m_nvidiaCTGPOffsetPath
               << " (stream error)" << std::endl;
     return false;
   }
@@ -643,7 +629,7 @@ bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
   file.close();
 
   // Verify the write by reading back
-  std::ifstream verifyFile( NVIDIA_CTGP_OFFSET );
+  std::ifstream verifyFile( m_nvidiaCTGPOffsetPath );
   if ( verifyFile.is_open() )
   {
     int32_t verifiedValue = -1;

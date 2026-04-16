@@ -19,14 +19,12 @@
 #include "platform/uniwill/UniwillDefaultProfiles.hpp"
 #include "SysfsNode.hpp"
 
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <syslog.h>
-
-// Forward declare — TuxedoIOAPI is only needed for model-ID detection.
-class TuxedoIOAPI;
 
 namespace ucc::hal
 {
@@ -34,8 +32,8 @@ namespace ucc::hal
 /**
  * @brief Profile provider for Uniwill / Clevo / TUXEDO laptops.
  *
- * Identifies the specific device via DMI SKU + WMI model ID and returns
- * the matching set of built-in default profiles from DefaultProfiles.cpp.
+ * Identifies the specific device via DMI SKU and returns the matching
+ * set of built-in default profiles from DefaultProfiles.cpp.
  *
  * Priority 100 — overrides the generic fallback when a Uniwill device
  * is detected.
@@ -43,10 +41,7 @@ namespace ucc::hal
 class UniwillProfileProvider : public IProfileProvider
 {
 public:
-  explicit UniwillProfileProvider( TuxedoIOAPI &io )
-    : m_io( io )
-  {
-  }
+  UniwillProfileProvider() = default;
 
   std::string name() const override { return "UniwillProfileProvider"; }
   int priority() const override { return 100; }
@@ -108,9 +103,6 @@ private:
     const std::string dmiBasePath = "/sys/class/dmi/id";
     const std::string productSKU = SysfsNode< std::string >( dmiBasePath + "/product_sku" ).read().value_or( "" );
 
-    std::string deviceModelId;
-    m_io.deviceModelIdStr( deviceModelId );
-
     // DMI SKU → device map
     static const std::map< std::string, UniwillDeviceID > dmiSKUDeviceMap = {
       { "IBS1706",                         UniwillDeviceID::IBP17G6 },
@@ -155,25 +147,35 @@ private:
     if ( auto skuIt = dmiSKUDeviceMap.find( productSKU ); skuIt != dmiSKUDeviceMap.end() )
       return skuIt->second;
 
-    // UWID (WMI interface) device mapping fallback
-    static const std::map< int, UniwillDeviceID > uwidDeviceMap = {
-      { 0x13, UniwillDeviceID::IBP14G6_TUX },
-      { 0x12, UniwillDeviceID::IBP14G6_TRX },
-      { 0x14, UniwillDeviceID::IBP14G6_TQF },
-      { 0x17, UniwillDeviceID::IBP14G7_AQF_ARX },
-    };
-
-    int modelId = 0;
-    try { modelId = std::stoi( deviceModelId ); }
-    catch ( ... ) { }
-
-    if ( auto uwidIt = uwidDeviceMap.find( modelId ); uwidIt != uwidDeviceMap.end() )
-      return uwidIt->second;
+    // Legacy UWID (WMI interface) device mapping — these 4 devices lack a DMI
+    // SKU so we check whether the INOU platform device exists as an indicator
+    // that the uniwill-laptop driver is loaded. Without the old ioctl-based
+    // TuxedoIOAPI there is no way to read the WMI model ID, so these devices
+    // remain unidentified.  Log a warning so the gap is visible.
+    {
+      std::error_code ec;
+      bool inouExists = false;
+      for ( const auto &entry : std::filesystem::directory_iterator(
+              "/sys/bus/platform/devices", ec ) )
+      {
+        if ( entry.path().filename().string().rfind( "INOU0000:", 0 ) == 0 )
+        {
+          inouExists = true;
+          break;
+        }
+      }
+      if ( inouExists && productSKU.empty() )
+      {
+        syslog( LOG_WARNING,
+                "[UniwillProfileProvider] INOU device present but no DMI SKU — "
+                "legacy IBP14G6/G7 devices cannot be identified without "
+                "WMI model ID (ioctl removed)" );
+      }
+    }
 
     return std::nullopt;
   }
 
-  TuxedoIOAPI &m_io;
   bool m_detected = false;
   std::optional< UniwillDeviceID > m_deviceId;
 };

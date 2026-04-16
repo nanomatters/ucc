@@ -38,7 +38,7 @@ UccProfile makeMaxEnergySave()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
-  profile.odmProfile.name = "power_save";
+  profile.odmProfile.name = "quiet";
   profile.odmPowerLimits.tdpValues = { 5, 10, 15 };
   return profile;
 }
@@ -55,7 +55,7 @@ UccProfile makeSilent()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
-  profile.odmProfile.name = "power_save";
+  profile.odmProfile.name = "quiet";
   profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
   return profile;
 }
@@ -72,7 +72,7 @@ UccProfile makeOffice()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
-  profile.odmProfile.name = "enthusiast";
+  profile.odmProfile.name = "balanced";
   profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
   return profile;
 }
@@ -89,7 +89,7 @@ UccProfile makeHighPerformance()
   profile.webcam.useStatus = true;
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
-  profile.odmProfile.name = "overboost";
+  profile.odmProfile.name = "performance";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
   return profile;
 }

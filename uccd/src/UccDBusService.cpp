@@ -33,7 +33,7 @@
 #include "platform/gpu/nvidia/NvmlTempProvider.hpp"
 #include "platform/gpu/nvidia/NvidiaGpuFanProvider.hpp"
 #include "platform/cpu/amd/AmdCpuPlatformProvider.hpp"
-#include "platform/uniwill/TuxedoIOProviders.hpp"
+#include "platform/uniwill/UniwillSysfsPlatformProvider.hpp"
 #include "platform/uniwill/UniwillProfileProvider.hpp"
 #include <sstream>
 #include <iomanip>
@@ -64,6 +64,30 @@ namespace
 {
 constexpr const char *AUTO_OC_CHECKPOINT_PATH = "/etc/ucc/autooc_checkpoint.json";
 constexpr const char *AUTO_UV_CHECKPOINT_PATH = "/etc/ucc/autouv_checkpoint.json";
+
+/// Discover the INOU0000 platform device base path (cached after first call).
+static std::string discoverINOUBasePath()
+{
+  static const std::string cached = []() -> std::string {
+    std::error_code ec;
+    for ( const auto &entry : std::filesystem::directory_iterator(
+            "/sys/bus/platform/devices", ec ) )
+    {
+      if ( entry.path().filename().string().rfind( "INOU0000:", 0 ) == 0 )
+        return entry.path().string();
+    }
+    return {};
+  }();
+  return cached;
+}
+
+/// Return the ctgp_offset sysfs path on the INOU device, or empty if not found.
+static std::string inouCTGPOffsetPath()
+{
+  const auto base = discoverINOUBasePath();
+  return base.empty() ? std::string{} : base + "/ctgp_offset";
+}
+
 }
 
 static std::string fanProfileToJSON( const FanProfile &fp,
@@ -2847,12 +2871,12 @@ int UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLMinPowerLimit()
 
 bool UccDBusInterfaceAdaptor::GetNVIDIAPowerCTRLAvailable()
 {
-  static const std::string NVIDIA_CTGP_OFFSET =
-      "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
+  const std::string ctgpPath = inouCTGPOffsetPath();
 
   std::error_code ec;
-  const bool ctgpAvailable = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
-                          && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+  const bool ctgpAvailable = !ctgpPath.empty() &&
+                             std::filesystem::exists( ctgpPath, ec ) &&
+                             std::filesystem::is_regular_file( ctgpPath, ec );
 
   bool genericNvmlAvailable = false;
   if ( m_service )
@@ -2882,9 +2906,8 @@ int UccDBusInterfaceAdaptor::GetNVIDIAPowerOffset()
 
   // Read the actual current cTGP offset from sysfs so callers always see
   // the hardware-accepted value, not a potentially stale profile value.
-  static const std::string NVIDIA_CTGP_OFFSET =
-      "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
-  std::ifstream file( NVIDIA_CTGP_OFFSET );
+  const std::string ctgpPath = inouCTGPOffsetPath();
+  std::ifstream file( ctgpPath );
   if ( file.is_open() )
   {
     int value = 0;
@@ -3612,7 +3635,6 @@ void UccDBusInterfaceAdaptor::emitPowerStateChanged( const std::string &state )
 UccDBusService::UccDBusService()
   : DaemonWorker( std::chrono::milliseconds( 1000 ), false ),
     m_dbusData(),
-    m_io(),
     m_dbusObject( nullptr ),
     m_adaptor( nullptr ),
     m_started( false ),
@@ -3673,10 +3695,8 @@ UccDBusService::UccDBusService()
   m_nvml = std::make_shared< NvmlWrapper >();
 
   // --- HAL: register and detect hardware providers ---
-  // TuxedoIO-based providers (OEM, high priority; only available on Clevo/Uniwill)
-  m_hw.addFanProvider( std::make_unique< ucc::hal::TuxedoIOFanProvider >( m_io ) );
-  m_hw.addTempProvider( std::make_unique< ucc::hal::TuxedoIOTempProvider >( m_io ) );
-  m_hw.addPlatformProvider( std::make_unique< ucc::hal::TuxedoIOPlatformProvider >( m_io ) );
+  // Uniwill sysfs-based platform provider (TDP via INOU device, no ioctl dependency)
+  m_hw.addPlatformProvider( std::make_unique< ucc::hal::UniwillSysfsPlatformProvider >() );
   // Generic hwmon providers (work on any Linux machine)
   m_hw.addFanProvider( std::make_unique< ucc::hal::HwmonFanProvider >() );
   m_hw.addTempProvider( std::make_unique< ucc::hal::HwmonTempProvider >() );
@@ -3687,7 +3707,7 @@ UccDBusService::UccDBusService()
   // CPU-specific platform providers (AMD via RyzenAdj/SMU, Intel TBD)
   m_hw.addPlatformProvider( std::make_unique< ucc::hal::AmdCpuPlatformProvider >() );
   // Profile providers — Uniwill-specific (high priority) and generic fallback
-  m_hw.addProfileProvider( std::make_unique< ucc::hal::UniwillProfileProvider >( m_io ) );
+  m_hw.addProfileProvider( std::make_unique< ucc::hal::UniwillProfileProvider >() );
   m_hw.addProfileProvider( std::make_unique< ucc::hal::GenericProfileProvider >() );
   // Probe all providers and select the best for each subsystem
   m_hw.detect();
@@ -4063,15 +4083,14 @@ UccDBusService::UccDBusService()
 
 int UccDBusService::readCurrentCTGPOffset() const
 {
-  static const std::string NVIDIA_CTGP_OFFSET =
-    "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
+  const std::string ctgpPath = inouCTGPOffsetPath();
 
-  if ( !m_dbusData.cTGPAdjustmentSupported )
+  if ( !m_dbusData.cTGPAdjustmentSupported || ctgpPath.empty() )
     return 0;
 
   try
   {
-    if ( auto value = SysfsNode< int >( NVIDIA_CTGP_OFFSET ).read(); value.has_value() )
+    if ( auto value = SysfsNode< int >( ctgpPath ).read(); value.has_value() )
       return value.value();
     return 0;
   }
@@ -4300,14 +4319,14 @@ void UccDBusService::readHardwareCapabilities()
 
   // ---- NVIDIA Power Control ----
   {
-    static const std::string NVIDIA_CTGP_OFFSET =
-      "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
+    const std::string ctgpPath = inouCTGPOffsetPath();
 
     const ucc::hal::NvidiaGpuPowerProvider powerProvider( m_nvml.get() );
 
     std::error_code ec;
-    const bool ctgpAvailable = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
-                            && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+    const bool ctgpAvailable = !ctgpPath.empty() &&
+                               std::filesystem::exists( ctgpPath, ec ) &&
+                               std::filesystem::is_regular_file( ctgpPath, ec );
     m_dbusData.nvidiaPowerCTRLAvailable = ctgpAvailable;
 
     if ( !m_nvidiaPowerLimitsInitialized )
@@ -4340,20 +4359,22 @@ void UccDBusService::readHardwareCapabilities()
 
   // ---- Charging ----
   {
-    static const std::string CHARGING_PROFILE_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profile";
-    static const std::string CHARGING_PROFILES_AVAILABLE_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profiles_available";
-    static const std::string CHARGING_PRIORITY_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prio";
-    static const std::string CHARGING_PRIORITIES_AVAILABLE_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prios_available";
+    // uniwill-laptop exposes charging profiles via standard power_supply
+    // charge_type attribute, and USB-C power priority via INOU sysfs.
+    static const std::string CHARGE_TYPE_PATH =
+      "/sys/class/power_supply/BAT0/charge_type";
+    static const std::string CHARGE_TYPE_AVAILABLE_PATH =
+      "/sys/class/power_supply/BAT0/charge_types_available";
 
-    // Charging profiles
-    if ( SysfsNode< std::string >( CHARGING_PROFILE_PATH ).isAvailable() and
-         SysfsNode< std::string >( CHARGING_PROFILES_AVAILABLE_PATH ).isAvailable() )
+    const std::string inouBase = discoverINOUBasePath();
+    const std::string usbCPriorityPath = inouBase.empty()
+      ? std::string{} : inouBase + "/usb_c_power_priority";
+
+    // Charging profiles (via standard charge_type)
+    if ( SysfsNode< std::string >( CHARGE_TYPE_PATH ).isAvailable() and
+         SysfsNode< std::string >( CHARGE_TYPE_AVAILABLE_PATH ).isAvailable() )
     {
-      auto profiles = SysfsNode< std::vector< std::string > >( CHARGING_PROFILES_AVAILABLE_PATH, " " ).read();
+      auto profiles = SysfsNode< std::vector< std::string > >( CHARGE_TYPE_AVAILABLE_PATH, " " ).read();
       if ( profiles.has_value() and not profiles->empty() )
       {
         QStringList profileList;
@@ -4361,7 +4382,7 @@ void UccDBusService::readHardwareCapabilities()
           profileList.append( QString::fromStdString( p ) );
         m_dbusData.chargingProfilesAvailable = profileList;
 
-        auto current = SysfsNode< std::string >( CHARGING_PROFILE_PATH ).read();
+        auto current = SysfsNode< std::string >( CHARGE_TYPE_PATH ).read();
         if ( current.has_value() )
           m_dbusData.currentChargingProfile = *current;
 
@@ -4371,21 +4392,34 @@ void UccDBusService::readHardwareCapabilities()
       }
     }
 
-    // Charging priorities
-    if ( SysfsNode< std::string >( CHARGING_PRIORITY_PATH ).isAvailable() and
-         SysfsNode< std::string >( CHARGING_PRIORITIES_AVAILABLE_PATH ).isAvailable() )
+    // USB-C power priority (via INOU sysfs)
+    if ( !usbCPriorityPath.empty() &&
+         SysfsNode< std::string >( usbCPriorityPath ).isAvailable() )
     {
-      auto prios = SysfsNode< std::vector< std::string > >( CHARGING_PRIORITIES_AVAILABLE_PATH, " " ).read();
-      if ( prios.has_value() and not prios->empty() )
+      // usb_c_power_priority returns "charging [performance]" or "[charging] performance"
+      auto raw = SysfsNode< std::string >( usbCPriorityPath ).read();
+      if ( raw.has_value() )
       {
+        // Parse available choices and current selection from bracket notation
         QStringList prioList;
-        for ( const auto &p : *prios )
-          prioList.append( QString::fromStdString( p ) );
+        std::string currentPrio;
+        std::istringstream iss( *raw );
+        std::string token;
+        while ( iss >> token )
+        {
+          if ( token.front() == '[' && token.back() == ']' )
+          {
+            currentPrio = token.substr( 1, token.size() - 2 );
+            prioList.append( QString::fromStdString( currentPrio ) );
+          }
+          else
+          {
+            prioList.append( QString::fromStdString( token ) );
+          }
+        }
         m_dbusData.chargingPrioritiesAvailable = prioList;
-
-        auto current = SysfsNode< std::string >( CHARGING_PRIORITY_PATH ).read();
-        if ( current.has_value() )
-          m_dbusData.currentChargingPriority = *current;
+        if ( !currentPrio.empty() )
+          m_dbusData.currentChargingPriority = currentPrio;
       }
     }
 
@@ -5733,10 +5767,6 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
   const std::string productSKU = SysfsNode< std::string >( dmiBasePath + "/product_sku" ).read().value_or( "" );
   const std::string boardName = SysfsNode< std::string >( dmiBasePath + "/board_name" ).read().value_or( "" );
 
-  // get module info from tuxedo_io
-  std::string deviceModelId;
-  m_io.deviceModelIdStr( deviceModelId );
-
   // create dmi sku to device map (matches typescript version)
   std::map< std::string, UniwillDeviceID > dmiSKUDeviceMap;
   dmiSKUDeviceMap[ "IBS1706" ] = UniwillDeviceID::IBP17G6;
@@ -5783,26 +5813,14 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
     return skuIt->second;
   }
 
-  // check uwid (univ wmi interface) device mapping
-  std::map< int, UniwillDeviceID > uwidDeviceMap;
-  uwidDeviceMap[ 0x13 ] = UniwillDeviceID::IBP14G6_TUX;
-  uwidDeviceMap[ 0x12 ] = UniwillDeviceID::IBP14G6_TRX;
-  uwidDeviceMap[ 0x14 ] = UniwillDeviceID::IBP14G6_TQF;
-  uwidDeviceMap[ 0x17 ] = UniwillDeviceID::IBP14G7_AQF_ARX;
-
-  int modelId = 0;
-  try
+  // Legacy UWID (WMI interface) device mapping — these 4 devices lack a DMI
+  // SKU.  Without tuxedo_io ioctls the WMI model ID is not available, so
+  // these devices remain unidentified.
+  if ( productSKU.empty() )
   {
-    modelId = std::stoi( deviceModelId );
-  }
-  catch ( ... )
-  {
-    // ignore parse errors
-  }
-
-  if ( auto uwidIt = uwidDeviceMap.find( modelId ); uwidIt != uwidDeviceMap.end() )
-  {
-    return uwidIt->second;
+    syslog( LOG_WARNING,
+            "[identifyDevice] No DMI SKU — legacy IBP14G6/G7 devices cannot "
+            "be identified without WMI model ID (ioctl removed)" );
   }
 
   // no device match found
@@ -5818,10 +5836,20 @@ void UccDBusService::computeDeviceCapabilities()
   }
   else
   {
+    // Check INOU device for ctgp_offset
     std::error_code ec;
-    const std::string ctgpPath = "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
-    bool hardwareExists = std::filesystem::exists( ctgpPath, ec ) &&
+    bool hardwareExists = false;
+    for ( const auto &entry : std::filesystem::directory_iterator(
+            "/sys/bus/platform/devices", ec ) )
+    {
+      if ( entry.path().filename().string().rfind( "INOU0000:", 0 ) == 0 )
+      {
+        const std::string ctgpPath = entry.path().string() + "/ctgp_offset";
+        hardwareExists = std::filesystem::exists( ctgpPath, ec ) &&
                          std::filesystem::is_regular_file( ctgpPath, ec );
+        break;
+      }
+    }
     m_dbusData.cTGPAdjustmentSupported = hardwareExists;
   }
 

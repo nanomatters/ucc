@@ -24,7 +24,7 @@ namespace fs = std::filesystem;
 /**
  * @brief Controller for Function Lock (FnLock)
  *
- * Manages the Fn key lock state through the tuxedo_keyboard kernel module.
+ * Manages the Fn key lock state through the uniwill-laptop kernel module.
  * When FnLock is enabled, function keys (F1-F12) act as media keys by default,
  * and Fn+Fkey gives the traditional F-key function.
  */
@@ -32,7 +32,7 @@ class FnLockController
 {
 public:
   FnLockController()
-    : m_fnLockPath( "/sys/devices/platform/tuxedo_keyboard/fn_lock" )
+    : m_fnLockPath( discoverFnLockPath() )
   {
   }
 
@@ -75,4 +75,20 @@ public:
 
 private:
   std::string m_fnLockPath;
+
+  static std::string discoverFnLockPath()
+  {
+    std::error_code ec;
+    for ( const auto &entry : fs::directory_iterator(
+            "/sys/bus/platform/devices", ec ) )
+    {
+      if ( entry.path().filename().string().rfind( "INOU0000:", 0 ) == 0 )
+      {
+        auto path = entry.path().string() + "/fn_lock";
+        if ( fs::exists( path, ec ) )
+          return path;
+      }
+    }
+    return {};
+  }
 };

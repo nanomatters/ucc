@@ -213,10 +213,10 @@ private:
   std::vector< KeyboardBacklightState > m_currentStates;
   std::vector< std::string > m_ledPaths;
 
-  // Common LED paths
-  static constexpr const char *LEDS_WHITE_ONLY = "/sys/devices/platform/tuxedo_keyboard/leds/white:kbd_backlight";
+  // Common LED paths — try standard LED class first, fall back to platform device
+  static constexpr const char *LEDS_WHITE_ONLY = "/sys/class/leds/uniwill:white:kbd_backlight";
   static constexpr const char *LEDS_WHITE_ONLY_NB05 = "/sys/bus/platform/devices/tuxedo_nb05_kbd_backlight/leds/white:kbd_backlight";
-  static constexpr const char *LEDS_RGB_BASE = "/sys/devices/platform/tuxedo_keyboard/leds/rgb:kbd_backlight";
+  static constexpr const char *LEDS_RGB_BASE = "/sys/class/leds/uniwill:multicolor:kbd_backlight";
 
   // ---- hardware detection ----
 

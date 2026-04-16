@@ -37,7 +37,6 @@
 #include <QTimer>
 
 // Hardware abstraction layer
-#include "tuxedo_io_lib/tuxedo_io_api.hh"
 #include "workers/HardwareMonitorWorker.hpp"
 #include "UccDBusService.hpp"
 #include "SettingsManager.hpp"
@@ -205,29 +204,25 @@ int run_daemon()
   // Ensure configuration directory exists
   ensure_config_directory();
 
-  // Initialize hardware interface
+  // Check for INOU platform device (uniwill-laptop driver)
   try
   {
-    TuxedoIOAPI io;
-    syslog( LOG_INFO, "Hardware interface initialized" );
-
-    // Detect device capabilities
-    bool identified = false;
-    if ( io.identify( identified ) and identified )
+    bool inouFound = false;
+    std::error_code ec;
+    for ( const auto &entry : std::filesystem::directory_iterator(
+            "/sys/bus/platform/devices", ec ) )
     {
-      std::string interface_id, model_id;
-      if ( io.deviceInterfaceIdStr( interface_id ) )
+      if ( entry.path().filename().string().rfind( "INOU0000:", 0 ) == 0 )
       {
-        syslog( LOG_INFO, "Detected interface: %s", interface_id.c_str() );
-      }
-      if ( io.deviceModelIdStr( model_id ) )
-      {
-        syslog( LOG_INFO, "Detected model: %s", model_id.c_str() );
+        syslog( LOG_INFO, "Detected INOU device: %s",
+                entry.path().filename().string().c_str() );
+        inouFound = true;
+        break;
       }
     }
-    else
+    if ( !inouFound )
     {
-      syslog( LOG_WARNING, "No compatible hardware device detected" );
+      syslog( LOG_WARNING, "No INOU platform device detected" );
     }
 
     // Initialize DBus service

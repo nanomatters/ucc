@@ -57,7 +57,6 @@
 #include "FpsServer.hpp"
 #include "SystemInfo.hpp"
 #include "hal/HardwareManager.hpp"
-#include "tuxedo_io_lib/tuxedo_io_api.hh"
 
 // Forward declarations
 class HardwareMonitorWorker;
@@ -623,7 +622,6 @@ private:
 
   static constexpr const char* INTERFACE_NAME = "com.uniwill.uccd";
   UccDBusData m_dbusData;
-  TuxedoIOAPI m_io;
   ucc::hal::HardwareManager m_hw;
   std::unique_ptr< UccDBusObject > m_dbusObject;  // The QObject registered on the D-Bus bus
   std::unique_ptr< UccDBusInterfaceAdaptor > m_adaptor;

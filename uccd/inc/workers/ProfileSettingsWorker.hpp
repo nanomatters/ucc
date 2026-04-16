@@ -25,6 +25,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <syslog.h>
 #include <vector>
@@ -84,6 +85,19 @@ public:
       m_nvidiaPowerCTRLAvailable( nvidiaPowerCTRLAvailable ),
       m_cTGPAdjustmentSupported( cTGPAdjustmentSupported )
   {
+    // Discover INOU device paths at construction time
+    std::error_code ec;
+    for ( const auto &entry : std::filesystem::directory_iterator(
+            "/sys/bus/platform/devices", ec ) )
+    {
+      if ( entry.path().filename().string().rfind( "INOU0000:", 0 ) == 0 )
+      {
+        const std::string base = entry.path().string();
+        m_chargingPriorityPath = base + "/usb_c_power_priority";
+        m_nvidiaCTGPOffsetPath = base + "/ctgp_offset";
+        break;
+      }
+    }
   }
 
   /**
@@ -144,9 +158,7 @@ private:
   enum class ODMProfileType
   {
     None,
-    TuxedoPlatformProfile,
     AcpiPlatformProfile,
-    TuxedoIOAPI
   };
 
   ucc::hal::HardwareManager &m_hw;
@@ -159,27 +171,22 @@ private:
 
   // --- Sysfs path constants ---
 
-  static inline const std::string TUXEDO_PLATFORM_PROFILE =
-    "/sys/bus/platform/devices/tuxedo_platform_profile/platform_profile";
-  static inline const std::string TUXEDO_PLATFORM_PROFILE_CHOICES =
-    "/sys/bus/platform/devices/tuxedo_platform_profile/platform_profile_choices";
   static inline const std::string ACPI_PLATFORM_PROFILE =
     "/sys/firmware/acpi/platform_profile";
   static inline const std::string ACPI_PLATFORM_PROFILE_CHOICES =
     "/sys/firmware/acpi/platform_profile_choices";
 
   static inline const std::string CHARGING_PROFILE =
-    "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profile";
+    "/sys/class/power_supply/BAT0/charge_type";
   static inline const std::string CHARGING_PROFILES_AVAILABLE =
-    "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profiles_available";
+    "/sys/class/power_supply/BAT0/charge_types_available";
 
-  static inline const std::string CHARGING_PRIORITY =
-    "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prio";
-  static inline const std::string CHARGING_PRIORITIES_AVAILABLE =
-    "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prios_available";
+  // USB-C power priority is exposed on the INOU device (discovered at runtime)
+  std::string m_chargingPriorityPath;
+  std::string m_chargingPrioritiesAvailablePath;
 
-  static inline const std::string NVIDIA_CTGP_OFFSET =
-    "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
+  // ctgp_offset on INOU device (discovered at runtime)
+  std::string m_nvidiaCTGPOffsetPath;
 
   void detectODMProfileType();
   std::vector< std::string > readPlatformProfileChoices( const std::string &path );
@@ -219,8 +226,8 @@ private:
 
   bool hasChargingPriority() const noexcept
   {
-    return SysfsNode< std::string >( CHARGING_PRIORITY ).isAvailable() and
-           SysfsNode< std::string >( CHARGING_PRIORITIES_AVAILABLE ).isAvailable();
+    return !m_chargingPriorityPath.empty() &&
+           SysfsNode< std::string >( m_chargingPriorityPath ).isAvailable();
   }
 
   std::vector< std::string > getChargingProfilesAvailable() const noexcept
@@ -238,8 +245,22 @@ private:
     if ( not hasChargingPriority() )
       return {};
 
-    auto prios = SysfsNode< std::vector< std::string > >( CHARGING_PRIORITIES_AVAILABLE, " " ).read();
-    return prios.value_or( std::vector< std::string >{} );
+    // usb_c_power_priority returns "charging [performance]" or "[charging] performance"
+    auto raw = SysfsNode< std::string >( m_chargingPriorityPath ).read();
+    if ( !raw.has_value() )
+      return {};
+
+    std::vector< std::string > prios;
+    std::istringstream iss( *raw );
+    std::string token;
+    while ( iss >> token )
+    {
+      if ( token.front() == '[' && token.back() == ']' )
+        prios.push_back( token.substr( 1, token.size() - 2 ) );
+      else
+        prios.push_back( token );
+    }
+    return prios;
   }
 
   void initializeChargingSettings() noexcept;
@@ -275,8 +296,10 @@ private:
 
   bool checkNVIDIAAvailability() const
   {
+    if ( m_nvidiaCTGPOffsetPath.empty() )
+      return false;
     std::error_code ec;
-    return fs::exists( NVIDIA_CTGP_OFFSET, ec ) && fs::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+    return fs::exists( m_nvidiaCTGPOffsetPath, ec ) && fs::is_regular_file( m_nvidiaCTGPOffsetPath, ec );
   }
 
 
