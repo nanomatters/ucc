@@ -202,8 +202,9 @@ void MainWindow::setupUI()
   // Place the Fan Control tab directly after Profiles and rename it
   setupFanControlTab();
 
-  // Place the GPU OC tab after Fan Control
-  setupGpuProfileTab();
+  // Place the GPU OC tab after Fan Control (only if NVIDIA dGPU is present)
+  if ( m_nvidiaOCAvailable )
+    setupGpuProfileTab();
 
   // Add Monitoring graph tab
   m_monitorTab = new MonitorTab( m_UccdClient.get(), this );
@@ -719,33 +720,43 @@ void MainWindow::setupProfilesPage()
   row++;
 
   // === GPU OC PROFILE SECTION ===
-  QLabel *gpuProfileHeader = new QLabel( "GPU Overclocking" );
-  gpuProfileHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
-  detailsLayout->addWidget( gpuProfileHeader, row, 0, 1, 2 );
-  row++;
+  {
+    m_gpuProfileSection = new QWidget();
+    QGridLayout *gpuLayout = new QGridLayout( m_gpuProfileSection );
+    gpuLayout->setContentsMargins( 0, 0, 0, 0 );
+    int gr = 0;
 
-  QLabel *gpuProfileLabel = new QLabel( "GPU OC profile" );
-  m_profileGpuProfileCombo = new QComboBox();
-  m_profileGpuProfileCombo->addItem( "(None)", QString() );
-  for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
-  {
-    if ( v.isObject() )
+    QLabel *gpuProfileHeader = new QLabel( "GPU Overclocking" );
+    gpuProfileHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
+    gpuLayout->addWidget( gpuProfileHeader, gr, 0, 1, 2 );
+    gr++;
+
+    QLabel *gpuProfileLabel = new QLabel( "GPU OC profile" );
+    m_profileGpuProfileCombo = new QComboBox();
+    m_profileGpuProfileCombo->addItem( "(None)", QString() );
+    for ( const auto &v : m_profileManager->builtinGpuProfilesData() )
     {
-      QJsonObject o = v.toObject();
-      m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+      if ( v.isObject() )
+      {
+        QJsonObject o = v.toObject();
+        m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+      }
     }
-  }
-  for ( const auto &v : m_profileManager->customGpuProfilesData() )
-  {
-    if ( v.isObject() )
+    for ( const auto &v : m_profileManager->customGpuProfilesData() )
     {
-      QJsonObject o = v.toObject();
-      m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+      if ( v.isObject() )
+      {
+        QJsonObject o = v.toObject();
+        m_profileGpuProfileCombo->addItem( o["name"].toString(), o["id"].toString() );
+      }
     }
+    gpuLayout->addWidget( gpuProfileLabel, gr, 0 );
+    gpuLayout->addWidget( m_profileGpuProfileCombo, gr, 1 );
+
+    detailsLayout->addWidget( m_gpuProfileSection, row, 0, 1, 2 );
+    m_gpuProfileSection->setVisible( m_nvidiaOCAvailable );
+    row++;
   }
-  detailsLayout->addWidget( gpuProfileLabel, row, 0 );
-  detailsLayout->addWidget( m_profileGpuProfileCombo, row, 1 );
-  row++;
 
   // Add spacer
   detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );

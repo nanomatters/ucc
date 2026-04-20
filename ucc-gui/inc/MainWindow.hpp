@@ -209,6 +209,7 @@ namespace ucc
     // GPU OC profile tab
     GpuProfileTab *m_gpuProfileTab = nullptr;
     QComboBox *m_profileGpuProfileCombo = nullptr;
+    QWidget *m_gpuProfileSection = nullptr;  // profile-page GPU OC section (hidden when no dGPU)
 
     // CPU frequency control widgets
     QSlider *m_cpuCoresSlider = nullptr;
@@ -258,6 +259,7 @@ namespace ucc
     // Device capability flags (queried from daemon at startup)
     bool m_waterCoolerSupported = false;
     bool m_cTGPAdjustmentSupported = true;
+    bool m_nvidiaOCAvailable = true;  // default true; only hidden when daemon positively reports false
     int m_gpuDefaultPowerLimit = 0;  // Default GPU power limit in watts, queried from daemon
 
     // Statusbar connection indicator
