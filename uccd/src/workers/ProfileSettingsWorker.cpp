@@ -220,6 +220,24 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
 //  Private methods — ODM Profile
 // =====================================================================
 
+bool ProfileSettingsWorker::getAvailableProfilesViaAPI( std::vector< std::string > &profiles )
+{
+  return m_ioApi.getAvailableODMPerformanceProfiles( profiles );
+}
+
+std::string ProfileSettingsWorker::getDefaultProfileViaAPI()
+{
+  std::string profileName;
+  if ( m_ioApi.getDefaultODMPerformanceProfile( profileName ) )
+    return profileName;
+  return "";
+}
+
+bool ProfileSettingsWorker::setProfileViaAPI( const std::string &profileName )
+{
+  return m_ioApi.setODMPerformanceProfile( profileName );
+}
+
 void ProfileSettingsWorker::detectODMProfileType()
 {
   if ( SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE ).isAvailable() and
@@ -278,6 +296,84 @@ std::vector< std::string > ProfileSettingsWorker::readPlatformProfileChoices(
   return profiles;
 }
 
+std::string ProfileSettingsWorker::readCurrentPlatformProfile( const std::string &path )
+{
+  std::ifstream file( path );
+  if ( not file.is_open() )
+    return "";
+
+  std::string line;
+  if ( std::getline( file, line ) )
+  {
+    // Strip trailing whitespace / newline
+    while ( not line.empty() and ( line.back() == '\n' or line.back() == '\r' or line.back() == ' ' ) )
+      line.pop_back();
+    return line;
+  }
+
+  return "";
+}
+
+bool ProfileSettingsWorker::setODMProfile( const std::string &profileName )
+{
+  const std::string *profilePath = nullptr;
+  const std::string *choicesPath = nullptr;
+
+  switch ( m_odmProfileType )
+  {
+    case ODMProfileType::TuxedoPlatformProfile:
+      profilePath = &TUXEDO_PLATFORM_PROFILE;
+      choicesPath = &TUXEDO_PLATFORM_PROFILE_CHOICES;
+      break;
+    case ODMProfileType::AcpiPlatformProfile:
+      profilePath = &ACPI_PLATFORM_PROFILE;
+      choicesPath = &ACPI_PLATFORM_PROFILE_CHOICES;
+      break;
+    case ODMProfileType::TuxedoIOAPI:
+    {
+      std::vector< std::string > available;
+      if ( not getAvailableProfilesViaAPI( available ) )
+        return false;
+      if ( std::ranges::find( available, profileName ) == available.end() )
+      {
+        syslog( LOG_WARNING, "ProfileSettingsWorker::setODMProfile: profile '%s' not in available list",
+                profileName.c_str() );
+        return false;
+      }
+      if ( setProfileViaAPI( profileName ) )
+      {
+        syslog( LOG_INFO, "ProfileSettingsWorker::setODMProfile: set to '%s'", profileName.c_str() );
+        m_setCurrentODMProfile( profileName );
+        return true;
+      }
+      return false;
+    }
+    default:
+      syslog( LOG_WARNING, "ProfileSettingsWorker::setODMProfile: not supported for current ODM type" );
+      return false;
+  }
+
+  const auto available = readPlatformProfileChoices( *choicesPath );
+  if ( std::ranges::find( available, profileName ) == available.end() )
+  {
+    syslog( LOG_WARNING, "ProfileSettingsWorker::setODMProfile: profile '%s' not in available list",
+            profileName.c_str() );
+    return false;
+  }
+
+  SysfsNode< std::string > profileNode( *profilePath );
+  if ( profileNode.write( profileName ) )
+  {
+    syslog( LOG_INFO, "ProfileSettingsWorker::setODMProfile: set to '%s'", profileName.c_str() );
+    m_setCurrentODMProfile( profileName );
+    return true;
+  }
+
+  syslog( LOG_WARNING, "ProfileSettingsWorker::setODMProfile: failed to write '%s'",
+          profileName.c_str() );
+  return false;
+}
+
 void ProfileSettingsWorker::applyODMProfile()
 {
   const UccProfile profile = m_getActiveProfile();
@@ -313,6 +409,11 @@ void ProfileSettingsWorker::applyPlatformProfile(
 
   m_setOdmProfilesAvailable( availableProfiles );
 
+  // Always read and publish the current hardware profile so the UI reflects reality,
+  // regardless of whether we are going to write a new value.
+  const std::string currentProfile = readCurrentPlatformProfile( profilePath );
+  m_setCurrentODMProfile( currentProfile );
+
   if ( chosenProfileName.empty() )
   {
     syslog( LOG_INFO, "ProfileSettingsWorker: No profile name specified in active profile" );
@@ -332,6 +433,7 @@ void ProfileSettingsWorker::applyPlatformProfile(
   {
     syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
             chosenProfileName.c_str() );
+    m_setCurrentODMProfile( chosenProfileName );
   }
   else
   {
@@ -375,6 +477,7 @@ void ProfileSettingsWorker::applyProfileViaAPI( const std::string &chosenProfile
   {
     syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
             profileToApply.c_str() );
+    m_setCurrentODMProfile( profileToApply );
   }
   else
   {

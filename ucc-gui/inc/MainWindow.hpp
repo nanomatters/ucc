@@ -187,6 +187,9 @@ namespace ucc
     QLabel *m_brightnessValueLabel = nullptr;
     QComboBox *m_profileKeyboardProfileCombo = nullptr;
 
+    // ODM platform profile selector (shown only when driver exposes platform profiles)
+    QComboBox *m_odmProfileCombo = nullptr;
+
     // Charging profile (per-profile firmware-level mode)
     QComboBox *m_profileChargingProfileCombo = nullptr;
     QComboBox *m_profileChargingPriorityCombo = nullptr;
@@ -219,6 +222,7 @@ namespace ucc
     int m_cpuMinFreqKHz = 400000;   // hardware min frequency in kHz
     int m_cpuMaxFreqKHz = 6000000;  // hardware max frequency in kHz
     // ODM Power Limit (TDP) widgets
+    QWidget *m_odmPowerSectionWidget = nullptr;  // container; hidden when no TDP hardware
     QSlider *m_odmPowerLimit1Slider = nullptr;
     QLabel *m_odmPowerLimit1Value = nullptr;
     QSlider *m_odmPowerLimit2Slider = nullptr;

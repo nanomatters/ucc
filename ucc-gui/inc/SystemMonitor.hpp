@@ -68,6 +68,10 @@ class SystemMonitor : public QObject
   Q_PROPERTY( int chargeEndThreshold READ chargeEndThreshold WRITE setChargeEndThreshold NOTIFY chargeEndThresholdChanged )
   Q_PROPERTY( QString chargeType READ chargeType WRITE setChargeType NOTIFY chargeTypeChanged )
 
+  // ODM platform profile properties
+  Q_PROPERTY( QStringList odmProfilesAvailable READ odmProfilesAvailable NOTIFY odmProfilesAvailableChanged )
+  Q_PROPERTY( QString currentODMProfile READ currentODMProfile WRITE setCurrentODMProfile NOTIFY currentODMProfileChanged )
+
 public:
   explicit SystemMonitor( QObject *parent = nullptr );
   ~SystemMonitor() override;
@@ -107,6 +111,10 @@ public:
   int chargeEndThreshold() const { return m_chargeEndThreshold; }
   QString chargeType() const { return m_chargeType; }
 
+  // ODM profile getters
+  QStringList odmProfilesAvailable() const { return m_odmProfilesAvailable; }
+  QString currentODMProfile() const { return m_currentODMProfile; }
+
 public slots:
   void setDisplayBrightness( int brightness );
   void setWebcamEnabled( bool enabled );
@@ -120,6 +128,9 @@ public slots:
   void setChargeStartThreshold( int value );
   void setChargeEndThreshold( int value );
   void setChargeType( const QString &type );
+
+  // ODM profile setter
+  void setCurrentODMProfile( const QString &profile );
 
 signals:
   void cpuUsageChanged();
@@ -157,11 +168,16 @@ signals:
   void chargeEndThresholdChanged();
   void chargeTypeChanged();
 
+  // ODM profile signals
+  void odmProfilesAvailableChanged();
+  void currentODMProfileChanged();
+
 private slots:
   void updateMetrics();
 
 private:
   void initializeChargingState();
+  void initializeODMProfileState();
 
   std::unique_ptr< UccdClient > m_client;
   QTimer *m_updateTimer;
@@ -200,6 +216,10 @@ private:
   int m_chargeStartThreshold = 0;
   int m_chargeEndThreshold = 100;
   QString m_chargeType;
+
+  // ODM platform profile state
+  QStringList m_odmProfilesAvailable;
+  QString m_currentODMProfile;
 };
 
 } // namespace ucc

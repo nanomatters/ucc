@@ -34,6 +34,7 @@ SystemMonitor::SystemMonitor( QObject *parent )
 
   // Load charging capabilities (these don't change at runtime)
   initializeChargingState();
+  initializeODMProfileState();
 
   // Re-init charging capabilities if uccd wasn't running at startup
   connect( m_client.get(), &UccdClient::connectionStatusChanged,
@@ -42,6 +43,7 @@ SystemMonitor::SystemMonitor( QObject *parent )
     {
       qInfo() << "[SystemMonitor] uccd reconnected — reinitialising charging state";
       initializeChargingState();
+      initializeODMProfileState();
       refreshAll();
     }
   } );
@@ -493,6 +495,43 @@ void SystemMonitor::setChargeType( const QString &type )
   {
     m_chargeType = type;
     emit chargeTypeChanged();
+  }
+}
+
+// =====================================================================
+//  ODM platform profile — initialization and setter
+// =====================================================================
+
+void SystemMonitor::initializeODMProfileState()
+{
+  if ( auto profiles = m_client->getAvailableODMProfiles() )
+  {
+    QStringList list;
+    for ( const auto &p : *profiles )
+      list << QString::fromStdString( p );
+    if ( m_odmProfilesAvailable != list )
+    {
+      m_odmProfilesAvailable = list;
+      emit odmProfilesAvailableChanged();
+    }
+  }
+
+  if ( auto profile = m_client->getODMPerformanceProfile() )
+  {
+    if ( QString p = QString::fromStdString( *profile ); m_currentODMProfile != p )
+    {
+      m_currentODMProfile = p;
+      emit currentODMProfileChanged();
+    }
+  }
+}
+
+void SystemMonitor::setCurrentODMProfile( const QString &profile )
+{
+  if ( m_client->setODMPerformanceProfile( profile.toStdString() ) )
+  {
+    m_currentODMProfile = profile;
+    emit currentODMProfileChanged();
   }
 }
 

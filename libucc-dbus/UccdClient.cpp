@@ -839,18 +839,27 @@ std::optional< std::string > UccdClient::getKeyboardBacklightStates()
   return std::nullopt;
 }
 
-bool UccdClient::setODMPerformanceProfile( [[maybe_unused]] const std::string &profile )
+bool UccdClient::setODMPerformanceProfile( const std::string &profile )
 {
-  return false;
+  return callVoidMethod( "SetODMProfile", QString::fromStdString( profile ) );
 }
 
 std::optional< std::string > UccdClient::getODMPerformanceProfile()
 {
+  if ( auto result = callMethod< QString >( "GetCurrentODMProfile" ) )
+    return result->toStdString();
   return std::nullopt;
 }
 
 std::optional< std::vector< std::string > > UccdClient::getAvailableODMProfiles()
 {
+  if ( auto result = callMethod< QStringList >( "ODMProfilesAvailable" ) )
+  {
+    std::vector< std::string > profiles;
+    for ( const auto &s : *result )
+      profiles.push_back( s.toStdString() );
+    return profiles;
+  }
   return std::nullopt;
 }
 

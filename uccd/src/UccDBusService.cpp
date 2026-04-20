@@ -296,6 +296,12 @@ static std::string profileToJSON( const UccProfile &profile,
       oss << ",\"selectedKeyboardProfile\":\"" << jsonEscape( kbRef ) << "\"";
   }
 
+  // ODM platform profile (per-profile hardware platform profile, e.g. "balanced")
+  if ( !profile.odmPlatformProfile.empty() )
+  {
+    oss << ",\"odmPlatformProfile\":\"" << jsonEscape( profile.odmPlatformProfile ) << "\"";
+  }
+
   // Charging profile (firmware-level mode, per-profile)
   if ( !profile.chargingProfile.empty() )
   {
@@ -1431,6 +1437,19 @@ QStringList UccDBusInterfaceAdaptor::ODMProfilesAvailable()
   return result;
 }
 
+QString UccDBusInterfaceAdaptor::GetCurrentODMProfile()
+{
+  std::lock_guard< std::mutex > lock( m_data.dataMutex );
+  return QString::fromStdString( m_data.currentODMProfile );
+}
+
+bool UccDBusInterfaceAdaptor::SetODMProfile( const QString &profileName )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
+  if ( !m_service || !m_service->m_profileSettingsWorker ) return false;
+  return m_service->m_profileSettingsWorker->setODMProfile( profileName.toStdString() );
+}
+
 QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
@@ -2217,6 +2236,10 @@ UccDBusService::UccDBusService()
     [this]( const std::vector< std::string > &profiles ) {
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
       m_dbusData.odmProfilesAvailable = profiles;
+    },
+    [this]( const std::string &profile ) {
+      std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+      m_dbusData.currentODMProfile = profile;
     },
     [this]( const std::string &json ) {
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
@@ -3471,6 +3494,13 @@ bool UccDBusService::setCurrentProfileById( const std::string &id )
           if ( m_profileSettingsWorker->setChargeEndThreshold( profile.chargeEndThreshold ) )
             m_dbusData.chargeEndThreshold = profile.chargeEndThreshold;
         }
+
+        // Apply ODM platform profile if the profile specifies one
+        if ( !profile.odmPlatformProfile.empty() )
+        {
+          std::cout << "[Profile] Applying ODM platform profile '" << profile.odmPlatformProfile << "'" << std::endl;
+          m_profileSettingsWorker->setODMProfile( profile.odmPlatformProfile );
+        }
       }
 
       if ( m_keyboardBacklightController.isAvailable()
@@ -3671,6 +3701,13 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         std::cout << "[Profile] Applying charge end threshold " << profile.chargeEndThreshold << std::endl;
         if ( m_profileSettingsWorker->setChargeEndThreshold( profile.chargeEndThreshold ) )
           m_dbusData.chargeEndThreshold = profile.chargeEndThreshold;
+      }
+
+      // Apply ODM platform profile if the profile specifies one
+      if ( !profile.odmPlatformProfile.empty() )
+      {
+        std::cout << "[Profile] Applying ODM platform profile '" << profile.odmPlatformProfile << "'" << std::endl;
+        m_profileSettingsWorker->setODMProfile( profile.odmPlatformProfile );
       }
     }
 

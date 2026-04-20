@@ -237,8 +237,6 @@ const UccProfile defaultCustomProfile25WcTGP = []()
 }();
 
 // device-specific default profiles
-
-// device-specific default profiles
 const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceProfiles =
 {
   { UniwillDeviceID::IBP14G6_TUX, { maxEnergySave, silent, office } },

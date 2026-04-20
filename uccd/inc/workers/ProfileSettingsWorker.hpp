@@ -63,6 +63,7 @@ public:
     std::shared_ptr< NvmlWrapper > nvml,
     std::function< UccProfile() > getActiveProfileCallback,
     std::function< void( const std::vector< std::string > & ) > setOdmProfilesAvailableCallback,
+    std::function< void( const std::string & ) > setCurrentODMProfileCallback,
     std::function< void( const std::string & ) > setOdmPowerLimitsJSON,
     std::function< void( const std::string & ) > logFunction,
     TccSettings &settings,
@@ -76,6 +77,7 @@ public:
       m_nvml( std::move( nvml ) ),
       m_getActiveProfile( std::move( getActiveProfileCallback ) ),
       m_setOdmProfilesAvailable( std::move( setOdmProfilesAvailableCallback ) ),
+      m_setCurrentODMProfile( std::move( setCurrentODMProfileCallback ) ),
       m_setOdmPowerLimitsJSON( std::move( setOdmPowerLimitsJSON ) ),
       m_logFunction( std::move( logFunction ) ),
       m_skipAcpiPlatformProfile( skipAcpiPlatformProfile ),
@@ -105,6 +107,16 @@ public:
     applyODMPowerLimits();
     applyODMProfile();
   }
+
+  /**
+   * @brief Directly set the platform profile by name (e.g. "low-power", "balanced").
+   *
+   * Writes the name to the active platform_profile sysfs node and publishes the
+   * new current profile via the setCurrentODMProfile callback.
+   * Has no effect when the ODM profile type is None or TuxedoIOAPI.
+   * @return true if the profile was written successfully.
+   */
+  bool setODMProfile( const std::string &profileName );
 
   // =====================================================================
   //  Charging API  (was ChargingWorker)
@@ -155,6 +167,7 @@ private:
   std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< void( const std::vector< std::string > & ) > m_setOdmProfilesAvailable;
+  std::function< void( const std::string & ) > m_setCurrentODMProfile;
   std::function< void( const std::string & ) > m_setOdmPowerLimitsJSON;
   std::function< void( const std::string & ) > m_logFunction;
   ODMProfileType m_odmProfileType = ODMProfileType::None;
@@ -186,15 +199,11 @@ private:
 
   void detectODMProfileType();
   std::vector< std::string > readPlatformProfileChoices( const std::string &path );
+  std::string readCurrentPlatformProfile( const std::string &path );
 
-  bool getAvailableProfilesViaAPI( [[maybe_unused]] std::vector< std::string > &profiles )
-  {
-    return false;
-  }
-
-  std::string getDefaultProfileViaAPI() { return ""; }
-
-  bool setProfileViaAPI( [[maybe_unused]] const std::string &profileName ) { return false; }
+  bool getAvailableProfilesViaAPI( std::vector< std::string > &profiles );
+  std::string getDefaultProfileViaAPI();
+  bool setProfileViaAPI( const std::string &profileName );
 
   void applyODMProfile();
   void applyPlatformProfile(

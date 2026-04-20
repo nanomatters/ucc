@@ -127,6 +127,7 @@ public:
   std::string defaultValuesProfileJSON;
   std::string settingsJSON;
   std::vector< std::string > odmProfilesAvailable;
+  std::string currentODMProfile;
   std::string odmPowerLimitsJSON;
   std::string keyboardBacklightCapabilitiesJSON;
   std::string keyboardBacklightStatesJSON;
@@ -183,6 +184,7 @@ public:
       defaultValuesProfileJSON( "{}" ),
       settingsJSON( "{}" ),
       odmProfilesAvailable(),
+      currentODMProfile( "" ),
       odmPowerLimitsJSON( "[]" ),
       keyboardBacklightCapabilitiesJSON( "{}" ),
       keyboardBacklightStatesJSON( "{}" ),
@@ -321,6 +323,8 @@ public slots:
 
   // odm methods
   QStringList ODMProfilesAvailable();
+  QString GetCurrentODMProfile();
+  bool SetODMProfile( const QString &profileName );
   QString ODMPowerLimitsJSON();
 
   // keyboard backlight methods

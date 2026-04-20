@@ -89,7 +89,7 @@ install(TARGETS uccd
 )
 
 # Install systemd service files
-install(FILES uccd.service uccd-pre-sleep.service uccd-sleep.service
+install(FILES uccd.service uccd-sleep.service
   DESTINATION lib/systemd/system
 )
 

@@ -442,6 +442,65 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addItem( new QSpacerItem( 0, 15 ), row, 0, 1, 2 );
   row++;
 
+  // === ODM PLATFORM PROFILE SECTION (visible only when driver exposes platform profiles) ===
+  QLabel *odmProfileHeader = new QLabel( "Power profile" );
+  odmProfileHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
+  detailsLayout->addWidget( odmProfileHeader, row, 0, 1, 2 );
+  row++;
+
+  QLabel *odmProfileLabel = new QLabel( "Platform profile" );
+  m_odmProfileCombo = new QComboBox();
+  detailsLayout->addWidget( odmProfileLabel, row, 0 );
+  detailsLayout->addWidget( m_odmProfileCombo, row, 1 );
+  row++;
+
+  auto setODMProfileSectionVisible = [odmProfileHeader, odmProfileLabel, this]( bool visible )
+  {
+    odmProfileHeader->setVisible( visible );
+    odmProfileLabel->setVisible( visible );
+    m_odmProfileCombo->setVisible( visible );
+  };
+
+  if ( m_systemMonitor )
+  {
+    auto populateODMProfiles = [this, setODMProfileSectionVisible]()
+    {
+      const QStringList profiles = m_systemMonitor->odmProfilesAvailable();
+      m_odmProfileCombo->blockSignals( true );
+      m_odmProfileCombo->clear();
+      for ( const auto &p : profiles )
+        m_odmProfileCombo->addItem( p, p );
+      m_odmProfileCombo->blockSignals( false );
+      setODMProfileSectionVisible( !profiles.isEmpty() );
+    };
+
+    auto refreshCurrentODMProfile = [this]()
+    {
+      const QString current = m_systemMonitor->currentODMProfile();
+      m_odmProfileCombo->blockSignals( true );
+      int idx = m_odmProfileCombo->findData( current );
+      if ( idx >= 0 )
+        m_odmProfileCombo->setCurrentIndex( idx );
+      m_odmProfileCombo->blockSignals( false );
+    };
+
+    populateODMProfiles();
+    refreshCurrentODMProfile();
+
+    connect( m_systemMonitor.get(), &SystemMonitor::odmProfilesAvailableChanged, this,
+             populateODMProfiles );
+    // Note: currentODMProfileChanged is intentionally NOT connected here — the combo
+    // shows the profile's *saved* platform profile setting, not the live hardware state.
+    // Hardware state is read once (refreshCurrentODMProfile above) for the initial default.
+
+    connect( m_odmProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ), this,
+             [this]( int ) { markChanged(); } );
+  }
+  else
+  {
+    setODMProfileSectionVisible( false );
+  }
+
   // === CHARGING SECTION (visible only when hardware supports it) ===
   QLabel *chargingHeader = new QLabel( "Charging" );
   chargingHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
@@ -698,9 +757,16 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( sysHeader, row, 0, 1, 2 );
   row++;
 
+  // ── ODM Power Limits section — hidden on platforms without TDP hardware ──
+  m_odmPowerSectionWidget = new QWidget();
+  auto *odmInnerLayout = new QGridLayout( m_odmPowerSectionWidget );
+  odmInnerLayout->setContentsMargins( 0, 0, 0, 5 );  // 5 px bottom replaces trailing spacer
+  odmInnerLayout->setSpacing( 6 );
+  int odmRow = 0;
+
   QLabel *odmPowerHeader = new QLabel( "CPU power limit control" );
-  detailsLayout->addWidget( odmPowerHeader, row, 0, 1, 2 );
-  row++;
+  odmInnerLayout->addWidget( odmPowerHeader, odmRow, 0, 1, 2 );
+  odmRow++;
 
   // TDP Limit 1
   QLabel *tdp1Label = new QLabel( "Sustained TDP" );  // Sustained Power Limit
@@ -713,9 +779,9 @@ void MainWindow::setupProfilesPage()
   m_odmPowerLimit1Value->setMinimumWidth( 50 );
   tdp1Layout->addWidget( m_odmPowerLimit1Slider, 1 );
   tdp1Layout->addWidget( m_odmPowerLimit1Value );
-  detailsLayout->addWidget( tdp1Label, row, 0 );
-  detailsLayout->addLayout( tdp1Layout, row, 1 );
-  row++;
+  odmInnerLayout->addWidget( tdp1Label, odmRow, 0 );
+  odmInnerLayout->addLayout( tdp1Layout, odmRow, 1 );
+  odmRow++;
 
   // TDP Limit 2
   QLabel *tdp2Label = new QLabel( "Boost TDP" );
@@ -728,9 +794,9 @@ void MainWindow::setupProfilesPage()
   m_odmPowerLimit2Value->setMinimumWidth( 50 );
   tdp2Layout->addWidget( m_odmPowerLimit2Slider, 1 );
   tdp2Layout->addWidget( m_odmPowerLimit2Value );
-  detailsLayout->addWidget( tdp2Label, row, 0 );
-  detailsLayout->addLayout( tdp2Layout, row, 1 );
-  row++;
+  odmInnerLayout->addWidget( tdp2Label, odmRow, 0 );
+  odmInnerLayout->addLayout( tdp2Layout, odmRow, 1 );
+  odmRow++;
 
   // TDP Limit 3
   QLabel *tdp3Label = new QLabel( "Peak TDP" );
@@ -743,12 +809,10 @@ void MainWindow::setupProfilesPage()
   m_odmPowerLimit3Value->setMinimumWidth( 50 );
   tdp3Layout->addWidget( m_odmPowerLimit3Slider, 1 );
   tdp3Layout->addWidget( m_odmPowerLimit3Value );
-  detailsLayout->addWidget( tdp3Label, row, 0 );
-  detailsLayout->addLayout( tdp3Layout, row, 1 );
-  row++;
+  odmInnerLayout->addWidget( tdp3Label, odmRow, 0 );
+  odmInnerLayout->addLayout( tdp3Layout, odmRow, 1 );
 
-  // Add spacer
-  detailsLayout->addItem( new QSpacerItem( 0, 5 ), row, 0, 1, 2 );
+  detailsLayout->addWidget( m_odmPowerSectionWidget, row, 0, 1, 2 );
   row++;
 
   QLabel *cpuFreqHeader = new QLabel( "CPU frequency control" );
@@ -1653,6 +1717,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_odmPowerLimit3Slider->blockSignals( true );
   m_profileKeyboardProfileCombo->blockSignals( true );
   m_keyboardProfileCombo->blockSignals( true );
+  if ( m_odmProfileCombo ) m_odmProfileCombo->blockSignals( true );
   if ( m_profileChargingProfileCombo ) m_profileChargingProfileCombo->blockSignals( true );
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->blockSignals( true );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->blockSignals( true );
@@ -1830,6 +1895,12 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   // Load ODM Power Limits (TDP) settings (nested in odmPowerLimits object)
   // First, set slider ranges from hardware limits
   std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
+
+  // Show the TDP section only when the hardware actually exposes TDP limits
+  const bool tdpSupported = !hardwareLimits.empty();
+  if ( m_odmPowerSectionWidget )
+    m_odmPowerSectionWidget->setVisible( tdpSupported );
+
   if ( hardwareLimits.size() > 0 )
   {
     m_odmPowerLimit1Slider->setMaximum( hardwareLimits[0] );
@@ -1921,6 +1992,17 @@ void MainWindow::loadProfileDetails( const QString &profileId )
       if ( !gpuProfileId.isEmpty() )
         onGpuProfileChanged( gpuProfileId );
     }
+  }
+
+  // Load ODM platform profile setting
+  if ( m_odmProfileCombo )
+  {
+    if ( obj.contains( "odmPlatformProfile" ) )
+    {
+      if ( int idx = m_odmProfileCombo->findData( obj["odmPlatformProfile"].toString() ); idx >= 0 )
+        m_odmProfileCombo->setCurrentIndex( idx );
+    }
+    // If not saved in profile, keep whatever was set from hardware state during initial populate
   }
 
   // Load Charging profile setting
@@ -2041,6 +2123,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_odmPowerLimit3Slider->blockSignals( false );
   m_profileKeyboardProfileCombo->blockSignals( false );
   m_keyboardProfileCombo->blockSignals( false );
+  if ( m_odmProfileCombo ) m_odmProfileCombo->blockSignals( false );
   if ( m_profileChargingProfileCombo ) m_profileChargingProfileCombo->blockSignals( false );
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->blockSignals( false );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->blockSignals( false );
@@ -2263,6 +2346,13 @@ QString MainWindow::buildProfileJSON() const
     keyboardObj["brightness"] = m_keyboardBrightnessSlider->value();
   profileObj["keyboard"]               = keyboardObj;
   profileObj["selectedKeyboardProfile"] = keyboardProfileId;
+
+  // ODM platform profile
+  if ( m_odmProfileCombo )
+  {
+    const QString v = m_odmProfileCombo->currentData().toString();
+    if ( !v.isEmpty() ) profileObj["odmPlatformProfile"] = v;
+  }
 
   // Charging
   if ( m_profileChargingProfileCombo )

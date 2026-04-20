@@ -299,6 +299,9 @@ public:
     profile.gpuProfileId = extractString( json, "gpuProfileId", "" );
     profile.gpuOCProfileData = extractObject( json, "gpuOCProfileData" );
 
+    // Parse ODM platform profile (e.g. "low-power", "balanced", "performance")
+    profile.odmPlatformProfile = extractString( json, "odmPlatformProfile", "" );
+
     // Parse charging profile (firmware-level charging mode stored per-profile)
     profile.chargingProfile = extractString( json, "chargingProfile", "" );
     profile.chargingPriority = extractString( json, "chargingPriority", "" );
