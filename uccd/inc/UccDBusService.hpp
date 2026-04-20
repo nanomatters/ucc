@@ -38,7 +38,6 @@
 #include "workers/FanControlWorker.hpp"
 #include "KeyboardBacklightController.hpp"
 #include "workers/ProfileSettingsWorker.hpp"
-#include "workers/LCTWaterCoolerWorker.hpp"
 #include "workers/NvidiaOCWorker.hpp"
 #include "FnLockController.hpp"
 #include "profiles/UccProfile.hpp"
@@ -625,7 +624,6 @@ private:
   std::unique_ptr< ProfileSettingsWorker > m_profileSettingsWorker;
   std::unique_ptr< FanControlWorker > m_fanControlWorker;
   KeyboardBacklightController m_keyboardBacklightController;
-  std::unique_ptr< LCTWaterCoolerWorker > m_waterCoolerWorker;
   std::unique_ptr< NvidiaOCWorker > m_nvidiaOCWorker;
 
   // Shared NVML instance — created once, used by all workers and readHardwareCapabilities
@@ -634,6 +632,10 @@ private:
   // identified device
   std::optional< UniwillDeviceID > m_deviceId;
   SystemInfo m_systemInfo;
+
+  // hardware-based WC support flag (set once at startup; runtime flag may be
+  // lowered to false when uwcd is unreachable so the UI hides all WC controls)
+  bool m_hwWaterCoolerSupported{ false };
 
   // periodic validation counters
   uint32_t m_nvidiaValidationCounter = 0;

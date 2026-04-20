@@ -17,7 +17,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Core Bluetooth DBus)
+find_package(Qt6 REQUIRED COMPONENTS Core DBus)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -29,11 +29,9 @@ add_executable(uccd
   src/NvmlWrapper.cpp
   src/workers/ProfileSettingsWorker.cpp
   src/workers/NvidiaOCWorker.cpp
-  src/workers/LCTWaterCoolerWorker.cpp
   src/workers/DisplayWorker.cpp
   src/workers/HardwareMonitorWorker.cpp
   inc/UccDBusService.hpp
-  inc/workers/LCTWaterCoolerWorker.hpp
   inc/workers/DaemonWorker.hpp
   inc/workers/NvidiaOCWorker.hpp
   src/profiles/FanProfiles.cpp
@@ -42,7 +40,7 @@ add_executable(uccd
 )
 
 # Include directories
-target_include_directories(uccd PRIVATE inc/ ${CMAKE_SOURCE_DIR}/../libucc-dbus ${Qt6Core_INCLUDE_DIRS} ${Qt6Bluetooth_INCLUDE_DIRS} ${Qt6DBus_INCLUDE_DIRS} /usr/include)
+target_include_directories(uccd PRIVATE inc/ ${CMAKE_SOURCE_DIR}/../libucc-dbus ${Qt6Core_INCLUDE_DIRS} ${Qt6DBus_INCLUDE_DIRS} /usr/include)
 
 # Link to tuxedo_io_lib
 target_link_libraries(uccd PRIVATE
@@ -54,7 +52,6 @@ target_link_libraries(uccd PRIVATE
   udev
   dl
   Qt6::Core
-  Qt6::Bluetooth
   Qt6::DBus
 )
 

@@ -38,12 +38,68 @@
 #include <QJsonArray>
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QDBusConnectionInterface>
 
 namespace
 {
 constexpr const char *BUILTIN_GPU_PROFILE_ID = "gpu-default-builtin";
 constexpr const char *BUILTIN_GPU_PROFILE_NAME = "Default [Built-in]";
+
+// ── uwcd D-Bus proxy helpers ─────────────────────────────────────────────────
+// These are thin wrappers around QDBusConnection::systemBus().call() to proxy
+// water-cooler commands to the uwcd daemon (com.uniwill.uwcd).  If uwcd is not
+// running, the call() will return an error message immediately and the helpers
+// return a safe default value.
+//
+// All helpers are safe to call from any thread (Qt DBus is thread-safe for
+// blocking calls via an internally-managed thread-local connection).
+
+static constexpr const char *UWCD_SERVICE    = "com.uniwill.uwcd";
+static constexpr const char *UWCD_OBJECT     = "/com/uniwill/uwcd";
+static constexpr const char *UWCD_INTERFACE  = "com.uniwill.uwcd";
+static constexpr int         UWCD_TIMEOUT_MS = 300;  // short: local IPC only
+
+static QDBusMessage uwcdCall( const QString &method, const QVariantList &args = {} )
+{
+  auto msg = QDBusMessage::createMethodCall(
+      QLatin1String( UWCD_SERVICE ),
+      QLatin1String( UWCD_OBJECT ),
+      QLatin1String( UWCD_INTERFACE ),
+      method );
+  if ( !args.isEmpty() )
+    msg.setArguments( args );
+  return QDBusConnection::systemBus().call( msg, QDBus::Block, UWCD_TIMEOUT_MS );
 }
+
+static bool uwcdCallBool( const QString &method, const QVariantList &args = {} )
+{
+  const auto reply = uwcdCall( method, args );
+  if ( reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty() )
+    return reply.arguments().first().toBool();
+  return false;
+}
+
+static int uwcdCallInt( const QString &method, const QVariantList &args = {} )
+{
+  const auto reply = uwcdCall( method, args );
+  if ( reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty() )
+    return reply.arguments().first().toInt();
+  return -1;
+}
+
+static void uwcdCallNoReply( const QString &method, const QVariantList &args = {} )
+{
+  auto msg = QDBusMessage::createMethodCall(
+      QLatin1String( UWCD_SERVICE ),
+      QLatin1String( UWCD_OBJECT ),
+      QLatin1String( UWCD_INTERFACE ),
+      method );
+  if ( !args.isEmpty() )
+    msg.setArguments( args );
+  QDBusConnection::systemBus().call( msg, QDBus::NoBlock );
+}
+
+} // anonymous namespace
 
 static std::string jsonEscape( const std::string &value );
 
@@ -1690,6 +1746,8 @@ int UccDBusInterfaceAdaptor::GetCpuCoreCount()
 }
 
 // water cooler methods
+// These are transparent proxies to the uwcd daemon (com.uniwill.uwcd).
+// m_dbusData.waterCoolerAvailable/Connected are kept in sync by onWork().
 
 bool UccDBusInterfaceAdaptor::GetWaterCoolerAvailable()
 {
@@ -1702,10 +1760,14 @@ bool UccDBusInterfaceAdaptor::GetWaterCoolerConnected()
 }
 
 int UccDBusInterfaceAdaptor::GetWaterCoolerFanSpeed()
-{ return m_service ? static_cast< int >( m_service->m_waterCoolerWorker->getLastFanSpeed() ) : -1; }
+{
+  return uwcdCallInt( QStringLiteral( "GetWaterCoolerFanSpeed" ) );
+}
 
 int UccDBusInterfaceAdaptor::GetWaterCoolerPumpLevel()
-{ return m_service ? static_cast< int >( m_service->m_waterCoolerWorker->getLastPumpVoltage() ) : -1; }
+{
+  return uwcdCallInt( QStringLiteral( "GetWaterCoolerPumpLevel" ) );
+}
 
 bool UccDBusInterfaceAdaptor::EnableWaterCooler( bool enable )
 {
@@ -1744,10 +1806,7 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerFanSpeed( int dutyCyclePercent )
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
   if ( dutyCyclePercent < 0 || dutyCyclePercent > 100 )
     return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-    return m_service->m_waterCoolerWorker->setFanSpeed( dutyCyclePercent );
-
-  return false;
+  return uwcdCallBool( QStringLiteral( "SetWaterCoolerFanSpeed" ), { dutyCyclePercent } );
 }
 
 bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int voltage )
@@ -1756,57 +1815,38 @@ bool UccDBusInterfaceAdaptor::SetWaterCoolerPumpVoltage( int voltage )
   // V12(1) is reserved and V1bis excluded. Valid: {0, 2, 3, 4}
   if ( voltage != 0 && voltage != 2 && voltage != 3 && voltage != 4 )
     return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-    return m_service->m_waterCoolerWorker->setPumpVoltage( voltage );
-
-  return false;
+  return uwcdCallBool( QStringLiteral( "SetWaterCoolerPumpVoltage" ), { voltage } );
 }
 
 bool UccDBusInterfaceAdaptor::SetWaterCoolerLEDColor( int red, int green, int blue, int mode )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-  {
-    m_service->m_waterCoolerLedMode.store( mode );
+  m_service->m_waterCoolerLedMode.store( mode );
 
-    // Temperature mode: internally use Static, daemon auto-sets color from fan speed
-    const int hwMode = ( mode == static_cast< int >( ucc::RGBState::Temperature ) )
-                             ? static_cast< int >( ucc::RGBState::Static )
-                             : mode;
+  // Temperature mode: internally use Static, daemon auto-sets color from fan speed
+  const int hwMode = ( mode == static_cast< int >( ucc::RGBState::Temperature ) )
+                           ? static_cast< int >( ucc::RGBState::Static )
+                           : mode;
 
-    return m_service->m_waterCoolerWorker->setLEDColor( red, green, blue, hwMode );
-  }
-  return false;
+  return uwcdCallBool( QStringLiteral( "SetWaterCoolerLEDColor" ), { red, green, blue, hwMode } );
 }
 
 bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerLED()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-  {
-    return m_service->m_waterCoolerWorker->turnOffLED();
-  }
-  return false;
+  return uwcdCallBool( QStringLiteral( "TurnOffWaterCoolerLED" ) );
 }
 
 bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerFan()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-  {
-    return m_service->m_waterCoolerWorker->turnOffFan();
-  }
-  return false;
+  return uwcdCallBool( QStringLiteral( "TurnOffWaterCoolerFan" ) );
 }
 
 bool UccDBusInterfaceAdaptor::TurnOffWaterCoolerPump()
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( m_service && m_service->m_waterCoolerWorker )
-  {
-    return m_service->m_waterCoolerWorker->turnOffPump();
-  }
-  return false;
+  return uwcdCallBool( QStringLiteral( "TurnOffWaterCoolerPump" ) );
 }
 
 bool UccDBusInterfaceAdaptor::IsWaterCoolerAutoControlEnabled()
@@ -2068,8 +2108,7 @@ UccDBusService::UccDBusService()
     m_customProfiles(),
     m_currentState( ProfileState::AC ),
     m_currentStateProfileId(),
-    m_previousWaterCoolerConnected( false ),
-    m_waterCoolerWorker( std::make_unique<LCTWaterCoolerWorker>( m_dbusData ) )
+    m_previousWaterCoolerConnected( false )
 {
   // set daemon version
   m_dbusData.uccdVersion = "2.1.21";
@@ -2325,7 +2364,7 @@ UccDBusService::UccDBusService()
 
           const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
           const int wcFanSpeed = fp.getWaterCoolerFanSpeedForTemp( snappedTemp );
-          m_waterCoolerWorker->setFanSpeed( wcFanSpeed );
+          uwcdCallNoReply( QStringLiteral( "SetWaterCoolerFanSpeed" ), { wcFanSpeed } );
 
           // Temperature LED mode: compute gradient color from fan speed
           if ( m_waterCoolerLedMode.load() == static_cast< int32_t >( ucc::RGBState::Temperature ) )
@@ -2334,8 +2373,8 @@ UccDBusService::UccDBusService()
             const int ledR = static_cast< int >( t * 255.0f );
             const int ledG = 0;
             const int ledB = static_cast< int >( ( 1.0f - t ) * 255.0f );
-            m_waterCoolerWorker->setLEDColor( ledR, ledG, ledB,
-              static_cast< int >( ucc::RGBState::Static ) );
+            uwcdCallNoReply( QStringLiteral( "SetWaterCoolerLEDColor" ),
+              { ledR, ledG, ledB, static_cast< int >( ucc::RGBState::Static ) } );
           }
 
           // Auto-control pump voltage with hysteresis.
@@ -2375,7 +2414,8 @@ UccDBusService::UccDBusService()
 
           const ucc::PumpVoltage pumpSpeedValue =
               pumpIdxToVoltage[ std::clamp( m_pumpHysSpeedIdx, 0, 4 ) ];
-          m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
+          uwcdCallNoReply( QStringLiteral( "SetWaterCoolerPumpVoltage" ),
+                           { static_cast<int>( pumpSpeedValue ) } );
 
           // std::cout << "[Auto WC] Temp: " << temp << "°C, Fan: " << wcFanSpeed
           //           << "%, Pump Voltage: " << static_cast<int>(pumpSpeedValue) << std::endl;
@@ -2895,7 +2935,7 @@ void UccDBusService::shutdown()
 
   // Phase 2: Wait for all threads to finish while keeping the Qt event
   // loop alive.  Workers may have pending BlockingQueuedConnection calls
-  // (e.g. LCTWaterCoolerWorker) that need the main thread to dispatch.
+  // that need the main thread to dispatch.
   // Pumping events here prevents deadlocks.
   auto waitPumpingEvents = []( QThread *t ) {
     if ( !t || !t->isRunning() )
@@ -3078,6 +3118,32 @@ void UccDBusService::onWork()
   if ( m_dbusData.modeReapplyPending and m_adaptor )
     m_adaptor->emitModeReapplyPendingChanged( true );
 
+  // Poll uwcd (com.uniwill.uwcd) for water cooler availability/connection status.
+  // If uwcd is unreachable (daemon not running), hide all WC controls by setting
+  // waterCoolerSupported to false.  As soon as uwcd becomes reachable again,
+  // restore the hardware-based capability flag.
+  if ( m_hwWaterCoolerSupported )
+  {
+    const bool uwcdReachable =
+        QDBusConnection::systemBus().interface()->isServiceRegistered(
+            QLatin1String( UWCD_SERVICE ) );
+
+    if ( !uwcdReachable )
+    {
+      // uwcd not running — treat as unsupported so the UI hides all WC controls
+      m_dbusData.waterCoolerSupported = false;
+      m_dbusData.waterCoolerAvailable = false;
+      m_dbusData.waterCoolerConnected = false;
+    }
+    else
+    {
+      // uwcd is reachable — restore hardware support flag and poll actual state
+      m_dbusData.waterCoolerSupported = true;
+      m_dbusData.waterCoolerAvailable = uwcdCallBool( QStringLiteral( "GetWaterCoolerAvailable" ) );
+      m_dbusData.waterCoolerConnected = uwcdCallBool( QStringLiteral( "GetWaterCoolerConnected" ) );
+    }
+  }
+
   // Check water cooler connection state changes and switch power state.
   // Debounce: BLE connections are inherently unstable – the water cooler
   // may briefly disconnect (UART error) and reconnect within seconds.
@@ -3151,7 +3217,7 @@ void UccDBusService::onWork()
 
 void UccDBusService::setWaterCoolerScanningEnabled( bool enable )
 {
-  // Caller may hold no locks; update dbus data and request worker actions.
+  // Caller may hold no locks; update dbus data and forward to uwcd.
   m_dbusData.waterCoolerScanningEnabled = enable;
 
   if ( not enable )
@@ -3160,22 +3226,8 @@ void UccDBusService::setWaterCoolerScanningEnabled( bool enable )
     m_dbusData.waterCoolerConnected = false;
   }
 
-  if ( not m_waterCoolerWorker )
-    return;
-
-  if ( enable )
-  {
-    // Only start scanning if not already scanning/connected.
-    // startScanning() calls cleanupBleController() which would tear down
-    // an active BLE connection, causing pump/fan commands to fail.
-    if ( not m_dbusData.waterCoolerAvailable.load() and not m_dbusData.waterCoolerConnected.load() )
-      m_waterCoolerWorker->startScanning();
-  }
-  else
-  {
-    // Stop discovery and disconnect; stopScanning() now also disconnects the device
-    m_waterCoolerWorker->stopScanning();
-  }
+  // Delegate BLE scanning control to uwcd
+  uwcdCallNoReply( QStringLiteral( "EnableWaterCooler" ), { enable } );
 }
 
 void UccDBusService::onExit()
@@ -3540,7 +3592,7 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
       }
 
       // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+      if ( profile.fan.autoControlWC && m_dbusData.waterCoolerConnected.load()
            && !pumpTable.empty() )
       {
         int maxTemp = 0;
@@ -3555,7 +3607,8 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         // loop re-initialises to the correct level on the next tick.
         m_pumpHysSpeedIdx = 0;
         m_pumpHysThreshold = 0;
-        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
+        uwcdCallNoReply( QStringLiteral( "SetWaterCoolerPumpVoltage" ),
+                         { static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) } );
         std::cout << "[Profile] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
       }
     }
@@ -3996,12 +4049,14 @@ void UccDBusService::computeDeviceCapabilities()
 
   if ( m_deviceId.has_value() )
   {
-    m_dbusData.waterCoolerSupported = waterCoolerDevices.count( m_deviceId.value() ) > 0;
+    m_hwWaterCoolerSupported = waterCoolerDevices.count( m_deviceId.value() ) > 0;
+    m_dbusData.waterCoolerSupported = m_hwWaterCoolerSupported;
     m_dbusData.cTGPAdjustmentSupported = cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
   }
   else
   {
     // Unknown device: water cooler not available, cTGP defers to hardware detection
+    m_hwWaterCoolerSupported = false;
     m_dbusData.waterCoolerSupported = false;
 
     // For unknown devices, check if the hardware file exists (like TCC does)
@@ -4270,7 +4325,7 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
     }
 
     // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-    if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+    if ( profile.fan.autoControlWC && m_dbusData.waterCoolerConnected.load()
          && !pumpTable.empty() )
     {
       int maxTemp = 0;
@@ -4285,7 +4340,8 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
       // loop re-initialises to the correct level on the next tick.
       m_pumpHysSpeedIdx = 0;
       m_pumpHysThreshold = 0;
-      m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
+      uwcdCallNoReply( QStringLiteral( "SetWaterCoolerPumpVoltage" ),
+                       { static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) } );
       std::cout << "[FanPump] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
     }
   }
@@ -4405,7 +4461,7 @@ void UccDBusService::applyProfileForCurrentState()
       }
 
       // Apply pump auto-control if water cooler is connected and autoControlWC is enabled
-      if ( profile.fan.autoControlWC && m_waterCoolerWorker && m_dbusData.waterCoolerConnected.load()
+      if ( profile.fan.autoControlWC && m_dbusData.waterCoolerConnected.load()
            && !pumpTable.empty() )
       {
         int maxTemp = 0;
@@ -4420,7 +4476,8 @@ void UccDBusService::applyProfileForCurrentState()
         // loop re-initialises to the correct level on the next tick.
         m_pumpHysSpeedIdx = 0;
         m_pumpHysThreshold = 0;
-        m_waterCoolerWorker->setPumpVoltage( static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) );
+        uwcdCallNoReply( QStringLiteral( "SetWaterCoolerPumpVoltage" ),
+                         { static_cast<int>( tempFp.getPumpSpeedForTemp( maxTemp ) ) } );
         std::cout << "[State] Applied pump voltage for temp " << maxTemp << "°C" << std::endl;
       }
     }

@@ -1,6 +1,6 @@
-# Maintainer: nanomatters <nanomatters@github.com>
+# Maintainer: nanomatters <nano.matters.code@gmail.com>
 
-pkgname=ucc
+pkgname=uniwill-control-center
 pkgver=0.2.0
 pkgrel=1
 pkgdesc='Uniwill Control Center - System daemon, GUI, CLI tool and Plasma applet for Uniwill laptops'
@@ -59,16 +59,16 @@ backup=('etc/ucc/settings')
 
 install=ucc.install
 
-source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
+source=("ucc-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 build() {
   local cmake_options=(
     -B build
-    -S "${pkgname}-${pkgver}"
+    -S "ucc-${pkgver}"
     -G Ninja
     -Wno-dev
-    -DCMAKE_BUILD_TYPE=None
+    -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_INSTALL_PREFIX=/usr
     -DCMAKE_INSTALL_LIBDIR=lib
     -DBUILD_GUI=ON
