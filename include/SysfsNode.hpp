@@ -21,6 +21,20 @@
 #include <sstream>
 #include <optional>
 #include <filesystem>
+#include <cerrno>
+#include <cstdint>
+#include <fcntl.h>
+#include <type_traits>
+#include <unistd.h>
+
+struct SysfsWriteResult
+{
+  bool success = false;
+  int error = 0;
+  size_t bytesWritten = 0;
+
+  explicit operator bool() const noexcept { return success; }
+};
 
 /**
  * @brief Template class for reading/writing sysfs files with type safety
@@ -83,18 +97,52 @@ public:
    */
   bool write( const T &value ) noexcept
   {
+    return static_cast< bool >( writeDetailed( value ) );
+  }
+
+  /**
+   * @brief Write value to sysfs node while preserving errno-style failure detail
+   * @param value The value to write
+   * @return Result containing success, errno value and bytes written
+   */
+  SysfsWriteResult writeDetailed( const T &value ) noexcept
+  {
     try
     {
-      std::ofstream file( m_path );
+      const std::string payload = formatWriteValue( value );
+      const int fd = ::open( m_path.c_str(), O_WRONLY | O_CLOEXEC | O_TRUNC );
 
-      if ( not file.is_open() )
-        return false;
+      if ( fd < 0 )
+        return { false, errno, 0 };
 
-      return writeImpl( file, value );
+      size_t written = 0;
+      while ( written < payload.size() )
+      {
+        const ssize_t ret = ::write( fd, payload.data() + written, payload.size() - written );
+        if ( ret < 0 )
+        {
+          const int savedErrno = errno;
+          ::close( fd );
+          return { false, savedErrno, written };
+        }
+
+        if ( ret == 0 )
+        {
+          ::close( fd );
+          return { false, EIO, written };
+        }
+
+        written += static_cast< size_t >( ret );
+      }
+
+      if ( ::close( fd ) < 0 )
+        return { false, errno, written };
+
+      return { true, 0, written };
     }
     catch ( ... )
     {
-      return false;
+      return { false, EIO, 0 };
     }
   }
 
@@ -122,6 +170,12 @@ private:
     return not file.fail();
   }
 
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, bool >
+  {
+    return value ? "1" : "0";
+  }
+
   // Specialization for int32_t
   [[nodiscard]] std::optional< T > readImpl( std::ifstream &file ) const
     requires std::is_same_v< T, int32_t >
@@ -142,6 +196,12 @@ private:
     return not file.fail();
   }
 
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, int32_t >
+  {
+    return std::to_string( value );
+  }
+
   // Specialization for int64_t
   [[nodiscard]] std::optional< T > readImpl( std::ifstream &file ) const
     requires std::is_same_v< T, int64_t >
@@ -160,6 +220,12 @@ private:
   {
     file << value;
     return not file.fail();
+  }
+
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, int64_t >
+  {
+    return std::to_string( value );
   }
 
   // Specialization for std::string
@@ -187,6 +253,12 @@ private:
   {
     file << value;
     return not file.fail();
+  }
+
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, std::string >
+  {
+    return value;
   }
 
   // Specialization for std::vector<int32_t>
@@ -251,6 +323,23 @@ private:
     return not file.fail();
   }
 
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, std::vector< int32_t > >
+  {
+    std::ostringstream stream;
+    const char delim = m_delimiter.empty() ? ',' : m_delimiter[ 0 ];
+
+    for ( size_t i = 0; i < value.size(); ++i )
+    {
+      if ( i > 0 )
+        stream << delim;
+
+      stream << value[ i ];
+    }
+
+    return stream.str();
+  }
+
   // Specialization for std::vector<std::string>
   [[nodiscard]] std::optional< T > readImpl( std::ifstream &file ) const
     requires std::is_same_v< T, std::vector< std::string > >
@@ -294,5 +383,22 @@ private:
     }
 
     return not file.fail();
+  }
+
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, std::vector< std::string > >
+  {
+    std::ostringstream stream;
+    const char delim = m_delimiter.empty() ? ' ' : m_delimiter[ 0 ];
+
+    for ( size_t i = 0; i < value.size(); ++i )
+    {
+      if ( i > 0 )
+        stream << delim;
+
+      stream << value[ i ];
+    }
+
+    return stream.str();
   }
 };

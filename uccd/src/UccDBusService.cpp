@@ -22,6 +22,7 @@
 #include "StateUtils.hpp"
 #include "Utils.hpp"
 #include "SysfsNode.hpp"
+#include "UniwillSysfs.hpp"
 #include <sstream>
 #include <iomanip>
 #include <map>
@@ -2128,7 +2129,6 @@ UccDBusService::UccDBusService()
       m_deviceId.value() == UniwillDeviceID::IBM15A10 );
 
   m_profileSettingsWorker = std::make_unique< ProfileSettingsWorker >(
-    m_io,
     m_nvml,
     [this]() -> UccProfile { return m_activeProfile; },
     [this]( const std::vector< std::string > &profiles ) {
@@ -2374,17 +2374,13 @@ UccDBusService::UccDBusService()
 
 int UccDBusService::readCurrentCTGPOffset() const
 {
-  static const std::string NVIDIA_CTGP_OFFSET =
-    "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
-
   if ( !m_dbusData.cTGPAdjustmentSupported )
     return 0;
 
   try
   {
-    if ( auto value = SysfsNode< int >( NVIDIA_CTGP_OFFSET ).read(); value.has_value() )
-      return value.value();
-    return 0;
+    const auto ctgpInfo = ucc::uniwill::readCtgpInfo();
+    return ctgpInfo.isAvailable() ? ctgpInfo.currentOffset : 0;
   }
   catch ( ... )
   {
@@ -2397,34 +2393,29 @@ void UccDBusService::readHardwareCapabilities()
   syslog( LOG_INFO, "[uccd] Reading hardware capabilities directly" );
 
   // ODM Power Limits (TDP)
-  // Read from TuxedoIOAPI - identical logic to ProfileSettingsWorker::getTDPInfo()
+  // Read from uniwill-laptop cpu/pl* sysfs. Manual writes are policy-gated by
+  // the driver, so these values are primarily informational/profile-managed.
   {
-    int nrTDPs = 0;
-    if ( m_io.getNumberTDPs( nrTDPs ) and nrTDPs > 0 )
-    {
-      std::vector< std::string > descriptors;
-      m_io.getTDPDescriptors( descriptors );
+    const auto limits = ucc::uniwill::readCpuPowerLimits();
 
+    if ( not limits.empty() )
+    {
       std::ostringstream jsonStream;
       jsonStream << "[";
 
-      for ( int i = 0; i < nrTDPs; ++i )
+      for ( size_t i = 0; i < limits.size(); ++i )
       {
-        uint32_t current = 0, min = 0, max = 0;
-        m_io.getTDPMin( i, reinterpret_cast< int & >( min ) );
-        m_io.getTDPMax( i, reinterpret_cast< int & >( max ) );
-        m_io.getTDP( i, reinterpret_cast< int & >( current ) );
-
         if ( i > 0 )
           jsonStream << ",";
 
         jsonStream << "{"
-                   << "\"current\":" << current << ","
-                   << "\"min\":" << min << ","
-                   << "\"max\":" << max
+                   << "\"current\":" << limits[ i ].current << ","
+                   << "\"min\":" << limits[ i ].min << ","
+                   << "\"max\":" << limits[ i ].max
                    << "}";
 
-        syslog( LOG_INFO, "[uccd] TDP[%d]: min=%u, max=%u, current=%u", i, min, max, current );
+        syslog( LOG_INFO, "[uccd] TDP[%zu]: min=%u, max=%u, current=%u",
+                i, limits[ i ].min, limits[ i ].max, limits[ i ].current );
       }
 
       jsonStream << "]";
@@ -2439,26 +2430,38 @@ void UccDBusService::readHardwareCapabilities()
 
   // NVIDIA Power Control
   {
-    static const std::string NVIDIA_CTGP_OFFSET =
-      "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
-
-    std::error_code ec;
-    const bool nvAvailable = std::filesystem::exists( NVIDIA_CTGP_OFFSET, ec )
-                          && std::filesystem::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+    const auto ctgpInfo = ucc::uniwill::readCtgpInfo();
+    const bool nvAvailable = ctgpInfo.isAvailable();
     m_dbusData.nvidiaPowerCTRLAvailable = nvAvailable;
 
     if ( nvAvailable )
     {
       if ( !m_nvidiaPowerLimitsInitialized )
       {
-        // Query power limits via the shared NVML instance only once per daemon startup.
+        // Prefer driver-provided limits and use NVML only as a fallback.
         // readHardwareCapabilities() is also called after profile apply/reapply.
-        if ( m_nvml && m_nvml->isAvailable() && m_nvml->deviceCount() > 0 )
+        if ( ctgpInfo.tgpBase > 0 )
         {
-          if ( auto v = m_nvml->getPowerDefaultLimitW( 0 ) )
-            m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
-          if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
-            m_dbusData.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+          m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = ctgpInfo.tgpBase;
+          m_dbusData.nvidiaPowerCTRLMaxPowerLimit =
+            ctgpInfo.tgpBase + std::max< int32_t >( 0, ctgpInfo.maxOffset );
+        }
+
+        if ( ( m_dbusData.nvidiaPowerCTRLDefaultPowerLimit <= 0 ||
+               m_dbusData.nvidiaPowerCTRLMaxPowerLimit <= 0 ) &&
+             m_nvml && m_nvml->isAvailable() && m_nvml->deviceCount() > 0 )
+        {
+          if ( m_dbusData.nvidiaPowerCTRLDefaultPowerLimit <= 0 )
+          {
+            if ( auto v = m_nvml->getPowerDefaultLimitW( 0 ) )
+              m_dbusData.nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+          }
+
+          if ( m_dbusData.nvidiaPowerCTRLMaxPowerLimit <= 0 )
+          {
+            if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
+              m_dbusData.nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+          }
         }
 
         m_nvidiaPowerLimitsInitialized = true;
@@ -3850,22 +3853,19 @@ void UccDBusService::computeDeviceCapabilities()
     UniwillDeviceID::IBPG10AMD,
   };
 
+  const bool ctgpHardwareExists = ucc::uniwill::readCtgpInfo().isAvailable();
+
   if ( m_deviceId.has_value() )
   {
     m_dbusData.waterCoolerSupported = waterCoolerDevices.count( m_deviceId.value() ) > 0;
-    m_dbusData.cTGPAdjustmentSupported = cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
+    m_dbusData.cTGPAdjustmentSupported =
+      ctgpHardwareExists && cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
   }
   else
   {
     // Unknown device: water cooler not available, cTGP defers to hardware detection
     m_dbusData.waterCoolerSupported = false;
-
-    // For unknown devices, check if the hardware file exists (like TCC does)
-    std::error_code ec;
-    const std::string ctgpPath = "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
-    bool hardwareExists = std::filesystem::exists( ctgpPath, ec ) &&
-                         std::filesystem::is_regular_file( ctgpPath, ec );
-    m_dbusData.cTGPAdjustmentSupported = hardwareExists;
+    m_dbusData.cTGPAdjustmentSupported = ctgpHardwareExists;
   }
 
   // Detect HWP Dynamic Boost support
@@ -4350,28 +4350,20 @@ void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &prof
   const int32_t cpuMinFreq = getCpuMinFrequency();
   const int32_t cpuMaxFreq = getCpuMaxFrequency();
 
-  // Get TDP info directly from hardware I/O
+  // Get TDP info from uniwill-laptop sysfs.
   std::vector< TDPInfo > tdpInfo;
   {
-    int nrTDPs = 0;
-    if ( m_io.getNumberTDPs( nrTDPs ) and nrTDPs > 0 )
-    {
-      std::vector< std::string > descriptors;
-      m_io.getTDPDescriptors( descriptors );
+    const auto limits = ucc::uniwill::readCpuPowerLimits();
 
-      for ( int i = 0; i < nrTDPs; ++i )
+    if ( not limits.empty() )
+    {
+      for ( const auto &limit : limits )
       {
         TDPInfo info;
-        info.current = 0;
-        info.min = 0;
-        info.max = 0;
-        info.descriptor = ( i < static_cast< int >( descriptors.size() ) )
-                            ? descriptors[ static_cast< size_t >( i ) ]
-                            : "";
-
-        m_io.getTDPMin( i, reinterpret_cast< int & >( info.min ) );
-        m_io.getTDPMax( i, reinterpret_cast< int & >( info.max ) );
-        m_io.getTDP( i, reinterpret_cast< int & >( info.current ) );
+        info.current = limit.current;
+        info.min = limit.min;
+        info.max = limit.max;
+        info.descriptor = limit.descriptor;
 
         tdpInfo.push_back( info );
       }

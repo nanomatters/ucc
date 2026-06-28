@@ -15,7 +15,8 @@
 
 #include "workers/ProfileSettingsWorker.hpp"
 #include "PowerSupplyController.hpp"
-#include <tuxedo_io_lib/tuxedo_io_api.hh>
+
+#include <cerrno>
 
 // =====================================================================
 //  Public methods
@@ -36,28 +37,15 @@ void ProfileSettingsWorker::start()
 std::vector< TDPInfo > ProfileSettingsWorker::getTDPInfo()
 {
   std::vector< TDPInfo > tdpInfo;
+  const auto limits = ucc::uniwill::readCpuPowerLimits( m_sysfsRoot );
 
-  int nrTDPs = 0;
-
-  if ( not m_ioApi.getNumberTDPs( nrTDPs ) or nrTDPs <= 0 )
-    return tdpInfo;
-
-  std::vector< std::string > descriptors;
-  m_ioApi.getTDPDescriptors( descriptors );
-
-  for ( int i = 0; i < nrTDPs; ++i )
+  for ( const auto &limit : limits )
   {
     TDPInfo info;
-    info.current = 0;
-    info.min = 0;
-    info.max = 0;
-    info.descriptor = ( i < static_cast< int >( descriptors.size() ) )
-                        ? descriptors[ static_cast< size_t >( i ) ]
-                        : "";
-
-    m_ioApi.getTDPMin( i, reinterpret_cast< int & >( info.min ) );
-    m_ioApi.getTDPMax( i, reinterpret_cast< int & >( info.max ) );
-    m_ioApi.getTDP( i, reinterpret_cast< int & >( info.current ) );
+    info.current = limit.current;
+    info.min = limit.min;
+    info.max = limit.max;
+    info.descriptor = limit.descriptor;
 
     tdpInfo.push_back( info );
   }
@@ -65,19 +53,43 @@ std::vector< TDPInfo > ProfileSettingsWorker::getTDPInfo()
   return tdpInfo;
 }
 
-bool ProfileSettingsWorker::setTDPValues( const std::vector< uint32_t > &values )
+ProfileSettingsWorker::TDPWriteStatus ProfileSettingsWorker::setTDPValues(
+  const std::vector< uint32_t > &values )
 {
-  bool allSuccess = true;
+  const auto limits = ucc::uniwill::readCpuPowerLimits( m_sysfsRoot );
+  if ( limits.empty() or values.empty() )
+    return TDPWriteStatus::Unsupported;
 
-  for ( size_t i = 0; i < values.size(); ++i )
+  bool wroteAny = false;
+  bool blocked = false;
+
+  for ( size_t i = 0; i < values.size() and i < limits.size(); ++i )
   {
-    if ( not m_ioApi.setTDP( static_cast< int >( i ), static_cast< int >( values[ i ] ) ) )
+    SysfsNode< int64_t > node( limits[ i ].valuePath );
+    const SysfsWriteResult result = node.writeDetailed( static_cast< int64_t >( values[ i ] ) );
+
+    if ( result )
     {
-      allSuccess = false;
+      wroteAny = true;
+      continue;
     }
+
+    if ( result.error == EACCES )
+    {
+      blocked = true;
+      continue;
+    }
+
+    if ( result.error == ENOENT )
+      return TDPWriteStatus::Unsupported;
+
+    return TDPWriteStatus::Failed;
   }
 
-  return allSuccess;
+  if ( blocked )
+    return TDPWriteStatus::BlockedByDriverPolicy;
+
+  return wroteAny ? TDPWriteStatus::Applied : TDPWriteStatus::Unsupported;
 }
 
 bool ProfileSettingsWorker::applyChargingProfile( const std::string &profileDescriptor ) noexcept
@@ -198,18 +210,14 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
   if ( !m_nvidiaPowerCTRLAvailable )
     return;
 
-  std::ifstream file( NVIDIA_CTGP_OFFSET );
-  if ( file.is_open() )
+  const auto ctgpInfo = ucc::uniwill::readCtgpInfo( m_sysfsRoot );
+  if ( ctgpInfo.isAvailable() )
   {
-    int32_t currentValue = 0;
-    file >> currentValue;
-    file.close();
-
     int32_t expectedOffset = m_lastAppliedNVIDIAOffset;
 
-    if ( currentValue != expectedOffset )
+    if ( ctgpInfo.currentOffset != expectedOffset )
     {
-      std::cout << "[NVIDIAPowerCTRL] External change detected (current: " << currentValue
+      std::cout << "[NVIDIAPowerCTRL] External change detected (current: " << ctgpInfo.currentOffset
                 << ", expected: " << expectedOffset << "), re-applying profile" << std::endl;
       applyNVIDIACTGPOffset( expectedOffset );
     }
@@ -222,37 +230,18 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
 
 void ProfileSettingsWorker::detectODMProfileType()
 {
-  if ( SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE ).isAvailable() and
-       SysfsNode< std::string >( TUXEDO_PLATFORM_PROFILE_CHOICES ).isAvailable() )
-  {
-    m_odmProfileType = ODMProfileType::TuxedoPlatformProfile;
-    syslog( LOG_INFO, "ProfileSettingsWorker: Using TUXEDO platform_profile" );
-    return;
-  }
+  m_platformProfile = ucc::uniwill::discover( m_sysfsRoot ).platformProfile;
 
-  if ( not m_skipAcpiPlatformProfile and
-       SysfsNode< std::string >( ACPI_PLATFORM_PROFILE ).isAvailable() and
-       SysfsNode< std::string >( ACPI_PLATFORM_PROFILE_CHOICES ).isAvailable() )
+  if ( m_platformProfile.isAvailable() )
   {
-    m_odmProfileType = ODMProfileType::AcpiPlatformProfile;
-    syslog( LOG_INFO, "ProfileSettingsWorker: Using ACPI platform_profile" );
-    return;
-  }
-  else if ( m_skipAcpiPlatformProfile )
-  {
-    syslog( LOG_INFO, "ProfileSettingsWorker: Skipping ACPI platform_profile (device quirk)" );
-  }
-
-  std::vector< std::string > availableProfiles;
-  if ( getAvailableProfilesViaAPI( availableProfiles ) and not availableProfiles.empty() )
-  {
-    m_odmProfileType = ODMProfileType::TuxedoIOAPI;
-    syslog( LOG_INFO, "ProfileSettingsWorker: Using Tuxedo IO API" );
+    m_odmProfileType = ODMProfileType::UniwillPlatformProfile;
+    syslog( LOG_INFO, "ProfileSettingsWorker: Using %s",
+            m_platformProfile.description.c_str() );
     return;
   }
 
   m_odmProfileType = ODMProfileType::None;
-  syslog( LOG_INFO, "ProfileSettingsWorker: No ODM profile support available" );
+  syslog( LOG_INFO, "ProfileSettingsWorker: No uniwill platform_profile support available" );
 }
 
 std::vector< std::string > ProfileSettingsWorker::readPlatformProfileChoices(
@@ -285,18 +274,8 @@ void ProfileSettingsWorker::applyODMProfile()
 
   switch ( m_odmProfileType )
   {
-    case ODMProfileType::TuxedoPlatformProfile:
-      applyPlatformProfile(
-        TUXEDO_PLATFORM_PROFILE, TUXEDO_PLATFORM_PROFILE_CHOICES, chosenProfileName );
-      break;
-
-    case ODMProfileType::AcpiPlatformProfile:
-      applyPlatformProfile(
-        ACPI_PLATFORM_PROFILE, ACPI_PLATFORM_PROFILE_CHOICES, chosenProfileName );
-      break;
-
-    case ODMProfileType::TuxedoIOAPI:
-      applyProfileViaAPI( chosenProfileName );
+    case ODMProfileType::UniwillPlatformProfile:
+      applyPlatformProfile( m_platformProfile, chosenProfileName );
       break;
 
     case ODMProfileType::None:
@@ -306,10 +285,10 @@ void ProfileSettingsWorker::applyODMProfile()
 }
 
 void ProfileSettingsWorker::applyPlatformProfile(
-  const std::string &profilePath, const std::string &choicesPath,
+  const ucc::uniwill::PlatformProfileSink &sink,
   const std::string &chosenProfileName )
 {
-  std::vector< std::string > availableProfiles = readPlatformProfileChoices( choicesPath );
+  std::vector< std::string > availableProfiles = readPlatformProfileChoices( sink.choicesPath );
 
   m_setOdmProfilesAvailable( availableProfiles );
 
@@ -319,66 +298,32 @@ void ProfileSettingsWorker::applyPlatformProfile(
     return;
   }
 
-  if ( auto it = std::ranges::find( availableProfiles, chosenProfileName );
-       it == availableProfiles.end() )
+  const std::string profileToApply =
+    ucc::uniwill::translatePlatformProfileName( chosenProfileName, availableProfiles );
+
+  if ( profileToApply != chosenProfileName )
   {
-    syslog( LOG_WARNING, "ProfileSettingsWorker: Profile '%s' not available",
-            chosenProfileName.c_str() );
-    return;
-  }
-
-  SysfsNode< std::string > profileNode( profilePath );
-  if ( profileNode.write( chosenProfileName ) )
-  {
-    syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
-            chosenProfileName.c_str() );
-  }
-  else
-  {
-    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to set ODM profile to '%s'",
-            chosenProfileName.c_str() );
-  }
-}
-
-void ProfileSettingsWorker::applyProfileViaAPI( const std::string &chosenProfileName )
-{
-  std::vector< std::string > availableProfiles;
-
-  if ( not getAvailableProfilesViaAPI( availableProfiles ) )
-  {
-    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to get available profiles via API" );
-    m_setOdmProfilesAvailable( {} );
-    return;
-  }
-
-  m_setOdmProfilesAvailable( availableProfiles );
-
-  std::string profileToApply = chosenProfileName;
-
-  auto it = std::ranges::find( availableProfiles, profileToApply );
-  if ( it == availableProfiles.end() )
-  {
-    profileToApply = getDefaultProfileViaAPI();
-    syslog( LOG_INFO,
-            "ProfileSettingsWorker: Profile '%s' not available, using default '%s'",
+    syslog( LOG_INFO, "ProfileSettingsWorker: Translating ODM profile '%s' to '%s'",
             chosenProfileName.c_str(), profileToApply.c_str() );
   }
 
-  it = std::ranges::find( availableProfiles, profileToApply );
-  if ( it == availableProfiles.end() )
+  if ( auto it = std::ranges::find( availableProfiles, profileToApply );
+       it == availableProfiles.end() )
   {
-    syslog( LOG_WARNING, "ProfileSettingsWorker: No valid profile found" );
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Profile '%s' not available",
+            profileToApply.c_str() );
     return;
   }
 
-  if ( setProfileViaAPI( profileToApply ) )
+  SysfsNode< std::string > profileNode( sink.profilePath );
+  if ( profileNode.write( profileToApply ) )
   {
     syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
             profileToApply.c_str() );
   }
   else
   {
-    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to apply profile '%s'",
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to set ODM profile to '%s'",
             profileToApply.c_str() );
   }
 }
@@ -470,14 +415,22 @@ void ProfileSettingsWorker::applyODMPowerLimits()
   logMessage << "]";
   logLine( logMessage.str() );
 
-  const bool writeSuccess = setTDPValues( newTDPValues );
+  const TDPWriteStatus writeStatus = setTDPValues( newTDPValues );
 
-  if ( writeSuccess )
+  if ( writeStatus == TDPWriteStatus::Applied )
   {
     for ( size_t i = 0; i < tdpInfo.size() and i < newTDPValues.size(); ++i )
     {
       tdpInfo[ i ].current = newTDPValues[ i ];
     }
+  }
+  else if ( writeStatus == TDPWriteStatus::BlockedByDriverPolicy )
+  {
+    logLine( "ProfileSettingsWorker: Driver blocked manual TDP writes; using profile-managed PL values" );
+  }
+  else if ( writeStatus == TDPWriteStatus::Unsupported )
+  {
+    logLine( "ProfileSettingsWorker: Manual TDP writes unsupported" );
   }
   else
   {
@@ -636,37 +589,34 @@ bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
     return false;
   }
 
-  // Clamp cTGP offset to valid range: [-(max-default), (max-default)]
-  const int32_t maxAdjustment = m_nvidiaPowerCTRLMaxPowerLimit - m_nvidiaPowerCTRLDefaultPowerLimit;
-  ctgpOffset = std::clamp( ctgpOffset, -maxAdjustment, maxAdjustment );
-
-  std::ofstream file( NVIDIA_CTGP_OFFSET );
-  if ( !file.is_open() )
+  const auto ctgpInfo = ucc::uniwill::readCtgpInfo( m_sysfsRoot );
+  if ( !ctgpInfo.isAvailable() )
   {
-    std::cerr << "[NVIDIAPowerCTRL] Failed to open " << NVIDIA_CTGP_OFFSET << " for writing"
-              << std::endl;
+    std::cout << "[NVIDIAPowerCTRL] cTGP sysfs node not available" << std::endl;
     return false;
   }
 
-  file << ctgpOffset;
-  file.flush();
+  const int32_t maxAdjustment = ctgpInfo.maxOffset > 0
+                                  ? ctgpInfo.maxOffset
+                                  : std::max< int32_t >( 0, m_nvidiaPowerCTRLMaxPowerLimit -
+                                                            m_nvidiaPowerCTRLDefaultPowerLimit );
+  ctgpOffset = std::clamp( ctgpOffset, 0, maxAdjustment );
 
-  if ( !file.good() )
+  SysfsNode< int64_t > node( ctgpInfo.offsetPath );
+  const SysfsWriteResult writeResult = node.writeDetailed( static_cast< int64_t >( ctgpOffset ) );
+
+  if ( !writeResult )
   {
-    std::cerr << "[NVIDIAPowerCTRL] Failed to write cTGP offset to " << NVIDIA_CTGP_OFFSET
-              << " (stream error)" << std::endl;
+    std::cerr << "[NVIDIAPowerCTRL] Failed to write cTGP offset to " << ctgpInfo.offsetPath
+              << " (errno " << writeResult.error << ")" << std::endl;
     return false;
   }
-
-  file.close();
 
   // Verify the write by reading back
-  std::ifstream verifyFile( NVIDIA_CTGP_OFFSET );
-  if ( verifyFile.is_open() )
+  const auto verifiedInfo = ucc::uniwill::readCtgpInfo( m_sysfsRoot );
+  if ( verifiedInfo.isAvailable() )
   {
-    int32_t verifiedValue = -1;
-    verifyFile >> verifiedValue;
-    verifyFile.close();
+    const int32_t verifiedValue = verifiedInfo.currentOffset;
 
     // The kernel module may clamp or round the offset to hardware-supported
     // steps, so the readback can legitimately differ from what we wrote.
@@ -691,12 +641,26 @@ bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
 
 void ProfileSettingsWorker::queryNVIDIAPowerLimits()
 {
+  const auto ctgpInfo = ucc::uniwill::readCtgpInfo( m_sysfsRoot );
+  if ( ctgpInfo.isAvailable() and ctgpInfo.tgpBase > 0 )
+  {
+    m_nvidiaPowerCTRLDefaultPowerLimit = ctgpInfo.tgpBase;
+    m_nvidiaPowerCTRLMaxPowerLimit = ctgpInfo.tgpBase + std::max< int32_t >( 0, ctgpInfo.maxOffset );
+  }
+
   if ( m_nvml && m_nvml->isAvailable() && m_nvml->deviceCount() > 0 )
   {
-    if ( auto v = m_nvml->getPowerDefaultLimitW( 0 ) )
-      m_nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
-    if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
-      m_nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+    if ( m_nvidiaPowerCTRLDefaultPowerLimit <= 0 )
+    {
+      if ( auto v = m_nvml->getPowerDefaultLimitW( 0 ) )
+        m_nvidiaPowerCTRLDefaultPowerLimit = static_cast< int32_t >( *v );
+    }
+
+    if ( m_nvidiaPowerCTRLMaxPowerLimit <= 0 )
+    {
+      if ( auto v = m_nvml->getPowerMaxLimitW( 0 ) )
+        m_nvidiaPowerCTRLMaxPowerLimit = static_cast< int32_t >( *v );
+    }
   }
 
   std::cout << "[NVIDIAPowerCTRL] NVIDIA GPU power limits - Default: "

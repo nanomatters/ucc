@@ -19,6 +19,7 @@
 #include "SysfsNode.hpp"
 #include "../TccSettings.hpp"
 #include "../NvmlWrapper.hpp"
+#include "../UniwillSysfs.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -28,9 +29,6 @@
 #include <string>
 #include <syslog.h>
 #include <vector>
-
-// Forward declaration
-class TuxedoIOAPI;
 
 namespace fs = std::filesystem;
 
@@ -59,7 +57,6 @@ class ProfileSettingsWorker
 {
 public:
   ProfileSettingsWorker(
-    TuxedoIOAPI &ioApi,
     std::shared_ptr< NvmlWrapper > nvml,
     std::function< UccProfile() > getActiveProfileCallback,
     std::function< void( const std::vector< std::string > & ) > setOdmProfilesAvailableCallback,
@@ -71,14 +68,14 @@ public:
     std::atomic< int32_t > &nvidiaPowerCTRLMaxPowerLimit,
     std::atomic< bool > &nvidiaPowerCTRLAvailable,
     std::atomic< bool > &cTGPAdjustmentSupported,
-    bool skipAcpiPlatformProfile = false )
-    : m_ioApi( ioApi ),
-      m_nvml( std::move( nvml ) ),
+    bool skipAcpiPlatformProfile = false,
+    std::string sysfsRoot = "/sys" )
+    : m_nvml( std::move( nvml ) ),
       m_getActiveProfile( std::move( getActiveProfileCallback ) ),
       m_setOdmProfilesAvailable( std::move( setOdmProfilesAvailableCallback ) ),
       m_setOdmPowerLimitsJSON( std::move( setOdmPowerLimitsJSON ) ),
       m_logFunction( std::move( logFunction ) ),
-      m_skipAcpiPlatformProfile( skipAcpiPlatformProfile ),
+      m_sysfsRoot( std::move( sysfsRoot ) ),
       m_settings( settings ),
       m_modeReapplyPending( modeReapplyPending ),
       m_nvidiaPowerCTRLDefaultPowerLimit( nvidiaPowerCTRLDefaultPowerLimit ),
@@ -86,6 +83,7 @@ public:
       m_nvidiaPowerCTRLAvailable( nvidiaPowerCTRLAvailable ),
       m_cTGPAdjustmentSupported( cTGPAdjustmentSupported )
   {
+    (void) skipAcpiPlatformProfile;
   }
 
   /**
@@ -102,8 +100,8 @@ public:
   void reapplyProfile()
   {
     logLine( "ProfileSettingsWorker: reapplyProfile() called" );
-    applyODMPowerLimits();
     applyODMProfile();
+    applyODMPowerLimits();
   }
 
   // =====================================================================
@@ -146,30 +144,19 @@ private:
   enum class ODMProfileType
   {
     None,
-    TuxedoPlatformProfile,
-    AcpiPlatformProfile,
-    TuxedoIOAPI
+    UniwillPlatformProfile
   };
 
-  TuxedoIOAPI &m_ioApi;
   std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< void( const std::vector< std::string > & ) > m_setOdmProfilesAvailable;
   std::function< void( const std::string & ) > m_setOdmPowerLimitsJSON;
   std::function< void( const std::string & ) > m_logFunction;
   ODMProfileType m_odmProfileType = ODMProfileType::None;
-  bool m_skipAcpiPlatformProfile = false;
+  std::string m_sysfsRoot;
+  ucc::uniwill::PlatformProfileSink m_platformProfile;
 
   // Sysfs path constants
-
-  static inline const std::string TUXEDO_PLATFORM_PROFILE =
-    "/sys/bus/platform/devices/tuxedo_platform_profile/platform_profile";
-  static inline const std::string TUXEDO_PLATFORM_PROFILE_CHOICES =
-    "/sys/bus/platform/devices/tuxedo_platform_profile/platform_profile_choices";
-  static inline const std::string ACPI_PLATFORM_PROFILE =
-    "/sys/firmware/acpi/platform_profile";
-  static inline const std::string ACPI_PLATFORM_PROFILE_CHOICES =
-    "/sys/firmware/acpi/platform_profile_choices";
 
   static inline const std::string CHARGING_PROFILE =
     "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profile";
@@ -181,31 +168,26 @@ private:
   static inline const std::string CHARGING_PRIORITIES_AVAILABLE =
     "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prios_available";
 
-  static inline const std::string NVIDIA_CTGP_OFFSET =
-    "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
-
   void detectODMProfileType();
   std::vector< std::string > readPlatformProfileChoices( const std::string &path );
 
-  bool getAvailableProfilesViaAPI( [[maybe_unused]] std::vector< std::string > &profiles )
-  {
-    return false;
-  }
-
-  std::string getDefaultProfileViaAPI() { return ""; }
-
-  bool setProfileViaAPI( [[maybe_unused]] const std::string &profileName ) { return false; }
-
   void applyODMProfile();
   void applyPlatformProfile(
-    const std::string &profilePath, const std::string &choicesPath,
+    const ucc::uniwill::PlatformProfileSink &sink,
     const std::string &chosenProfileName );
-  void applyProfileViaAPI( const std::string &chosenProfileName );
 
   // ODM Power Limit internals
 
+  enum class TDPWriteStatus
+  {
+    Applied,
+    Unsupported,
+    BlockedByDriverPolicy,
+    Failed
+  };
+
   std::vector< TDPInfo > getTDPInfo();
-  bool setTDPValues( const std::vector< uint32_t > &values );
+  TDPWriteStatus setTDPValues( const std::vector< uint32_t > &values );
   void logLine( const std::string &message );
   void publishODMPowerLimitsJSON( const std::vector< TDPInfo > &tdpInfo );
   void applyODMPowerLimits();
@@ -279,8 +261,7 @@ private:
 
   bool checkNVIDIAAvailability() const
   {
-    std::error_code ec;
-    return fs::exists( NVIDIA_CTGP_OFFSET, ec ) && fs::is_regular_file( NVIDIA_CTGP_OFFSET, ec );
+    return ucc::uniwill::readCtgpInfo( m_sysfsRoot ).isAvailable();
   }
 
 
