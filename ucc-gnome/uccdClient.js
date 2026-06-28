@@ -192,7 +192,7 @@ export class UccdClient {
     getCustomProfilesJSON()  { return this._call('GetCustomProfilesJSON'); }
     getFanProfileNames()     { return this._call('GetFanProfileNames'); }
 
-    getCustomFanProfiles()      { return this._call('GetCustomFanProfiles'); }
+    getCustomFanProfiles()      { return this._call('GetCustomFanProfilesJSON'); }
     getCustomKeyboardProfiles() { return this._call('GetCustomKeyboardProfiles'); }
 
     getWebcamEnabled()      { return this._call('GetWebcamSWStatus') ?? false; }

@@ -124,6 +124,11 @@ struct FanChannel
   {
     return not pwmEnablePath.empty();
   }
+
+  [[nodiscard]] bool canUseCustomAuto() const noexcept
+  {
+    return supportsCustomAuto and canWritePwmMode();
+  }
 };
 
 struct FanInfo
@@ -136,6 +141,23 @@ struct FanInfo
     return not hwmonPath.empty() and not channels.empty();
   }
 };
+
+[[nodiscard]] inline bool fanCustomAutoAvailable( const FanInfo &info )
+{
+  return std::ranges::any_of( info.channels, []( const FanChannel &channel ) {
+    return channel.canUseCustomAuto();
+  } );
+}
+
+[[nodiscard]] inline bool fanOffAvailable( const FanInfo &info )
+{
+  return fanCustomAutoAvailable( info );
+}
+
+[[nodiscard]] inline int32_t fanMinimumSpeedPercent( const FanInfo &info )
+{
+  return fanCustomAutoAvailable( info ) ? FAN_MIN_SPEED_PERCENT : 0;
+}
 
 struct FanReading
 {

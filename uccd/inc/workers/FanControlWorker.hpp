@@ -126,8 +126,8 @@ protected:
       const bool available = m_fanInfo.isAvailable();
       m_updateFanHardwareInfo(
         available,
-        ucc::uniwill::FAN_MIN_SPEED_PERCENT,
-        available );
+        ucc::uniwill::fanMinimumSpeedPercent( m_fanInfo ),
+        ucc::uniwill::fanOffAvailable( m_fanInfo ) );
     }
 
     if ( m_fanInfo.isAvailable() )

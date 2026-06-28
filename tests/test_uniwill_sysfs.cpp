@@ -208,6 +208,32 @@ private slots:
     QCOMPARE( info.channels.size(), static_cast< size_t >( 1 ) );
     QCOMPARE( info.channels[ 0 ].label, std::string( "Main" ) );
     QVERIFY( info.channels[ 0 ].supportsCustomAuto );
+    QVERIFY( ucc::uniwill::fanCustomAutoAvailable( info ) );
+    QVERIFY( ucc::uniwill::fanOffAvailable( info ) );
+    QCOMPARE( ucc::uniwill::fanMinimumSpeedPercent( info ),
+              ucc::uniwill::FAN_MIN_SPEED_PERCENT );
+  }
+
+  void fanCapabilitiesRequireCustomAutoControl()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path hwmonPath = root / "class/hwmon/hwmon0";
+
+    writeFile( hwmonPath / "name", "uniwill\n" );
+    writeFile( hwmonPath / "fan1_input", "2400\n" );
+    writeFile( hwmonPath / "temp1_input", "55000\n" );
+    writeFile( hwmonPath / "pwm1", "128\n" );
+    writeFile( hwmonPath / "pwm1_enable", "2\n" );
+
+    const auto info = ucc::uniwill::readFanInfo( root.string() );
+
+    QVERIFY( info.isAvailable() );
+    QVERIFY( !info.channels[ 0 ].supportsCustomAuto );
+    QVERIFY( !ucc::uniwill::fanCustomAutoAvailable( info ) );
+    QVERIFY( !ucc::uniwill::fanOffAvailable( info ) );
+    QCOMPARE( ucc::uniwill::fanMinimumSpeedPercent( info ), static_cast< int32_t >( 0 ) );
   }
 
   void readsFanTelemetryWithHwmonUnits()

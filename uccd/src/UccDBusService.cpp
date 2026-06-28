@@ -2539,8 +2539,8 @@ void UccDBusService::updateFanData()
 
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
   m_dbusData.fanHwmonAvailable = fanInfo.isAvailable();
-  m_dbusData.fansMinSpeed = ucc::uniwill::FAN_MIN_SPEED_PERCENT;
-  m_dbusData.fansOffAvailable = fanInfo.isAvailable();
+  m_dbusData.fansMinSpeed = ucc::uniwill::fanMinimumSpeedPercent( fanInfo );
+  m_dbusData.fansOffAvailable = ucc::uniwill::fanOffAvailable( fanInfo );
 
   if ( not fanInfo.isAvailable() )
     return;
@@ -2682,9 +2682,6 @@ void UccDBusService::onWork()
   // On unsupported devices, skip all hardware polling
   if ( !m_dbusData.deviceSupported.load() )
     return;
-
-  // Keep the driver availability cache visible to D-Bus clients.
-  m_dbusData.uniwillDriverAvailable = m_uniwillDriverAvailable;
 
   // Periodic NVIDIA cTGP offset validation (every 5 ticks = 5 s)
   if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )
