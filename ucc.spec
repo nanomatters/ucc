@@ -31,7 +31,7 @@ Requires:       qt6-qtdeclarative
 Requires:       qt6-qtconnectivity
 Requires:       qt6-qtcharts
 Requires:       plasma-workspace >= 6.0
-Requires:       tuxedo-drivers
+Requires:       uniwill-laptop-driver
 Requires:       polkit
 Requires(post): systemd
 Requires(preun): systemd

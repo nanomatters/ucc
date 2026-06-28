@@ -29,7 +29,7 @@ Architecture: any
 Section: utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
          systemd,
-         tuxedo-drivers,
+         uniwill-laptop-driver,
          qt6-qpa-plugins,
          plasma-workspace (>= 6.0),
          policykit-1

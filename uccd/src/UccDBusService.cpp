@@ -464,8 +464,6 @@ bool UccDBusInterfaceAdaptor::SetDisplayRefreshRate( const QString &display, int
 
 bool UccDBusInterfaceAdaptor::GetKeyboardBacklightControlSupported()
 {
-  if ( m_service )
-    return m_service->m_keyboardBacklightController.isAvailable();
   return false;
 }
 
@@ -1357,103 +1355,8 @@ QString UccDBusInterfaceAdaptor::GetKeyboardBacklightStatesJSON()
 
 bool UccDBusInterfaceAdaptor::SetKeyboardBacklightStatesJSON( const QString &keyboardBacklightStatesJSON )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  if ( !m_service->m_settings.keyboardBacklightControlSupported ) return false;
-
-  auto inputJSON = keyboardBacklightStatesJSON.toStdString();
-
-  // The caller sends a JSON object:
-  //   { "keyboardProfileId": "...", "states": [...] }
-  // Extract optional metadata before applying to hardware.
-  auto extractStr = []( const std::string &json, const std::string &key ) -> std::string {
-    std::string search = "\"" + key + "\":\"";
-    size_t pos = json.find( search );
-    if ( pos == std::string::npos ) return {};
-    pos += search.length();
-    size_t end = json.find( '"', pos );
-    if ( end == std::string::npos ) return {};
-    return json.substr( pos, end - pos );
-  };
-  std::string keyboardProfileId = extractStr( inputJSON, "keyboardProfileId" );
-
-  // GUI live edits send a raw states array, while profile selection sends
-  // {"keyboardProfileId": ..., "states": [...]}. Accept both formats.
-  const bool wrappedStates = inputJSON.find( "\"states\":" ) != std::string::npos;
-  const bool applied = wrappedStates
-    ? m_service->m_keyboardBacklightController.applyProfileKeyboardStates( inputJSON )
-    : m_service->m_keyboardBacklightController.applyStatesFromJSON( inputJSON );
-
-  if ( !applied )
-  {
-    std::cerr << "[KeyboardBacklight] Failed to apply keyboard states from D-Bus payload" << std::endl;
-    return false;
-  }
-
-  const std::string currentStatesJSON =
-    m_service->m_keyboardBacklightController.currentStatesJSON();
-
-  auto extractFirstBrightness = []( const std::string &statesJSON ) -> int {
-    std::string search = "\"brightness\":";
-    size_t pos = statesJSON.find( search );
-    if ( pos == std::string::npos ) return -1;
-
-    pos += search.length();
-    size_t end = statesJSON.find_first_of( ",}", pos );
-    if ( end == std::string::npos ) return -1;
-
-    try
-    {
-      return std::stoi( statesJSON.substr( pos, end - pos ) );
-    }
-    catch ( ... )
-    {
-      return -1;
-    }
-  };
-
-  std::ostringstream keyboardProfileData;
-  keyboardProfileData << "{";
-  if ( const int brightness = extractFirstBrightness( currentStatesJSON ); brightness >= 0 )
-    keyboardProfileData << "\"brightness\":" << brightness;
-  keyboardProfileData << "}";
-  m_service->m_activeProfile.keyboard.keyboardProfileData = keyboardProfileData.str();
-
-  // Update the D-Bus readable state with the states *array* so
-  // GetKeyboardBacklightStatesJSON returns a clean array.
-  {
-    std::lock_guard< std::mutex > lock( m_data.dataMutex );
-    m_data.keyboardBacklightStatesJSON = currentStatesJSON;
-  }
-
-  m_service->updateDBusActiveProfileData();
-
-  // If the caller provided a keyboard profile ID, update the active profile
-  // reference.
-  if ( !keyboardProfileId.empty() )
-  {
-    m_service->m_activeProfile.keyboard.keyboardProfileId = keyboardProfileId;
-  }
-
-  // Keep the assigned custom profile in sync silently so startup replays the current color
-  // without requiring an explicit SaveCustomProfile (and its Polkit password dialog).
-  if ( auto it = std::ranges::find_if( m_service->m_customProfiles,
-                         [ & ]( const UccProfile &p ) { return p.id == m_service->m_activeProfile.id; } );
-       it != m_service->m_customProfiles.end() )
-  {
-    it->keyboard = m_service->m_activeProfile.keyboard;
-    m_service->m_settings.profiles[ it->id ] = ProfileManager::profileToJSON( *it );
-    (void)m_service->m_settingsManager.writeSettings( m_service->m_settings );
-  }
-
-  m_service->updateDBusActiveProfileData();
-  if ( m_service->m_adaptor )
-  {
-    emitProfileChanged( m_service->m_activeProfile.id,
-                        m_service->m_activeProfile.keyboard.keyboardProfileId,
-                        m_service->m_activeProfile.fan.fanProfile );
-  }
-
-  return true;
+  (void) keyboardBacklightStatesJSON;
+  return false;
 }
 
 QString UccDBusInterfaceAdaptor::GetCustomKeyboardProfilesJSON()
@@ -1604,12 +1507,13 @@ QString UccDBusInterfaceAdaptor::GetCurrentChargingPriority()
 bool UccDBusInterfaceAdaptor::SetChargingPriority( const QString &priorityDescriptor )
 {
   if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return false;
-  bool result = m_service->m_profileSettingsWorker->applyChargingPriority( priorityDescriptor.toStdString() );
+  const std::string requestedPriority = priorityDescriptor.toStdString();
+  bool result = m_service->m_profileSettingsWorker->applyChargingPriority( requestedPriority );
 
   if ( result )
   {
     std::lock_guard< std::mutex > lock( m_data.dataMutex );
-    m_data.currentChargingPriority = priorityDescriptor.toStdString();
+    m_data.currentChargingPriority = ucc::uniwill::translateUsbCPowerPriority( requestedPriority );
   }
 
   return result;
@@ -1687,18 +1591,17 @@ bool UccDBusInterfaceAdaptor::SetChargeType( const QString &type )
 
 bool UccDBusInterfaceAdaptor::GetFnLockSupported()
 {
-  return m_service->m_fnLockController.isSupported();
+  return false;
 }
 
 bool UccDBusInterfaceAdaptor::GetFnLockStatus()
 {
-  return m_service->m_fnLockController.getStatus();
+  return false;
 }
 
 void UccDBusInterfaceAdaptor::SetFnLockStatus( bool status )
 {
-  if ( !checkAuth( PolkitAuthority::ACTION_CONTROL ) ) return;
-  m_service->m_fnLockController.setStatus( status );
+  (void) status;
 }
 
 // sensor data collection methods
@@ -2027,6 +1930,7 @@ UccDBusService::UccDBusService()
 {
   // set daemon version
   m_dbusData.uccdVersion = "2.1.21";
+  m_uniwillDriverAvailable = ucc::uniwill::discover().isAvailable();
 
   // identify and set device
   auto device = identifyDevice();
@@ -2061,18 +1965,19 @@ UccDBusService::UccDBusService()
 
   // Keep the legacy D-Bus property populated as "uniwill driver available"
   // until the public interface is renamed.
-  m_dbusData.tuxedoWmiAvailable = ucc::uniwill::discover().isAvailable();
+  m_dbusData.tuxedoWmiAvailable = m_uniwillDriverAvailable;
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
   m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"vramFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999,\"coreVoltageMv\":-1}";
   m_dbusData.iGpuInfoValuesJSON = "{\"vendor\":\"unknown\",\"temp\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"powerDraw\":-1}";
 
-  // Keyboard backlight will be detected during worker initialization
+  // Keyboard control is deliberately disabled during the uniwill-only port.
   m_dbusData.keyboardBacklightCapabilitiesJSON = "null";
   m_dbusData.keyboardBacklightStatesJSON = "[]";
 
-  // Read all hardware capabilities directly using m_io / sysfs BEFORE any
+  // Read all hardware capabilities directly using uniwill sysfs and standard
+  // sysfs BEFORE any
   // workers or profiles are created. This populates TDP limits, NVIDIA
   // power limits, charging profiles and YCbCr420 availability with real
   // hardware values so the D-Bus data is never populated with fake defaults.
@@ -2088,6 +1993,7 @@ UccDBusService::UccDBusService()
 
   // Load settings (creates defaults if needed)
   loadSettings();
+  m_settings.keyboardBacklightControlSupported = false;
 
   // Now build settings JSON with actual stateMap
   m_dbusData.settingsJSON = buildSettingsJSON( m_dbusData.keyboardBacklightStatesJSON,
@@ -2122,7 +2028,7 @@ UccDBusService::UccDBusService()
   // Initialize profile settings worker. This replaces the old ODM power,
   // ODM profile, charging and YCbCr420 worker classes.
   // Quirk: some devices (e.g. IBP Gen10 AMD) have a non-functional ACPI platform_profile -
-  // skip it and fall through to the Tuxedo IO API instead (synced from TCC f71acd86, a1b2f6b4).
+  // skip it instead of advertising a profile sink that cannot control hardware.
   const bool skipAcpiPlatformProfile =
     m_deviceId.has_value() and
     ( m_deviceId.value() == UniwillDeviceID::IBPG10AMD or
@@ -2337,20 +2243,8 @@ UccDBusService::UccDBusService()
     }
   );
 
-  // Initialize keyboard backlight controller (synchronous - no worker thread)
-  {
-    std::string capsJSON = m_keyboardBacklightController.init();
-    m_dbusData.keyboardBacklightCapabilitiesJSON = capsJSON;
-
-    if ( m_keyboardBacklightController.isAvailable() )
-    {
-      std::string defaultStates = m_keyboardBacklightController.buildDefaultStatesJSON();
-      m_dbusData.keyboardBacklightStatesJSON = defaultStates;
-
-      if ( m_settings.keyboardBacklightControlSupported )
-        m_keyboardBacklightController.applyStatesFromJSON( defaultStates );
-    }
-  }
+  // Keyboard sysfs probing remains quarantined until keyboard support is
+  // ported to the new driver.
 
   // then setup gpu callback before worker starts processing
   setupGpuDataCallback();
@@ -2785,7 +2679,7 @@ void UccDBusService::onWork()
     return;
 
   // Legacy D-Bus property; see constructor comment.
-  m_dbusData.tuxedoWmiAvailable = ucc::uniwill::discover().isAvailable();
+  m_dbusData.tuxedoWmiAvailable = m_uniwillDriverAvailable;
 
   // Periodic NVIDIA cTGP offset validation (every 5 ticks = 5 s)
   if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )
@@ -3314,7 +3208,8 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         if ( m_profileSettingsWorker->applyChargingPriority( profile.chargingPriority ) )
         {
           std::lock_guard< std::mutex > lk( m_dbusData.dataMutex );
-          m_dbusData.currentChargingPriority = profile.chargingPriority;
+          m_dbusData.currentChargingPriority =
+            ucc::uniwill::translateUsbCPowerPriority( profile.chargingPriority );
         }
       }
 
@@ -3339,30 +3234,6 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         std::cout << "[Profile] Applying charge end threshold " << profile.chargeEndThreshold << std::endl;
         if ( m_profileSettingsWorker->setChargeEndThreshold( profile.chargeEndThreshold ) )
           m_dbusData.chargeEndThreshold = profile.chargeEndThreshold;
-      }
-    }
-
-    if ( m_keyboardBacklightController.isAvailable()
-         && m_settings.keyboardBacklightControlSupported
-         && !profile.keyboard.keyboardProfileId.empty() )
-    {
-      const auto kbIt = m_settings.customKeyboardProfiles.find( profile.keyboard.keyboardProfileId );
-      if ( kbIt != m_settings.customKeyboardProfiles.end() )
-      {
-        const QJsonObject stored = QJsonDocument::fromJson( QByteArray::fromStdString( kbIt->second ) ).object();
-        const std::string kbStateJSON = QJsonDocument( stored.value( "json" ).toObject() )
-                                          .toJson( QJsonDocument::Compact )
-                                          .toStdString();
-        std::cout << "[Profile] Applying keyboard backlight settings from profile" << std::endl;
-        if ( m_keyboardBacklightController.applyProfileKeyboardStates( kbStateJSON ) )
-        {
-          std::lock_guard< std::mutex > lk( m_dbusData.dataMutex );
-          m_dbusData.keyboardBacklightStatesJSON = m_keyboardBacklightController.currentStatesJSON();
-        }
-        else
-        {
-          std::cerr << "[Profile] Failed to apply keyboard backlight settings from profile" << std::endl;
-        }
       }
     }
 
@@ -3727,6 +3598,23 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
        productNameIt != dmiProductNameDeviceMap.end() )
   {
     return productNameIt->second;
+  }
+
+  const auto driverInfo = ucc::uniwill::readDriverInfo();
+  if ( driverInfo.projectId.has_value() )
+  {
+    const std::map< int32_t, UniwillDeviceID > uniwillProjectIdDeviceMap = {
+      { 0x13, UniwillDeviceID::IBP14G6_TUX },
+      { 0x12, UniwillDeviceID::IBP14G6_TRX },
+      { 0x14, UniwillDeviceID::IBP14G6_TQF },
+      { 0x17, UniwillDeviceID::IBP14G7_AQF_ARX },
+    };
+
+    if ( auto projectIt = uniwillProjectIdDeviceMap.find( *driverInfo.projectId );
+         projectIt != uniwillProjectIdDeviceMap.end() )
+    {
+      return projectIt->second;
+    }
   }
 
   // no device match found

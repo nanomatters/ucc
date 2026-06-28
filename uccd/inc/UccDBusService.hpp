@@ -36,10 +36,8 @@
 #include "workers/DisplayWorker.hpp"
 #include "workers/CpuWorker.hpp"
 #include "workers/FanControlWorker.hpp"
-#include "KeyboardBacklightController.hpp"
 #include "workers/ProfileSettingsWorker.hpp"
 #include "workers/LCTWaterCoolerWorker.hpp"
-#include "FnLockController.hpp"
 #include "profiles/UccProfile.hpp"
 #include "profiles/DefaultProfiles.hpp"
 #include "ProfileManager.hpp"
@@ -605,7 +603,6 @@ private:
   std::unique_ptr< CpuWorker > m_cpuWorker;
   std::unique_ptr< ProfileSettingsWorker > m_profileSettingsWorker;
   std::unique_ptr< FanControlWorker > m_fanControlWorker;
-  KeyboardBacklightController m_keyboardBacklightController;
   std::unique_ptr< LCTWaterCoolerWorker > m_waterCoolerWorker;
 
   // Shared NVML instance - created once, used by all workers and readHardwareCapabilities
@@ -614,6 +611,7 @@ private:
   // identified device
   std::optional< UniwillDeviceID > m_deviceId;
   SystemInfo m_systemInfo;
+  bool m_uniwillDriverAvailable = false;
 
   // periodic validation counters
   uint32_t m_nvidiaValidationCounter = 0;
@@ -621,9 +619,6 @@ private:
 
   // monitoring history ring buffer (daemon-side storage for graph tab)
   MetricsHistoryStore m_metricsStore;
-
-  // controllers
-  FnLockController m_fnLockController;
 
   static constexpr const char *SERVICE_NAME = "com.uniwill.uccd";
   static constexpr const char *OBJECT_PATH = "/com/uniwill/uccd";

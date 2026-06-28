@@ -49,9 +49,8 @@ makedepends=(
   'kwindowsystem'
 )
 
-# tuxedo-drivers provides the /dev/tuxedo_io kernel interface uccd talks to
 optdepends=(
-  'tuxedo-drivers: kernel module providing /dev/tuxedo_io hardware interface (required for daemon)'
+  'uniwill-laptop-driver: kernel module exposing uniwill sysfs controls for hardware control'
 )
 
 # Preserve user-modified configuration across upgrades

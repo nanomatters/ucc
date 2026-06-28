@@ -104,7 +104,7 @@ bool ProfileSettingsWorker::applyChargingPriority( const std::string &priorityDe
     return false;
 
   if ( not priorityDescriptor.empty() )
-    m_currentChargingPriority = priorityDescriptor;
+    m_currentChargingPriority = ucc::uniwill::translateUsbCPowerPriority( priorityDescriptor );
 
   try
   {
@@ -112,14 +112,17 @@ bool ProfileSettingsWorker::applyChargingPriority( const std::string &priorityDe
     const auto priority = ucc::uniwill::readUsbCPowerPriority( m_sysfsRoot );
     const auto priosAvailable = priority.choices;
 
-    if ( auto it = std::ranges::find( priosAvailable, prioToSet );
-         not prioToSet.empty() and prioToSet != priority.current and it != priosAvailable.end() )
+    if ( prioToSet.empty() or
+         std::ranges::find( priosAvailable, prioToSet ) == priosAvailable.end() )
+      return false;
+
+    if ( prioToSet == priority.current )
+      return true;
+
+    if ( ucc::uniwill::writeUsbCPowerPriority( priority, prioToSet ) )
     {
-      if ( ucc::uniwill::writeUsbCPowerPriority( priority, prioToSet ) )
-      {
-        syslog( LOG_INFO, "Applied charging priority '%s'", prioToSet.c_str() );
-        return true;
-      }
+      syslog( LOG_INFO, "Applied charging priority '%s'", prioToSet.c_str() );
+      return true;
     }
   }
   catch ( ... )

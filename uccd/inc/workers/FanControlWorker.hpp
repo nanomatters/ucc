@@ -48,6 +48,8 @@ public:
     , m_updateFanSpeed( updateFanSpeed )
     , m_updateFanTemp( updateFanTemp )
     , m_modeSameSpeed( true )
+    , m_sameSpeedOverride( false )
+    , m_sameSpeedOverrideActive( false )
     , m_controlAvailableMessageShown( false )
     , m_hasTemporaryCurves( false )
   {
@@ -58,6 +60,8 @@ public:
   // Allow external callers to change same-speed mode at runtime
   void setSameSpeed( bool same )
   {
+    m_sameSpeedOverride = same;
+    m_sameSpeedOverrideActive = true;
     m_modeSameSpeed = same;
     markCurveDirty();
     syslog( LOG_INFO, "FanControlWorker: setSameSpeed = %d", m_modeSameSpeed.load() ? 1 : 0 );
@@ -157,14 +161,22 @@ protected:
 
     const UccProfile profile = m_getActiveProfile();
     const bool useFanControl = m_getFanControlEnabled();
-    m_modeSameSpeed = profile.fan.sameSpeed;
+    if ( profile.id != m_lastProfileId )
+    {
+      m_lastProfileId = profile.id;
+      m_sameSpeedOverrideActive = false;
+    }
+
+    const bool sameSpeed =
+      m_sameSpeedOverrideActive.load() ? m_sameSpeedOverride.load() : profile.fan.sameSpeed;
+    m_modeSameSpeed = sameSpeed;
 
     if ( useFanControl )
     {
-      const std::string signature = makeCurveSignature( profile );
+      const std::string signature = makeCurveSignature( profile, sameSpeed );
       if ( takeCurveDirtyFlag() or signature != m_lastAppliedCurveSignature )
       {
-        if ( applyDriverFanCurves( profile ) )
+        if ( applyDriverFanCurves( profile, sameSpeed ) )
           m_lastAppliedCurveSignature = signature;
       }
     }
@@ -287,7 +299,7 @@ private:
     return points;
   }
 
-  [[nodiscard]] std::string makeCurveSignature( const UccProfile &profile ) const
+  [[nodiscard]] std::string makeCurveSignature( const UccProfile &profile, bool sameSpeed ) const
   {
     const auto temporary = temporaryCurves();
     std::ostringstream signature;
@@ -300,7 +312,7 @@ private:
 
     signature << profile.id << '|'
               << profile.fan.fanProfile << '|'
-              << ( profile.fan.sameSpeed ? 1 : 0 ) << '|';
+              << ( sameSpeed ? 1 : 0 ) << '|';
 
     appendTable( profile.fan.tableCPU );
     appendTable( profile.fan.tableGPU );
@@ -310,10 +322,9 @@ private:
     return signature.str();
   }
 
-  bool applyDriverFanCurves( const UccProfile &profile )
+  bool applyDriverFanCurves( const UccProfile &profile, bool sameSpeed )
   {
     const FanProfile fanProfile = resolveFanProfile( profile );
-    const bool sameSpeed = profile.fan.sameSpeed;
     bool wroteAnyCurve = false;
 
     for ( const auto &channel : m_fanInfo.channels )
@@ -371,10 +382,13 @@ private:
   std::function< void( size_t, int64_t, int ) > m_updateFanTemp;
 
   std::atomic< bool > m_modeSameSpeed;
+  std::atomic< bool > m_sameSpeedOverride;
+  std::atomic< bool > m_sameSpeedOverrideActive;
   bool m_controlAvailableMessageShown;
   bool m_controlModeInitialized = false;
   bool m_lastControlEnabled = false;
   std::string m_lastAppliedCurveSignature;
+  std::string m_lastProfileId;
 
   // Temporary fan curve tracking
   mutable std::mutex m_curveMutex;

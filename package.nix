@@ -16,7 +16,7 @@
   systemd,
   xorg,
   makeWrapper,
-  tuxedo-drivers ? null,
+  uniwillLaptopDriver ? null,
   src ? ./., # default to the source tree containing this file
   version ? "0.0.1",
 }:
@@ -53,8 +53,8 @@ stdenv.mkDerivation {
     systemd
     xorg.xcbutilcursor
   ]
-  ++ lib.optionals (tuxedo-drivers != null) [
-    tuxedo-drivers
+  ++ lib.optionals (uniwillLaptopDriver != null) [
+    uniwillLaptopDriver
   ];
 
   cmakeFlags = [

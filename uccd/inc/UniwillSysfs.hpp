@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -54,6 +55,22 @@ struct DriverPaths
   [[nodiscard]] bool isAvailable() const noexcept
   {
     return not platformDevicePath.empty();
+  }
+};
+
+struct DriverInfo
+{
+  std::string infoPath;
+  std::string projectIdPath;
+  std::string moduleIdPath;
+  std::string romIdPath;
+  std::optional< int32_t > projectId;
+  std::string moduleId;
+  std::string romId;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return projectId.has_value() or not moduleId.empty() or not romId.empty();
   }
 };
 
@@ -185,6 +202,27 @@ struct UsbCPowerPriority
     catch ( ... )
     {
     }
+  }
+
+  return std::nullopt;
+}
+
+[[nodiscard]] inline std::optional< int32_t > parseInt32AutoBase( const std::string &line )
+{
+  try
+  {
+    size_t parsedCharacters = 0;
+    const long parsed = std::stol( line, &parsedCharacters, 0 );
+
+    if ( parsedCharacters == 0 or
+         parsed < std::numeric_limits< int32_t >::min() or
+         parsed > std::numeric_limits< int32_t >::max() )
+      return std::nullopt;
+
+    return static_cast< int32_t >( parsed );
+  }
+  catch ( ... )
+  {
   }
 
   return std::nullopt;
@@ -364,6 +402,45 @@ struct UsbCPowerPriority
   return paths;
 }
 
+[[nodiscard]] inline DriverInfo readDriverInfo( const std::string &sysfsRoot = "/sys" )
+{
+  DriverInfo info;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return info;
+
+  const fs::path infoPath = *platformDevice / "info";
+  if ( not fs::exists( infoPath ) )
+    return info;
+
+  info.infoPath = infoPath.string();
+
+  const fs::path projectIdPath = infoPath / "project_id";
+  if ( fs::exists( projectIdPath ) )
+  {
+    info.projectIdPath = projectIdPath.string();
+    if ( auto projectId = readFirstLine( projectIdPath ) )
+      info.projectId = parseInt32AutoBase( *projectId );
+  }
+
+  const fs::path moduleIdPath = infoPath / "module_id";
+  if ( fs::exists( moduleIdPath ) )
+  {
+    info.moduleIdPath = moduleIdPath.string();
+    info.moduleId = readFirstLine( moduleIdPath ).value_or( "" );
+  }
+
+  const fs::path romIdPath = infoPath / "rom_id";
+  if ( fs::exists( romIdPath ) )
+  {
+    info.romIdPath = romIdPath.string();
+    info.romId = readFirstLine( romIdPath ).value_or( "" );
+  }
+
+  return info;
+}
+
 [[nodiscard]] inline bool hasFanAutoPointFiles( const fs::path &hwmonPath, size_t channelIndex )
 {
   const size_t number = channelIndex + 1;
@@ -490,6 +567,14 @@ inline bool writeFanCurve( const FanChannel &channel, const std::vector< FanCurv
   return true;
 }
 
+[[nodiscard]] inline std::string translateUsbCPowerPriority( const std::string &value )
+{
+  if ( value == "charge_battery" )
+    return "charging";
+
+  return value;
+}
+
 [[nodiscard]] inline UsbCPowerPriority readUsbCPowerPriority(
   const std::string &sysfsRoot = "/sys" )
 {
@@ -504,7 +589,7 @@ inline bool writeFanCurve( const FanChannel &channel, const std::vector< FanCurv
     return priority;
 
   priority.path = path.string();
-  priority.current = readFirstLine( path ).value_or( "" );
+  priority.current = translateUsbCPowerPriority( readFirstLine( path ).value_or( "" ) );
   priority.choices = { "charging", "performance" };
 
   return priority;
@@ -514,10 +599,12 @@ inline bool writeUsbCPowerPriority(
   const UsbCPowerPriority &priority,
   const std::string &value )
 {
-  if ( not priority.isAvailable() or not contains( priority.choices, value ) )
+  const std::string translatedValue = translateUsbCPowerPriority( value );
+
+  if ( not priority.isAvailable() or not contains( priority.choices, translatedValue ) )
     return false;
 
-  return SysfsNode< std::string >( priority.path ).write( value );
+  return SysfsNode< std::string >( priority.path ).write( translatedValue );
 }
 
 [[nodiscard]] inline std::vector< CpuPowerLimit > readCpuPowerLimits(

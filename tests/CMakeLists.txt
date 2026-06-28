@@ -6,9 +6,6 @@ set( CMAKE_AUTOMOC ON )
 # uccd headers needed by most tests
 set( UCCD_INC_DIR "${CMAKE_SOURCE_DIR}/uccd/inc" )
 
-# nlohmann/json lives in uccd/3rdparty
-set( UCCD_3RDPARTY_DIR "${CMAKE_SOURCE_DIR}/uccd/3rdparty" )
-
 # ---------- helper function -------------------------------------------------
 # ucc_add_test( <name> <source> [LINK_LIBS lib1 lib2 ...] )
 #
@@ -21,7 +18,6 @@ function( ucc_add_test TEST_NAME TEST_SOURCE )
 
   target_include_directories( ${TEST_NAME} PRIVATE
     ${UCCD_INC_DIR}
-    ${UCCD_3RDPARTY_DIR}
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_BINARY_DIR}/include
   )

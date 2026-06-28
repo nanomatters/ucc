@@ -104,6 +104,26 @@ private slots:
     QVERIFY( !paths.platformProfile.isAvailable() );
   }
 
+  void readsDriverInfoFromPlatformDevice()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path infoPath = root / "bus/platform/devices/INOU0000:00/info";
+
+    writeFile( infoPath / "project_id", "0x13\n" );
+    writeFile( infoPath / "module_id", "PH4TUX1\n" );
+    writeFile( infoPath / "rom_id", "1.07\n" );
+
+    const auto info = ucc::uniwill::readDriverInfo( root.string() );
+
+    QVERIFY( info.isAvailable() );
+    QCOMPARE( info.infoPath, infoPath.string() );
+    QCOMPARE( info.projectId.value_or( -1 ), static_cast< int32_t >( 0x13 ) );
+    QCOMPARE( info.moduleId, std::string( "PH4TUX1" ) );
+    QCOMPARE( info.romId, std::string( "1.07" ) );
+  }
+
   void profileTranslationKeepsUccProfilesCompatible()
   {
     const std::vector< std::string > uniwillProfiles = { "quiet", "balanced", "performance" };
@@ -265,6 +285,9 @@ private slots:
     QVERIFY( ucc::uniwill::writeUsbCPowerPriority( priority, "performance" ) );
     QCOMPARE( ucc::uniwill::readFirstLine( devicePath / "usb_c_power_priority" ).value_or( "" ),
               std::string( "performance" ) );
+    QVERIFY( ucc::uniwill::writeUsbCPowerPriority( priority, "charge_battery" ) );
+    QCOMPARE( ucc::uniwill::readFirstLine( devicePath / "usb_c_power_priority" ).value_or( "" ),
+              std::string( "charging" ) );
     QVERIFY( !ucc::uniwill::writeUsbCPowerPriority( priority, "invalid" ) );
   }
 

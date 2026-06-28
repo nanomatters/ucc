@@ -1,7 +1,7 @@
 
 # Uniwill Control Center (UCC)
 
-Modern Qt6/KDE C++20 application suite for Uniwill laptop control.
+Modern Qt6/KDE C++23 application suite for Uniwill laptop control.
 
 ## Disclaimer
 
@@ -11,7 +11,7 @@ USE AT YOUR OWN RISK
 
 ## Components
 
-- **Tuxedo IO**: IO access class taken from Tuxedo Control Center
+- **uccd**: System daemon using the uniwill-laptop sysfs/hwmon interfaces
 - **ucc-gui**: Main GUI application using Qt6
 - **ucc-tray**: KDE/Plasma system tray applet for quick access.
 
@@ -26,14 +26,14 @@ USE AT YOUR OWN RISK
 
 ### Build Requirements
 - CMake >= 3.20
-- GCC with C++20 support
+- GCC with C++23 support
 - Qt6
 - KDE Frameworks 6
 
 ### Runtime Requirements
 - Qt6 runtime libraries
 - KDE Plasma (for widgets)
-- tuxedo-drivers (kernel/user drivers required for hardware control)
+- uniwill-laptop-driver (kernel driver required for hardware control)
 
 ## Building
 

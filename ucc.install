@@ -17,8 +17,8 @@ post_install() {
   update-desktop-database -q usr/share/applications 2>/dev/null || true
 
   echo ""
-  echo "==> NOTE: uccd requires tuxedo-drivers kernel module."
-  echo "==>       Install 'tuxedo-drivers' from AUR if not already present."
+  echo "==> NOTE: uccd requires the uniwill-laptop-driver kernel module for hardware control."
+  echo "==>       Install 'uniwill-laptop-driver' if not already present."
   echo ""
 }
 
