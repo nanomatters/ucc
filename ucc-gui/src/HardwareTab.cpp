@@ -21,7 +21,6 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QSlider>
-#include <QCheckBox>
 #include <QListWidget>
 #include <QProgressBar>
 
@@ -42,11 +41,8 @@ HardwareTab::HardwareTab( SystemMonitor *systemMonitor, QWidget *parent )
 void HardwareTab::setupUI( QWidget *parent )
 {
   // Quick Controls Group
-  QGroupBox *quickControlsGroup = new QGroupBox( "General Quick Controls" );
+  QGroupBox *quickControlsGroup = new QGroupBox( "General Hardware Controls" );
   QHBoxLayout *controlsLayout = new QHBoxLayout( quickControlsGroup );
-  m_webcamCheckBox = new QCheckBox( "Webcam Enabled" );
-  m_webcamCheckBox->setLayoutDirection( Qt::RightToLeft );
-  controlsLayout->addWidget( m_webcamCheckBox );
   QLabel *brightnessLabel = new QLabel( "Display Brightness:" );
   m_displayBrightnessSlider = new QSlider( Qt::Horizontal );
   m_displayBrightnessSlider->setMinimum( 0 );
@@ -71,16 +67,11 @@ void HardwareTab::connectSignals()
   connect( m_displayBrightnessSlider, &QSlider::valueChanged,
            this, &HardwareTab::onDisplayBrightnessSliderChanged );
 
-  connect( m_webcamCheckBox, &QCheckBox::toggled,
-           this, &HardwareTab::onWebcamToggled );
-
   // Inbound: daemon state -> widgets
   if ( m_systemMonitor )
   {
     connect( m_systemMonitor, &SystemMonitor::displayBrightnessChanged,
              this, &HardwareTab::onDisplayBrightnessUpdated );
-    connect( m_systemMonitor, &SystemMonitor::webcamEnabledChanged,
-             this, &HardwareTab::onWebcamEnabledUpdated );
   }
 }
 
@@ -97,8 +88,6 @@ void HardwareTab::initializeFromMonitor()
     m_displayBrightnessSlider->setValue( brightness );
     m_displayBrightnessValueLabel->setText( QString::number( brightness ) + "%" );
   }
-
-  m_webcamCheckBox->setChecked( m_systemMonitor->webcamEnabled() );
 
   m_updatingFromMonitor = false;
 }
@@ -119,15 +108,6 @@ void HardwareTab::onDisplayBrightnessSliderChanged( int value )
     m_systemMonitor->setDisplayBrightness( value );
 }
 
-void HardwareTab::onWebcamToggled( bool checked )
-{
-  if ( m_updatingFromMonitor )
-    return;
-
-  if ( m_systemMonitor )
-    m_systemMonitor->setWebcamEnabled( checked );
-}
-
 void HardwareTab::onDisplayBrightnessUpdated()
 {
   if ( not m_systemMonitor )
@@ -137,16 +117,6 @@ void HardwareTab::onDisplayBrightnessUpdated()
   int brightness = m_systemMonitor->displayBrightness();
   m_displayBrightnessSlider->setValue( brightness );
   m_displayBrightnessValueLabel->setText( QString::number( brightness ) + "%" );
-  m_updatingFromMonitor = false;
-}
-
-void HardwareTab::onWebcamEnabledUpdated()
-{
-  if ( not m_systemMonitor )
-    return;
-
-  m_updatingFromMonitor = true;
-  m_webcamCheckBox->setChecked( m_systemMonitor->webcamEnabled() );
   m_updatingFromMonitor = false;
 }
 

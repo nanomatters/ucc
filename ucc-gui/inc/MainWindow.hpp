@@ -179,8 +179,6 @@ namespace ucc
     QLabel *m_brightnessValueLabel = nullptr;
     QComboBox *m_profileKeyboardProfileCombo = nullptr;
 
-    // Charging profile (per-profile firmware-level mode)
-    QComboBox *m_profileChargingProfileCombo = nullptr;
     QComboBox *m_profileChargingPriorityCombo = nullptr;
     QComboBox *m_profileChargeLimitCombo = nullptr;
 

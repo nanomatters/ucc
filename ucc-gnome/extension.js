@@ -120,12 +120,8 @@ class UccIndicator extends PanelMenu.Button {
             activeProfileId: '', activeProfileName: '',
             fanProfileNames: [], fanProfileIds: [],
             activeProfileFanId: '',
-            keyboardProfileNames: [], keyboardProfileIds: [],
-            keyboardProfilesData: [],
-            activeKeyboardProfileId: '',
             powerState: '',
             // Hardware
-            webcamEnabled: false, fnLock: false,
             displayBrightness: 50,
             // Water cooler
             waterCoolerSupported: false,
@@ -346,16 +342,6 @@ class UccIndicator extends PanelMenu.Button {
         });
         box.add_child(this._fanProfileListBox);
 
-        // Keyboard Profile
-        this._kbProfileHeader = new St.Label({ text: 'Keyboard Profile', style_class: 'ucc-section-title' });
-        box.add_child(this._kbProfileHeader);
-        this._kbProfileListBox = new St.BoxLayout({
-            vertical: true,
-            style_class: 'ucc-chooser-list',
-            x_expand: true,
-        });
-        box.add_child(this._kbProfileListBox);
-
         this._tabs['profile'] = scroll;
     }
 
@@ -367,48 +353,6 @@ class UccIndicator extends PanelMenu.Button {
             style_class: 'ucc-tab-content',
             x_expand: true,
         });
-
-        // Fn Lock toggle
-        const fnRow = new St.BoxLayout({ style_class: 'ucc-hw-row', x_expand: true });
-        fnRow.add_child(new St.Label({
-            text: 'Fn Lock',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-        this._fnLockSwitch = new St.Button({
-            style_class: 'ucc-toggle',
-            toggle_mode: true,
-            label: 'OFF',
-        });
-        this._fnLockSwitch.connect('clicked', () => {
-            const val = this._fnLockSwitch.checked;
-            this._client.setFnLock(val);
-            this._state.fnLock = val;
-            this._fnLockSwitch.label = val ? 'ON' : 'OFF';
-        });
-        fnRow.add_child(this._fnLockSwitch);
-        box.add_child(fnRow);
-
-        // Webcam toggle
-        const camRow = new St.BoxLayout({ style_class: 'ucc-hw-row', x_expand: true });
-        camRow.add_child(new St.Label({
-            text: 'Webcam',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-        this._webcamSwitch = new St.Button({
-            style_class: 'ucc-toggle',
-            toggle_mode: true,
-            label: 'OFF',
-        });
-        this._webcamSwitch.connect('clicked', () => {
-            const val = this._webcamSwitch.checked;
-            this._client.setWebcamEnabled(val);
-            this._state.webcamEnabled = val;
-            this._webcamSwitch.label = val ? 'ON' : 'OFF';
-        });
-        camRow.add_child(this._webcamSwitch);
-        box.add_child(camRow);
 
         // Display Brightness slider
         box.add_child(new St.Label({ text: 'Display Brightness', style_class: 'ucc-section-title' }));
@@ -602,7 +546,7 @@ class UccIndicator extends PanelMenu.Button {
                     s.activeProfileId = id;
                     s.activeProfileName = name;
                     this._rebuildProfileButtons();
-                    this._pollSlowState(); // refresh fan/keyboard sub-profiles
+                    this._pollSlowState(); // refresh fan sub-profiles
                 }
             });
             this._profileListBox.add_child(row);
@@ -630,27 +574,6 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
-    _rebuildKeyboardProfileButtons() {
-        this._kbProfileListBox.destroy_all_children();
-
-        const s = this._state;
-        // Hide section if no keyboard profiles
-        this._kbProfileHeader.visible = s.keyboardProfileIds.length > 0;
-        this._kbProfileListBox.visible = s.keyboardProfileIds.length > 0;
-
-        for (let i = 0; i < s.keyboardProfileIds.length; i++) {
-            const id = s.keyboardProfileIds[i];
-            const name = s.keyboardProfileNames[i] ?? id;
-            const isActive = id === s.activeKeyboardProfileId;
-            const row = this._makeChooserRow(name, isActive, () => {
-                this._applyKeyboardProfile(id);
-                s.activeKeyboardProfileId = id;
-                this._rebuildKeyboardProfileButtons();
-            });
-            this._kbProfileListBox.add_child(row);
-        }
-    }
-
     _applyFanProfile(fanProfileId) {
         const raw = this._client.getFanProfile(fanProfileId);
         if (!raw) return;
@@ -663,18 +586,6 @@ class UccIndicator extends PanelMenu.Button {
             if (src.tableWaterCoolerFan) dst.waterCoolerFan = src.tableWaterCoolerFan;
             this._client.applyFanProfiles(JSON.stringify(dst));
         } catch { /* ignore parse errors */ }
-    }
-
-    _applyKeyboardProfile(kbProfileId) {
-        const s = this._state;
-        const idx = s.keyboardProfileIds.indexOf(kbProfileId);
-        if (idx < 0) return;
-        const profileData = s.keyboardProfilesData[idx];
-        if (!profileData) return;
-        const json = profileData.json;
-        if (json) {
-            this._client.setKeyboardBacklight(json);
-        }
     }
 
     _updatePumpVoltageUI() {
@@ -835,67 +746,8 @@ class UccIndicator extends PanelMenu.Button {
         s.fanProfileNames = fanNames;
         s.fanProfileIds = fanIds;
 
-        // Keyboard profiles
-        const kbNames = [], kbIds = [], kbData = [];
-
-        // Custom keyboard profiles from daemon
-        const rawKbCust = this._client.getCustomKeyboardProfiles();
-        if (rawKbCust) {
-            try {
-                for (const p of JSON.parse(rawKbCust)) {
-                    if (p.id) {
-                        kbIds.push(p.id);
-                        kbNames.push(p.name ?? p.id);
-                        kbData.push(p);
-                    }
-                }
-            } catch { /* ignore */ }
-        }
-
-        // Fallback: Keyboard profiles from uccrc
-        if (uccrcKf) {
-            try {
-                const ckp = unwrapQByteArray(uccrcKf.get_value('General', 'customKeyboardProfiles'));
-                if (ckp) {
-                    for (const p of JSON.parse(ckp)) {
-                        if (p.id && !kbIds.includes(p.id)) {
-                            kbIds.push(p.id);
-                            kbNames.push(p.name ?? p.id);
-                            kbData.push(p);
-                        }
-                    }
-                }
-            } catch { /* ignore */ }
-        }
-
-        s.keyboardProfileNames = kbNames;
-        s.keyboardProfileIds = kbIds;
-        s.keyboardProfilesData = kbData;
-
-        // Extract active keyboard profile from the active profile JSON
-        if (ap) {
-            try {
-                const obj = JSON.parse(ap);
-                const kbRef = obj.selectedKeyboardProfile ?? '';
-                // Resolve: may be a UUID or a display name
-                s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
-            } catch { /* ignore */ }
-        }
-
         this._rebuildProfileButtons();
         this._rebuildFanProfileButtons();
-        this._rebuildKeyboardProfileButtons();
-    }
-
-    /** Resolve a keyboard profile reference (UUID or display name) to its canonical UUID. */
-    _resolveKeyboardProfileId(ref) {
-        if (!ref) return '';
-        const s = this._state;
-        // If it's already a known ID, use as-is
-        if (s.keyboardProfileIds.includes(ref)) return ref;
-        // Otherwise look up by name
-        const idx = s.keyboardProfileNames.indexOf(ref);
-        return idx >= 0 ? s.keyboardProfileIds[idx] : ref;
     }
 
     // Polling
@@ -953,12 +805,8 @@ class UccIndicator extends PanelMenu.Button {
                     s.activeProfileId = newId;
                     s.activeProfileName = obj.name ?? '';
                     s.activeProfileFanId = obj.fan?.fanProfile ?? '';
-                    // Extract keyboard profile reference
-                    const kbRef = obj.selectedKeyboardProfile ?? '';
-                    s.activeKeyboardProfileId = this._resolveKeyboardProfileId(kbRef);
                     this._rebuildProfileButtons();
                     this._rebuildFanProfileButtons();
-                    this._rebuildKeyboardProfileButtons();
                 }
                 const oldAutoControl = s.wcAutoControl;
                 s.wcAutoControl = obj.fan?.autoControlWC ?? true;
@@ -979,21 +827,6 @@ class UccIndicator extends PanelMenu.Button {
             if (s.wcConnected !== wasWcConnected) {
                 this._updateWaterCoolerControlsEnabled();
             }
-        }
-
-        // Hardware toggles
-        const webcam = this._client.getWebcamEnabled();
-        if (webcam !== s.webcamEnabled) {
-            s.webcamEnabled = webcam;
-            this._webcamSwitch.checked = webcam;
-            this._webcamSwitch.label = webcam ? 'ON' : 'OFF';
-        }
-
-        const fn = this._client.getFnLock();
-        if (fn !== s.fnLock) {
-            s.fnLock = fn;
-            this._fnLockSwitch.checked = fn;
-            this._fnLockSwitch.label = fn ? 'ON' : 'OFF';
         }
 
         const br = this._client.getDisplayBrightness();

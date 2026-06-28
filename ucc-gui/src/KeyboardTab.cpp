@@ -171,8 +171,8 @@ void MainWindow::setupKeyboardBacklightPage()
     mainLayout->addWidget( noSupportLabel );
   }
 
-  const int tabIndex = m_tabs->addTab( keyboardWidget, "Keyboard and Hardware" );
-  m_hardwareTab = new HardwareTab( m_systemMonitor.get(), m_tabs->widget( tabIndex ) );
+  keyboardWidget->setParent( this );
+  keyboardWidget->hide();
 }
 
 void MainWindow::reloadKeyboardProfiles()

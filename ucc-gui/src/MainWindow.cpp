@@ -379,12 +379,6 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( chargingHeader, row, 0, 1, 2 );
   row++;
 
-  QLabel *chargingProfileLabel = new QLabel( "Charging profile" );
-  m_profileChargingProfileCombo = new QComboBox();
-  detailsLayout->addWidget( chargingProfileLabel, row, 0 );
-  detailsLayout->addWidget( m_profileChargingProfileCombo, row, 1 );
-  row++;
-
   QLabel *chargingPriorityLabel = new QLabel( "Charging priority" );
   m_profileChargingPriorityCombo = new QComboBox();
   detailsLayout->addWidget( chargingPriorityLabel, row, 0 );
@@ -400,55 +394,33 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( m_profileChargeLimitCombo, row, 1 );
   row++;
 
-  auto setChargingSectionVisible = [chargingHeader, chargingProfileLabel,
-                                    chargingPriorityLabel, chargeLimitLabel, this]( bool visible )
+  auto refreshChargingSectionVisibility = [chargingHeader,
+                                           chargingPriorityLabel,
+                                           chargeLimitLabel,
+                                           this]()
   {
-    chargingHeader->setVisible( visible );
-    chargingProfileLabel->setVisible( visible );
-    m_profileChargingProfileCombo->setVisible( visible );
-
-    // Charging priority is only visible if priorities are available
     bool hasPriorities = m_systemMonitor && !m_systemMonitor->chargingPrioritiesAvailable().isEmpty();
-    chargingPriorityLabel->setVisible( visible && hasPriorities );
-    m_profileChargingPriorityCombo->setVisible( visible && hasPriorities );
-
-    // Charge limit is visible when thresholds are available
     bool hasThresholds = m_systemMonitor && m_systemMonitor->chargeThresholdsAvailable();
-    chargeLimitLabel->setVisible( visible && hasThresholds );
-    m_profileChargeLimitCombo->setVisible( visible && hasThresholds );
+    bool visible = hasPriorities || hasThresholds;
+
+    chargingHeader->setVisible( visible );
+    chargingPriorityLabel->setVisible( hasPriorities );
+    m_profileChargingPriorityCombo->setVisible( hasPriorities );
+    chargeLimitLabel->setVisible( hasThresholds );
+    m_profileChargeLimitCombo->setVisible( hasThresholds );
   };
 
   // Populate and show/hide based on hardware support
   if ( m_systemMonitor )
   {
-    auto populateChargingProfiles = [this, setChargingSectionVisible]()
-    {
-      const QStringList profiles = m_systemMonitor->chargingProfilesAvailable();
-      m_profileChargingProfileCombo->blockSignals( true );
-      m_profileChargingProfileCombo->clear();
-
-      static const QMap< QString, QString > displayNames = {
-          { "high_capacity", "High Capacity (Full charge)" },
-          { "balanced", "Balanced (~90%)" },
-          { "stationary", "Stationary (~80%)" } };
-
-      for ( const auto &p : profiles )
-      {
-        QString display = displayNames.value( p, p );
-        m_profileChargingProfileCombo->addItem( display, p );
-      }
-      m_profileChargingProfileCombo->blockSignals( false );
-      setChargingSectionVisible( !profiles.isEmpty() );
-    };
-
-    auto populateChargingPriorities = [this, setChargingSectionVisible]()
+    auto populateChargingPriorities = [this, refreshChargingSectionVisibility]()
     {
       const QStringList priorities = m_systemMonitor->chargingPrioritiesAvailable();
       m_profileChargingPriorityCombo->blockSignals( true );
       m_profileChargingPriorityCombo->clear();
 
       static const QMap< QString, QString > priorityDisplayNames = {
-          { "charge_battery", "Charge Battery" },
+          { "charging", "Charging" },
           { "performance", "Performance" } };
 
       for ( const auto &p : priorities )
@@ -458,27 +430,26 @@ void MainWindow::setupProfilesPage()
       }
       m_profileChargingPriorityCombo->blockSignals( false );
 
-      // Re-evaluate visibility since priority availability changed
-      bool hasProfiles = !m_systemMonitor->chargingProfilesAvailable().isEmpty();
-      setChargingSectionVisible( hasProfiles );
+      refreshChargingSectionVisibility();
     };
 
-    populateChargingProfiles();
     populateChargingPriorities();
-    connect( m_systemMonitor.get(), &SystemMonitor::chargingProfilesAvailableChanged, this,
-             populateChargingProfiles );
     connect( m_systemMonitor.get(), &SystemMonitor::chargingPrioritiesAvailableChanged, this,
              populateChargingPriorities );
     connect( m_systemMonitor.get(), &SystemMonitor::chargeThresholdsAvailableChanged, this,
-             [this, setChargingSectionVisible]()
+             [refreshChargingSectionVisibility]()
              {
-               bool hasProfiles = !m_systemMonitor->chargingProfilesAvailable().isEmpty();
-               setChargingSectionVisible( hasProfiles );
+               refreshChargingSectionVisibility();
              } );
+    refreshChargingSectionVisibility();
   }
   else
   {
-    setChargingSectionVisible( false );
+    chargingHeader->setVisible( false );
+    chargingPriorityLabel->setVisible( false );
+    m_profileChargingPriorityCombo->setVisible( false );
+    chargeLimitLabel->setVisible( false );
+    m_profileChargeLimitCombo->setVisible( false );
   }
 
   // Add spacer before Display section
@@ -486,7 +457,7 @@ void MainWindow::setupProfilesPage()
   row++;
 
   // === DISPLAY SECTION ===
-  QLabel *displayHeader = new QLabel( "Display and Keyboard" );
+  QLabel *displayHeader = new QLabel( "Display" );
   displayHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
   detailsLayout->addWidget( displayHeader, row, 0, 1, 2 );
   row++;
@@ -502,9 +473,11 @@ void MainWindow::setupProfilesPage()
 
   detailsLayout->addWidget( keyboardProfileLabel, row, 0 );
   detailsLayout->addWidget( m_profileKeyboardProfileCombo, row, 1 );
+  keyboardProfileLabel->setVisible( false );
+  m_profileKeyboardProfileCombo->setVisible( false );
   row++;
 
-  QLabel *backlightLabel = new QLabel( "Backlight brightness" );
+  QLabel *backlightLabel = new QLabel( "Display brightness" );
   QHBoxLayout *backlightLayout = new QHBoxLayout();
   m_brightnessSlider = new QSlider( Qt::Horizontal );
   m_brightnessSlider->setMinimum( 0 );
@@ -807,14 +780,8 @@ void MainWindow::connectSignals()
   connect( m_profileManager.get(), &ProfileManager::customKeyboardProfilesChanged,
            this, &MainWindow::onCustomKeyboardProfilesChanged );
 
-  // Sub-profile sync: when a remote client (e.g. tray) changes the
-  // keyboard or fan profile, update the combo boxes and editors without
-  // writing back to hardware (the hardware already has the new state).
-  connect( m_profileManager.get(), &ProfileManager::activeKeyboardProfileChanged,
-           this, [this]( const QString &kbId ) {
-    if ( m_initializing ) return;
-    updateKeyboardEditorFromProfile( kbId );
-  } );
+  // Sub-profile sync: when a remote client (e.g. tray) changes the fan profile,
+  // update the combo boxes and editors without writing back to hardware.
   connect( m_profileManager.get(), &ProfileManager::activeFanProfileChanged,
            this, [this]( const QString &fpId ) {
     if ( m_initializing ) return;
@@ -983,11 +950,6 @@ void MainWindow::connectSignals()
              m_keyboardProfileCombo->blockSignals(false);
            } );
 
-  if ( m_profileChargingProfileCombo )
-  {
-    connect( m_profileChargingProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
-             this, &MainWindow::markChanged );
-  }
   if ( m_profileChargingPriorityCombo )
   {
     connect( m_profileChargingPriorityCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
@@ -1189,80 +1151,6 @@ void MainWindow::onTabChanged( int index )
       m_fanControlTab->pumpEditor()->clearCrosshair();
   }
 
-  // Load current keyboard backlight states when keyboard tab (index 4) is activated
-  if ( index == 4 )
-  {
-    if ( m_keyboardVisualizer )
-    {
-      if ( auto states = m_UccdClient->getKeyboardBacklightStates() )
-      {
-        // Block visualizer signals to prevent hardware write during state refresh
-        m_keyboardVisualizer->blockSignals( true );
-        m_keyboardVisualizer->loadCurrentStates( *states );
-
-        // Read brightness from hardware states and sync slider
-        if ( QJsonDocument statesDoc = QJsonDocument::fromJson( QString::fromStdString( *states ).toUtf8() );
-             statesDoc.isArray() && !statesDoc.array().isEmpty() )
-        {
-          int hwBrightness = statesDoc.array()[0].toObject()["brightness"].toInt( -1 );
-          qDebug() << "[KBD TAB] hw brightness:" << hwBrightness
-                   << "slider current:" << m_keyboardBrightnessSlider->value()
-                   << "slider max:" << m_keyboardBrightnessSlider->maximum();
-          if ( hwBrightness >= 0 && m_keyboardBrightnessSlider )
-          {
-            m_keyboardBrightnessSlider->blockSignals( true );
-            m_keyboardBrightnessSlider->setValue( hwBrightness );
-            m_keyboardBrightnessSlider->blockSignals( false );
-            m_keyboardBrightnessValueLabel->setText( QString::number( hwBrightness ) );
-          }
-        }
-
-        // ALWAYS override per-zone brightness with slider value to guarantee sync
-        m_keyboardVisualizer->setGlobalBrightness( m_keyboardBrightnessSlider->value() );
-        m_keyboardVisualizer->blockSignals( false );
-      }
-    }
-
-    // Reload keyboard profiles
-    reloadKeyboardProfiles();
-
-    // Auto-load the keyboard profile from the active profile's settings
-    if ( QString activeProfileId = m_profileManager->activeProfileId(); !activeProfileId.isEmpty() )
-    {
-      if ( QString profileJson = m_profileManager->getProfileDetails( activeProfileId );
-           !profileJson.isEmpty() )
-      {
-        if ( QJsonDocument doc = QJsonDocument::fromJson( profileJson.toUtf8() ); doc.isObject() )
-        {
-          QJsonObject obj = doc.object();
-          QString keyboardProfileId;
-
-          if ( obj.contains( "selectedKeyboardProfile" ) )
-            keyboardProfileId = obj["selectedKeyboardProfile"].toString();
-
-          if ( !keyboardProfileId.isEmpty() )
-          {
-            // Find by ID in combo userData
-            int kbIdx = -1;
-            for ( int i = 0; i < m_keyboardProfileCombo->count(); ++i )
-            {
-              if ( m_keyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
-              { kbIdx = i; break; }
-            }
-            if ( kbIdx >= 0 )
-            {
-              m_keyboardProfileCombo->blockSignals( true );
-              m_keyboardProfileCombo->setCurrentIndex( kbIdx );
-              m_keyboardProfileCombo->blockSignals( false );
-              // Explicitly load the profile data (setCurrentIndex won't emit
-              // if the index was already restored by reloadKeyboardProfiles)
-              onKeyboardProfileChanged( m_keyboardProfileCombo->itemData( kbIdx ).toString() );
-            }
-          }
-        }
-      }
-    }
-  }
 }
 
 // Profile page slots
@@ -1345,15 +1233,12 @@ void MainWindow::onAllProfilesChanged()
   // Custom profiles may have changed; reload fan profiles (adds custom entries to the fan combo)
   reloadFanProfiles();
 
-  // Override stored keyboard/fan profile with the daemon's live state.
+  // Override stored fan profile with the daemon's live state.
   // A remote client (e.g. tray applet) may have changed the sub-profile
   // while the GUI was not running or the ProfileChanged signal may have
-  // arrived with updated sub-profile IDs.
+  // arrived with an updated sub-profile ID.
   {
-    QString liveKbId = m_profileManager->activeKeyboardProfileId();
     QString liveFpId = m_profileManager->activeFanProfileId();
-    if ( !liveKbId.isEmpty() )
-      updateKeyboardEditorFromProfile( liveKbId );
     if ( !liveFpId.isEmpty() )
       updateFanEditorFromProfile( liveFpId );
   }
@@ -1584,7 +1469,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_odmPowerLimit3Slider->blockSignals( true );
   m_profileKeyboardProfileCombo->blockSignals( true );
   m_keyboardProfileCombo->blockSignals( true );
-  if ( m_profileChargingProfileCombo ) m_profileChargingProfileCombo->blockSignals( true );
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->blockSignals( true );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->blockSignals( true );
   m_mainsButton->blockSignals( true );
@@ -1831,19 +1715,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     m_ctgpValueLabel->setText( QString::number( m_ctgpSlider->value() ) + " W" );
   }
 
-  // Load Charging profile setting
-  if ( m_profileChargingProfileCombo && obj.contains( "chargingProfile" ) )
-  {
-    if ( int idx = m_profileChargingProfileCombo->findData( obj["chargingProfile"].toString() ); idx >= 0 )
-      m_profileChargingProfileCombo->setCurrentIndex( idx );
-    else
-      m_profileChargingProfileCombo->setCurrentIndex( 0 );
-  }
-  else if ( m_profileChargingProfileCombo )
-  {
-    m_profileChargingProfileCombo->setCurrentIndex( 0 );
-  }
-
   // Load Charging priority setting
   if ( m_profileChargingPriorityCombo && obj.contains( "chargingPriority" ) )
   {
@@ -1871,38 +1742,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     else
       m_profileChargeLimitCombo->setCurrentIndex( m_profileChargeLimitCombo->findData( "full" ) );
   }
-
-  // Load Keyboard settings - check for embedded keyboard profile name
-  QString loadedKeyboardProfile;
-  bool keyboardProfileNotFound = false;
-  QString missingKeyboardProfile;
-  if ( obj.contains( "selectedKeyboardProfile" ) )
-  {
-    QString keyboardProfileId = obj["selectedKeyboardProfile"].toString();
-    // Find by ID in combo userData
-    int idx = -1;
-    for ( int i = 0; i < m_profileKeyboardProfileCombo->count(); ++i )
-    {
-      if ( m_profileKeyboardProfileCombo->itemData( i ).toString() == keyboardProfileId )
-      { idx = i; break; }
-    }
-    if ( idx >= 0 )
-    {
-      m_profileKeyboardProfileCombo->setCurrentIndex( idx );
-      m_keyboardProfileCombo->setCurrentIndex( idx );
-      loadedKeyboardProfile = m_profileKeyboardProfileCombo->itemData( idx ).toString();
-    }
-    else
-    {
-      // Referenced keyboard profile was not found
-      keyboardProfileNotFound = true;
-      missingKeyboardProfile = keyboardProfileId;
-    }
-  }
-  // Keyboard brightness and colors are managed by the keyboard profile system
-  // (via selectedKeyboardProfile), not directly from system profile data.
-  // "keyboard" object in profiles is ignored to avoid overriding
-  // the hardware brightness with stale saved values.
 
   // Load power state activation settings
   if ( QString settingsJson = m_profileManager->getSettingsJSON(); !settingsJson.isEmpty() )
@@ -1949,7 +1788,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_odmPowerLimit3Slider->blockSignals( false );
   m_profileKeyboardProfileCombo->blockSignals( false );
   m_keyboardProfileCombo->blockSignals( false );
-  if ( m_profileChargingProfileCombo ) m_profileChargingProfileCombo->blockSignals( false );
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->blockSignals( false );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->blockSignals( false );
   m_mainsButton->blockSignals( false );
@@ -1970,29 +1808,15 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     onFanProfileChanged( loadedFanProfile );
   }
 
-  // Load keyboard profile for display only - must NOT write to hardware.
-  // onKeyboardProfileChanged() pushes states to the daemon, which would revert
-  // live changes made by the tray applet while the GUI was not running.
-  // Use updateKeyboardEditorFromProfile() which only updates the UI widgets.
-  if ( loadedKeyboardProfile.isEmpty() && m_keyboardProfileCombo->count() > 0 )
-    loadedKeyboardProfile = m_keyboardProfileCombo->currentData().toString();
-
-  if ( !loadedKeyboardProfile.isEmpty() )
-    updateKeyboardEditorFromProfile( loadedKeyboardProfile );
-
-
   // Enable/disable editing widgets based on whether profile is custom
   const bool isCustom = m_profileManager ? m_profileManager->isCustomProfile( profileId ) : false;
   updateProfileEditingWidgets( isCustom );
 
   // Warn user if any referenced profiles were not found (deleted after profile creation)
-  if ( fanProfileNotFound || keyboardProfileNotFound )
+  if ( fanProfileNotFound )
   {
     QString profileName = m_profileCombo->currentText();
     QString message = QString( "The profile '%1' references the following missing subprofiles:\n\n" ).arg( profileName );
-
-    if ( keyboardProfileNotFound )
-      message += QString( "Keyboard profile: %1\n" ).arg( missingKeyboardProfile );
 
     if ( fanProfileNotFound )
       message += QString( "Fan profile: %1\n" ).arg( missingFanProfile );
@@ -2039,9 +1863,6 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
   if ( m_maxFrequencySlider ) m_maxFrequencySlider->setEnabled( isCustom );
   if ( m_hwpDynamicBoostCheckBox ) m_hwpDynamicBoostCheckBox->setEnabled( isCustom );
 
-  // Keyboard profile
-  if ( m_profileKeyboardProfileCombo ) m_profileKeyboardProfileCombo->setEnabled( isCustom );
-
   // ODM Power controls
   if ( m_odmPowerLimit1Slider ) m_odmPowerLimit1Slider->setEnabled( isCustom );
   if ( m_odmPowerLimit2Slider ) m_odmPowerLimit2Slider->setEnabled( isCustom );
@@ -2049,8 +1870,7 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   // GPU Power (cTGP) slider
   if ( m_ctgpSlider ) m_ctgpSlider->setEnabled( isCustom );
-  // Charging profile
-  if ( m_profileChargingProfileCombo ) m_profileChargingProfileCombo->setEnabled( isCustom );
+  // Charging
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->setEnabled( isCustom );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->setEnabled( isCustom );
 }
@@ -2155,21 +1975,7 @@ QString MainWindow::buildProfileJSON() const
     profileObj["nvidiaCTGPOffset"] = ctgpOffset;
   }
 
-  // Keyboard - only store the profile reference, not the full state data
-  // Full per-key states live in customKeyboardProfiles managed by uccd.
-  QString keyboardProfileId  = m_profileKeyboardProfileCombo->currentData().toString();
-  QJsonObject keyboardObj;
-  if ( m_keyboardBrightnessSlider )
-    keyboardObj["brightness"] = m_keyboardBrightnessSlider->value();
-  profileObj["keyboard"]               = keyboardObj;
-  profileObj["selectedKeyboardProfile"] = keyboardProfileId;
-
   // Charging
-  if ( m_profileChargingProfileCombo )
-  {
-    QString v = m_profileChargingProfileCombo->currentData().toString();
-    if ( !v.isEmpty() ) profileObj["chargingProfile"] = v;
-  }
   if ( m_profileChargingPriorityCombo )
   {
     QString v = m_profileChargingPriorityCombo->currentData().toString();

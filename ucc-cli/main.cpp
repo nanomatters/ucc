@@ -31,6 +31,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -75,14 +76,6 @@ static void printVal( const char *label, const std::optional< bool > &v )
 {
   if ( v )
     std::printf( "  %-24s %s\n", label, *v ? "yes" : "no" );
-  else
-    std::printf( "  %-24s n/a\n", label );
-}
-
-static void printVal( const char *label, const std::optional< std::string > &v )
-{
-  if ( v )
-    std::printf( "  %-24s %s\n", label, v->c_str() );
   else
     std::printf( "  %-24s n/a\n", label );
 }
@@ -144,13 +137,21 @@ static std::string profileId( const std::string &json )
   return "";
 }
 
+static bool jsonArrayHasEntries( const std::optional< std::string > &json )
+{
+  if ( !json )
+    return false;
+
+  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+  return doc.isArray() && !doc.array().isEmpty();
+}
+
 // Local assignment helpers (stateMap + customProfiles cross-reference)
 
 /// Per-profile assignment data loaded from the daemon settings.
 struct LocalAssignments {
   QMap<QString, QStringList> profileStates;  ///< main profile id -> power state names
   QMap<QString, QStringList> fanStates;      ///< fan profile id -> power state names
-  QMap<QString, QStringList> kbStates;       ///< keyboard profile id -> power state names
 };
 
 /// Map power-state key (e.g. "power_ac") to a short display label ("AC").
@@ -171,7 +172,7 @@ static QString assignmentTag( const QStringList &states )
 }
 
 /// Load stateMap and customProfiles from the daemon settings (single source of truth)
-/// and resolve which fan/keyboard profiles are transitively referenced through
+/// and resolve which fan profiles are transitively referenced through
 /// power-state-assigned main profiles.
 static LocalAssignments loadLocalAssignments( ucc::UccdClient &c )
 {
@@ -197,7 +198,7 @@ static LocalAssignments loadLocalAssignments( ucc::UccdClient &c )
     }
   }
 
-  // customProfiles: resolve which fan and keyboard profiles are used by assigned main profiles
+  // customProfiles: resolve which fan profiles are used by assigned main profiles
   if ( settings.contains( "customProfiles" ) && settings["customProfiles"].isArray() )
   {
     for ( const QJsonValue &v : settings["customProfiles"].toArray() )
@@ -218,12 +219,6 @@ static LocalAssignments loadLocalAssignments( ucc::UccdClient &c )
               result.fanStates[fanId].append( s );
       }
 
-      // Keyboard profile referenced by this main profile
-      QString kbId = prof["selectedKeyboardProfile"].toString();
-      if ( !kbId.isEmpty() )
-        for ( const QString &s : states )
-          if ( !result.kbStates[kbId].contains( s ) )
-            result.kbStates[kbId].append( s );
     }
   }
 
@@ -303,7 +298,6 @@ static int cmdStatus( ucc::UccdClient &c )
   std::puts( "" );
   std::puts( "--- Hardware ---" );
   printVal( "Display brightness:", c.getDisplayBrightness(), "%" );
-  printVal( "Webcam enabled:",     c.getWebcamEnabled() );
 
   auto wcSupported = c.getWaterCoolerSupported();
   if ( wcSupported && *wcSupported )
@@ -323,23 +317,10 @@ static int cmdStatus( ucc::UccdClient &c )
     }
   }
 
-  // Charging info - mirror GUI logic: only show if hardware provides data
-  auto chargingProfilesAvail = c.getChargingProfilesAvailable();
-  bool hasChargingHW = false;
-  if ( chargingProfilesAvail )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *chargingProfilesAvail ) );
-    hasChargingHW = doc.isArray() && !doc.array().isEmpty();
-  }
-
-  if ( hasChargingHW )
+  // Charging info: uniwill exposes priority/type/thresholds without legacy profiles.
   {
     // Collect charging fields first, only print section if non-empty
     std::vector< std::pair< std::string, std::string > > chLines;
-
-    auto chargingProfile = c.getCurrentChargingProfile();
-    if ( chargingProfile && !chargingProfile->empty() )
-      chLines.emplace_back( "Charging profile:", *chargingProfile );
 
     auto chargingPriority = c.getCurrentChargingPriority();
     if ( chargingPriority && !chargingPriority->empty() )
@@ -349,14 +330,7 @@ static int cmdStatus( ucc::UccdClient &c )
     if ( chargeType && *chargeType != "Unknown" && *chargeType != "N/A" && !chargeType->empty() )
       chLines.emplace_back( "Charge type:", *chargeType );
 
-    auto endAvail = c.getChargeEndAvailableThresholds();
-    bool hasThr = false;
-    if ( endAvail )
-    {
-      QJsonDocument td = QJsonDocument::fromJson( QByteArray::fromStdString( *endAvail ) );
-      hasThr = td.isArray() && !td.array().isEmpty();
-    }
-    if ( hasThr )
+    if ( jsonArrayHasEntries( c.getChargeEndAvailableThresholds() ) )
     {
       auto chargeStart = c.getChargeStartThreshold();
       auto chargeEnd   = c.getChargeEndThreshold();
@@ -512,14 +486,6 @@ static void printProfileSummary( const QJsonObject &obj, bool showHeader = true 
     }
   }
 
-  // Webcam
-  if ( obj.contains( "webcam" ) && obj["webcam"].isObject() )
-  {
-    QJsonObject wc = obj["webcam"].toObject();
-    if ( wc.contains( "useStatus" ) && wc["useStatus"].toBool() )
-      std::printf( "  %-24s %s\n", "Webcam:", wc["status"].toBool() ? "enabled" : "disabled" );
-  }
-
   // ODM power limits
   if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
   {
@@ -555,21 +521,6 @@ static void printProfileSummary( const QJsonObject &obj, bool showHeader = true 
       std::printf( "  %-24s %s\n", "ODM profile:", odmName.toStdString().c_str() );
   }
 
-  // Charging
-  if ( obj.contains( "chargingProfile" ) )
-  {
-    QString cp = obj["chargingProfile"].toString();
-    if ( !cp.isEmpty() )
-      std::printf( "  %-24s %s\n", "Charging profile:", cp.toStdString().c_str() );
-  }
-
-  // Selected keyboard profile
-  if ( obj.contains( "selectedKeyboardProfile" ) )
-  {
-    QString kp = obj["selectedKeyboardProfile"].toString();
-    if ( !kp.isEmpty() )
-      std::printf( "  %-24s %s\n", "Keyboard profile:", kp.toStdString().c_str() );
-  }
 }
 
 static int cmdProfileGet( ucc::UccdClient &c )
@@ -934,232 +885,6 @@ static int cmdMonitor( ucc::UccdClient &c, int count, int interval )
   return 0;
 }
 
-// Keyboard
-
-static int cmdKeyboardInfo( ucc::UccdClient &c )
-{
-  auto info = c.getKeyboardBacklightInfo();
-  if ( !info )
-  {
-    std::fputs( "Error: Could not retrieve keyboard backlight info\n", stderr );
-    return 1;
-  }
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *info ) );
-  if ( !doc.isObject() )
-  {
-    std::puts( info->c_str() );
-    return 0;
-  }
-  QJsonObject obj = doc.object();
-  std::puts( "=== Keyboard Backlight ===" );
-  std::printf( "  %-24s %d\n",  "Zones:", obj["zones"].toInt() );
-  std::printf( "  %-24s %d\n",  "Max brightness:", obj["maxBrightness"].toInt() );
-  std::printf( "  %-24s %d\n",  "Max red:", obj["maxRed"].toInt() );
-  std::printf( "  %-24s %d\n",  "Max green:", obj["maxGreen"].toInt() );
-  std::printf( "  %-24s %d\n",  "Max blue:", obj["maxBlue"].toInt() );
-  if ( obj.contains( "modes" ) && obj["modes"].isArray() )
-  {
-    QJsonArray modes = obj["modes"].toArray();
-    std::string mstr;
-    for ( int i = 0; i < modes.size(); ++i )
-    {
-      if ( i > 0 ) mstr += ", ";
-      int m = modes[i].toInt();
-      switch ( m )
-      {
-        case 0: mstr += "static"; break;
-        case 1: mstr += "breathe"; break;
-        case 2: mstr += "colorful"; break;
-        case 3: mstr += "breathe-color"; break;
-        default: mstr += std::to_string( m ); break;
-      }
-    }
-    std::printf( "  %-24s %s\n", "Modes:", mstr.c_str() );
-  }
-  return 0;
-}
-
-static int cmdKeyboardGet( ucc::UccdClient &c )
-{
-  auto states = c.getKeyboardBacklightStates();
-  if ( !states )
-  {
-    std::fputs( "Error: Could not retrieve keyboard backlight states\n", stderr );
-    return 1;
-  }
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *states ) );
-  if ( !doc.isObject() )
-  {
-    std::puts( states->c_str() );
-    return 0;
-  }
-  QJsonObject root = doc.object();
-  int brightness = root["brightness"].toInt();
-  QJsonArray arr = root["states"].toArray();
-
-  std::puts( "=== Keyboard Backlight State ===" );
-  std::printf( "  %-24s %d\n", "Global brightness:", brightness );
-  std::printf( "  %-24s %d\n", "Zones:", (int)arr.size() );
-
-  if ( arr.isEmpty() )
-    return 0;
-
-  // Check if all zones are uniform
-  QJsonObject first = arr[0].toObject();
-  bool uniform = true;
-  for ( int i = 1; i < arr.size(); ++i )
-  {
-    QJsonObject z = arr[i].toObject();
-    if ( z["red"].toInt() != first["red"].toInt() ||
-         z["green"].toInt() != first["green"].toInt() ||
-         z["blue"].toInt() != first["blue"].toInt() ||
-         z["mode"].toInt() != first["mode"].toInt() ||
-         z["brightness"].toInt() != first["brightness"].toInt() )
-    {
-      uniform = false;
-      break;
-    }
-  }
-
-  if ( uniform )
-  {
-    std::printf( "  %-24s uniform\n", "Pattern:" );
-    std::printf( "  %-24s rgb(%d, %d, %d)\n", "Color:",
-                 first["red"].toInt(), first["green"].toInt(), first["blue"].toInt() );
-    std::printf( "  %-24s %d\n", "Zone brightness:", first["brightness"].toInt() );
-    int m = first["mode"].toInt();
-    const char *modeName = m == 0 ? "static" : m == 1 ? "breathe" :
-                           m == 2 ? "colorful" : m == 3 ? "breathe-color" : "unknown";
-    std::printf( "  %-24s %s\n", "Mode:", modeName );
-  }
-  else
-  {
-    // Print a compact table for differing zones
-    std::puts( "" );
-    std::printf( "  %-6s %-6s %-14s %-12s %s\n", "Zone", "Mode", "Color", "Brightness", "" );
-    std::printf( "  %-6s %-6s %-14s %-12s %s\n", "----", "----", "-----------", "----------", "" );
-    for ( int i = 0; i < arr.size(); ++i )
-    {
-      QJsonObject z = arr[i].toObject();
-      int m = z["mode"].toInt();
-      const char *modeName = m == 0 ? "static" : m == 1 ? "breathe" :
-                             m == 2 ? "color" : m == 3 ? "br-color" : "?";
-      char color[32];
-      std::snprintf( color, sizeof(color), "(%d,%d,%d)",
-                     z["red"].toInt(), z["green"].toInt(), z["blue"].toInt() );
-      std::printf( "  %-6d %-6s %-14s %-12d\n", i + 1, modeName, color, z["brightness"].toInt() );
-    }
-  }
-  return 0;
-}
-
-static int cmdKeyboardSet( ucc::UccdClient &c, const char *jsonStr )
-{
-  ok( c.setKeyboardBacklight( jsonStr ) );
-  return 0;
-}
-
-/// List custom keyboard profiles from the daemon.
-static int cmdKeyboardProfileList( ucc::UccdClient &c )
-{
-  LocalAssignments assignments = loadLocalAssignments( c );
-
-  auto customKPJson = c.getCustomKeyboardProfiles();
-  if ( !customKPJson )
-  {
-    std::puts( "No custom keyboard profiles found." );
-    return 0;
-  }
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *customKPJson ) );
-  if ( !doc.isArray() || doc.array().isEmpty() )
-  {
-    std::puts( "No custom keyboard profiles found." );
-    return 0;
-  }
-  std::puts( "Keyboard profiles:" );
-  for ( const QJsonValue &v : doc.array() )
-  {
-    if ( v.isObject() )
-    {
-      QJsonObject obj = v.toObject();
-      QString id = obj["id"].toString();
-      QString tag = assignmentTag( assignments.kbStates.value( id ) );
-      std::printf( "  %-36s  %s%s\n",
-                   id.toStdString().c_str(),
-                   obj["name"].toString().toStdString().c_str(),
-                   tag.toStdString().c_str() );
-    }
-  }
-  return 0;
-}
-
-/// Set a keyboard profile by ID from the daemon.
-static int cmdKeyboardProfileSet( ucc::UccdClient &c, const char *profileId )
-{
-  auto customKPJson = c.getCustomKeyboardProfiles();
-  if ( !customKPJson )
-  {
-    std::fputs( "Error: No custom keyboard profiles found\n", stderr );
-    return 1;
-  }
-  QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *customKPJson ) );
-  if ( !doc.isArray() )
-  {
-    std::fputs( "Error: Invalid keyboard profiles data\n", stderr );
-    return 1;
-  }
-  QString qId = QString::fromUtf8( profileId );
-  for ( const QJsonValue &v : doc.array() )
-  {
-    if ( v.isObject() && v.toObject()["id"].toString() == qId )
-    {
-      QString json = v.toObject()["json"].toString();
-      if ( json.isEmpty() )
-      {
-        std::fputs( "Error: Keyboard profile has no data\n", stderr );
-        return 1;
-      }
-      ok( c.setKeyboardBacklight( json.toStdString() ) );
-      return 0;
-    }
-  }
-  std::fputs( "Error: Keyboard profile not found\n", stderr );
-  return 1;
-}
-
-static int cmdKeyboardColor( ucc::UccdClient &c, int r, int g, int b, int brightness )
-{
-  // Get current capabilities to determine zone count
-  auto info = c.getKeyboardBacklightInfo();
-  if ( !info )
-  {
-    std::fputs( "Error: Could not retrieve keyboard capabilities\n", stderr );
-    return 1;
-  }
-
-  QJsonDocument cap = QJsonDocument::fromJson( QByteArray::fromStdString( *info ) );
-  int zones = 1;
-  if ( cap.isObject() && cap.object().contains( "zones" ) )
-    zones = cap.object()["zones"].toInt( 1 );
-
-  // Build a per-zone array with uniform color
-  QJsonArray states;
-  for ( int i = 0; i < zones; ++i )
-  {
-    QJsonObject zone;
-    zone["mode"]       = 0;  // static
-    zone["brightness"] = brightness;
-    zone["red"]        = r;
-    zone["green"]      = g;
-    zone["blue"]       = b;
-    states.append( zone );
-  }
-
-  QString json = QJsonDocument( states ).toJson( QJsonDocument::Compact );
-  ok( c.setKeyboardBacklight( json.toStdString() ) );
-  return 0;
-}
-
 // Hardware controls
 
 static int cmdBrightnessGet( ucc::UccdClient &c )
@@ -1177,24 +902,6 @@ static int cmdBrightnessGet( ucc::UccdClient &c )
 static int cmdBrightnessSet( ucc::UccdClient &c, int val )
 {
   ok( c.setDisplayBrightness( val ) );
-  return 0;
-}
-
-static int cmdWebcamGet( ucc::UccdClient &c )
-{
-  auto v = c.getWebcamEnabled();
-  if ( !v )
-  {
-    std::fputs( "Error: Could not read webcam status\n", stderr );
-    return 1;
-  }
-  std::puts( *v ? "enabled" : "disabled" );
-  return 0;
-}
-
-static int cmdWebcamSet( ucc::UccdClient &c, bool enabled )
-{
-  ok( c.setWebcamEnabled( enabled ) );
   return 0;
 }
 
@@ -1275,64 +982,44 @@ static std::string jsonArrayToList( const std::string &json )
 
 static int cmdChargingStatus( ucc::UccdClient &c )
 {
-  auto profilesAvail = c.getChargingProfilesAvailable();
-  std::string profilesList;
-  if ( profilesAvail )
-    profilesList = jsonArrayToList( *profilesAvail );
-
-  if ( profilesList.empty() )
-  {
-    std::puts( "Charging control: not available on this hardware" );
-    return 0;
-  }
-
-  std::puts( "=== Charging ===" );
-
-  auto chargingProfile = c.getCurrentChargingProfile();
-  if ( chargingProfile && !chargingProfile->empty() )
-    printVal( "Charging profile:",  chargingProfile );
-
-  std::printf( "  %-24s %s\n", "Available profiles:", profilesList.c_str() );
+  std::vector< std::pair< std::string, std::string > > lines;
 
   auto chargingPriority = c.getCurrentChargingPriority();
   if ( chargingPriority && !chargingPriority->empty() )
-    printVal( "Charging priority:", chargingPriority );
+    lines.emplace_back( "Charging priority:", *chargingPriority );
 
   auto prioritiesAvail = c.getChargingPrioritiesAvailable();
   if ( prioritiesAvail )
   {
     std::string plist = jsonArrayToList( *prioritiesAvail );
     if ( !plist.empty() )
-      std::printf( "  %-24s %s\n", "Available priorities:", plist.c_str() );
+      lines.emplace_back( "Available priorities:", plist );
   }
 
   auto chargeType = c.getChargeType();
   if ( chargeType && *chargeType != "Unknown" && *chargeType != "N/A" && !chargeType->empty() )
-    printVal( "Charge type:",       chargeType );
+    lines.emplace_back( "Charge type:", *chargeType );
 
-  auto endAvail = c.getChargeEndAvailableThresholds();
-  bool hasThr = false;
-  if ( endAvail )
-  {
-    QJsonDocument td = QJsonDocument::fromJson( QByteArray::fromStdString( *endAvail ) );
-    hasThr = td.isArray() && !td.array().isEmpty();
-  }
-  if ( hasThr )
+  if ( jsonArrayHasEntries( c.getChargeEndAvailableThresholds() ) )
   {
     auto chargeStart = c.getChargeStartThreshold();
     auto chargeEnd   = c.getChargeEndThreshold();
     if ( chargeStart && *chargeStart >= 0 )
-      printVal( "Charge start thr.:", chargeStart, "%" );
+      lines.emplace_back( "Charge start thr.:", std::to_string( *chargeStart ) + " %" );
     if ( chargeEnd && *chargeEnd >= 0 )
-      printVal( "Charge end thr.:",   chargeEnd,   "%" );
+      lines.emplace_back( "Charge end thr.:", std::to_string( *chargeEnd ) + " %" );
   }
 
-  return 0;
-}
+  if ( lines.empty() )
+  {
+    std::puts( "Charging control: not available on this hardware" );
+    return 0;
+  }
 
-static int cmdChargingSetProfile( ucc::UccdClient &c, const char *profile )
-{
-  ok( c.setChargingProfile( profile ) );
+  std::puts( "=== Charging ===" );
+  for ( const auto &[label, value] : lines )
+    std::printf( "  %-24s %s\n", label.c_str(), value.c_str() );
+
   return 0;
 }
 
@@ -1423,18 +1110,10 @@ static int cmdStateMapGet( ucc::UccdClient &c )
     std::printf( "    %-24s %s\n", "CPU settings:", obj["cpuSettingsEnabled"].toBool() ? "enabled" : "disabled" );
   if ( obj.contains( "fanControlEnabled" ) )
     std::printf( "    %-24s %s\n", "Fan control:", obj["fanControlEnabled"].toBool() ? "enabled" : "disabled" );
-  if ( obj.contains( "keyboardBacklightControlSupported" ) )
-    std::printf( "    %-24s %s\n", "Keyboard backlight:", obj["keyboardBacklightControlSupported"].toBool() ? "enabled" : "disabled" );
   if ( obj.contains( "fahrenheit" ) )
     std::printf( "    %-24s %s\n", "Temperature unit:", obj["fahrenheit"].toBool() ? "Fahrenheit" : "Celsius" );
 
   // Charging
-  if ( obj.contains( "chargingProfile" ) )
-  {
-    QString cp = obj["chargingProfile"].toString();
-    if ( !cp.isEmpty() )
-      std::printf( "    %-24s %s\n", "Charging profile:", cp.toStdString().c_str() );
-  }
   if ( obj.contains( "chargingPriority" ) && !obj["chargingPriority"].isNull() )
   {
     QString cp = obj["chargingPriority"].toString();
@@ -1556,8 +1235,6 @@ static void printUsage()
     "Hardware controls:\n"
     "  brightness get                Get display brightness (0-100)\n"
     "  brightness set <VALUE>        Set display brightness (0-100)\n"
-    "  webcam get                    Get webcam status\n"
-    "  webcam set <on|off>           Enable/disable webcam\n"
     "\n"
     "Water cooler:\n"
     "  watercooler status            Show water cooler status\n"
@@ -1572,7 +1249,6 @@ static void printUsage()
     "\n"
     "Charging:\n"
     "  charging status               Show charging info\n"
-    "  charging set-profile <DESC>   Set charging profile\n"
     "  charging set-priority <DESC>  Set charging priority\n"
     "  charging set-thresholds <START> <END>\n"
     "                                Set charge start/end thresholds (%)\n"
@@ -1594,21 +1270,6 @@ static void printUsage()
 static bool matchArg( const char *arg, const char *name )
 {
   return std::strcmp( arg, name ) == 0;
-}
-
-static bool parseBool( const char *s, bool &out )
-{
-  if ( matchArg( s, "on" ) || matchArg( s, "true" ) || matchArg( s, "1" ) || matchArg( s, "yes" ) || matchArg( s, "enable" ) || matchArg( s, "enabled" ) )
-  {
-    out = true;
-    return true;
-  }
-  if ( matchArg( s, "off" ) || matchArg( s, "false" ) || matchArg( s, "0" ) || matchArg( s, "no" ) || matchArg( s, "disable" ) || matchArg( s, "disabled" ) )
-  {
-    out = false;
-    return true;
-  }
-  return false;
 }
 
 // Status JSON mode
@@ -1658,7 +1319,6 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   // Hardware
   QJsonObject hw;
   auto b = c.getDisplayBrightness(); if ( b ) hw["displayBrightness"] = *b;
-  auto w = c.getWebcamEnabled();     if ( w ) hw["webcamEnabled"]     = *w;
   root["hardware"] = hw;
 
   // Water cooler
@@ -1678,33 +1338,16 @@ static int cmdStatusJSON( ucc::UccdClient &c )
     root["waterCooler"] = wc;
   }
 
-  // Charging - mirror GUI logic
-  auto chargingProfilesAvail = c.getChargingProfilesAvailable();
-  bool hasChargingJ = false;
-  if ( chargingProfilesAvail )
-  {
-    QJsonDocument chDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *chargingProfilesAvail ) );
-    hasChargingJ = chDoc.isArray() && !chDoc.array().isEmpty();
-  }
-  if ( hasChargingJ )
+  // Charging
   {
     QJsonObject ch;
-    auto cp = c.getCurrentChargingProfile();
-    if ( cp && !cp->empty() ) ch["profile"]  = QString::fromStdString( *cp );
     auto cr = c.getCurrentChargingPriority();
     if ( cr && !cr->empty() ) ch["priority"] = QString::fromStdString( *cr );
     auto ct = c.getChargeType();
     if ( ct && *ct != "Unknown" && *ct != "N/A" && !ct->empty() )
       ch["type"] = QString::fromStdString( *ct );
 
-    auto endAvailJ = c.getChargeEndAvailableThresholds();
-    bool hasThrJ = false;
-    if ( endAvailJ )
-    {
-      QJsonDocument td = QJsonDocument::fromJson( QByteArray::fromStdString( *endAvailJ ) );
-      hasThrJ = td.isArray() && !td.array().isEmpty();
-    }
-    if ( hasThrJ )
+    if ( jsonArrayHasEntries( c.getChargeEndAvailableThresholds() ) )
     {
       auto cs = c.getChargeStartThreshold(); if ( cs && *cs >= 0 ) ch["startThreshold"] = *cs;
       auto ce = c.getChargeEndThreshold();   if ( ce && *ce >= 0 ) ch["endThreshold"]   = *ce;
@@ -1887,48 +1530,6 @@ int main( int argc, char *argv[] )
     return 1;
   }
 
-  // keyboard ...
-  if ( matchArg( cmd, "keyboard" ) || matchArg( cmd, "kb" ) )
-  {
-    if ( args.size() < 2 )
-    {
-      std::fputs( "Usage: ucc-cli keyboard <info|get|set|color|profiles|activate>\n", stderr );
-      return 1;
-    }
-    const char *sub = args[1];
-    if ( matchArg( sub, "info" ) || matchArg( sub, "caps" ) )
-      return cmdKeyboardInfo( client );
-    if ( matchArg( sub, "get" ) || matchArg( sub, "show" ) )
-      return cmdKeyboardGet( client );
-    if ( matchArg( sub, "set" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli keyboard set <JSON>\n", stderr ); return 1; }
-      return cmdKeyboardSet( client, args[2] );
-    }
-    if ( matchArg( sub, "profiles" ) || matchArg( sub, "profile-list" ) || matchArg( sub, "ls" ) )
-      return cmdKeyboardProfileList( client );
-    if ( matchArg( sub, "activate" ) || matchArg( sub, "use" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli keyboard activate <PROFILE_ID>\n", stderr ); return 1; }
-      return cmdKeyboardProfileSet( client, args[2] );
-    }
-    if ( matchArg( sub, "color" ) )
-    {
-      if ( args.size() < 5 )
-      {
-        std::fputs( "Usage: ucc-cli keyboard color <R> <G> <B> [BRIGHTNESS]\n", stderr );
-        return 1;
-      }
-      int r = std::atoi( args[2] );
-      int g = std::atoi( args[3] );
-      int b = std::atoi( args[4] );
-      int brightness = ( args.size() > 5 ) ? std::atoi( args[5] ) : 128;
-      return cmdKeyboardColor( client, r, g, b, brightness );
-    }
-    std::fprintf( stderr, "Unknown keyboard subcommand: %s\n", sub );
-    return 1;
-  }
-
   // brightness ...
   if ( matchArg( cmd, "brightness" ) || matchArg( cmd, "br" ) )
   {
@@ -1946,28 +1547,6 @@ int main( int argc, char *argv[] )
       return cmdBrightnessSet( client, std::atoi( args[2] ) );
     }
     std::fprintf( stderr, "Unknown brightness subcommand: %s\n", sub );
-    return 1;
-  }
-
-  // webcam ...
-  if ( matchArg( cmd, "webcam" ) )
-  {
-    if ( args.size() < 2 )
-    {
-      std::fputs( "Usage: ucc-cli webcam <get|set>\n", stderr );
-      return 1;
-    }
-    const char *sub = args[1];
-    if ( matchArg( sub, "get" ) )
-      return cmdWebcamGet( client );
-    if ( matchArg( sub, "set" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli webcam set <on|off>\n", stderr ); return 1; }
-      bool v;
-      if ( !parseBool( args[2], v ) ) { std::fputs( "Error: expected on/off\n", stderr ); return 1; }
-      return cmdWebcamSet( client, v );
-    }
-    std::fprintf( stderr, "Unknown webcam subcommand: %s\n", sub );
     return 1;
   }
 
@@ -2017,17 +1596,12 @@ int main( int argc, char *argv[] )
   {
     if ( args.size() < 2 )
     {
-      std::fputs( "Usage: ucc-cli charging <status|set-profile|set-priority|set-thresholds>\n", stderr );
+      std::fputs( "Usage: ucc-cli charging <status|set-priority|set-thresholds>\n", stderr );
       return 1;
     }
     const char *sub = args[1];
     if ( matchArg( sub, "status" ) )
       return cmdChargingStatus( client );
-    if ( matchArg( sub, "set-profile" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli charging set-profile <DESCRIPTOR>\n", stderr ); return 1; }
-      return cmdChargingSetProfile( client, args[2] );
-    }
     if ( matchArg( sub, "set-priority" ) )
     {
       if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli charging set-priority <DESCRIPTOR>\n", stderr ); return 1; }

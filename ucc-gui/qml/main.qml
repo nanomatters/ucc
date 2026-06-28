@@ -138,19 +138,6 @@
                         }
                     }
 
-                    GroupBox {
-                        title: qsTr("Quick Controls")
-                        Layout.fillWidth: true
-
-                        RowLayout {
-                            Switch {
-                                text: qsTr("Webcam")
-                                checked: systemMonitor.webcamEnabled
-                                onToggled: systemMonitor.webcamEnabled = checked
-                            }
-                        }
-                    }
-
                     Item {
                         Layout.fillHeight: true
                     }

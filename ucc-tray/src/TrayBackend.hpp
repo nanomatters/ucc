@@ -301,10 +301,10 @@ private:
   QString m_activeProfileId;
   QString m_activeProfileName;
   QString m_powerState;
-  bool m_keyboardBacklightControlSupported = true;
+  bool m_keyboardBacklightControlSupported = false;
 
   // Hardware toggles
-  bool m_webcamEnabled = true;
+  bool m_webcamEnabled = false;
   bool m_fnLock = false;
   int m_displayBrightness = 50;
 

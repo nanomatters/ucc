@@ -18,7 +18,6 @@
 #include <QWidget>
 #include <QLabel>
 #include <QSlider>
-#include <QCheckBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -47,11 +46,9 @@ public:
 
 private slots:
     void onDisplayBrightnessSliderChanged( int value );
-    void onWebcamToggled( bool checked );
 
     // Feedback from daemon via SystemMonitor
     void onDisplayBrightnessUpdated();
-    void onWebcamEnabledUpdated();
 
 private:
     void setupUI( QWidget *parent );
@@ -64,9 +61,6 @@ private:
     // Display controls
     QSlider *m_displayBrightnessSlider = nullptr;
     QLabel *m_displayBrightnessValueLabel = nullptr;
-
-    // Quick controls
-    QCheckBox *m_webcamCheckBox = nullptr;
 };
 
 }

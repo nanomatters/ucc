@@ -302,29 +302,7 @@ void TrayBackend::setActiveFanProfile( const QString &fanProfileId )
 
 void TrayBackend::setActiveKeyboardProfile( const QString &keyboardProfileId )
 {
-  auto it = std::ranges::find_if( m_keyboardProfilesData, [&]( const QJsonValue &val ) {
-    return val.toObject()[ "id" ].toString() == keyboardProfileId;
-  } );
-  if ( it != m_keyboardProfilesData.end() )
-  {
-    auto profileData = it->toObject()[ "json" ].toString();
-    if ( !profileData.isEmpty() )
-    {
-      QJsonDocument doc = QJsonDocument::fromJson( profileData.toUtf8() );
-      if ( doc.isObject() )
-      {
-        QJsonObject obj = doc.object();
-        // Inject the keyboard profile ID so uccd can notify subscribers
-        obj[ "keyboardProfileId" ] = keyboardProfileId;
-        m_client->setKeyboardBacklight(
-          QJsonDocument( obj ).toJson( QJsonDocument::Compact ).toStdString() );
-      }
-    }
-  }
-  m_keyboardProfileOverride = true;
-  m_activeProfileKeyboardId = keyboardProfileId;
-  m_activeProfileKeyboardName = resolveKeyboardProfileName( keyboardProfileId );
-  emit activeProfileChanged();
+  Q_UNUSED( keyboardProfileId );
 }
 
 void TrayBackend::setODMPerformanceProfile( const QString &profile )
@@ -470,15 +448,6 @@ void TrayBackend::pollSlowState()
         changed = true;
       }
 
-      // Extract keyboard profile reference - skip if user manually overrode it
-      auto kbId = obj[ "selectedKeyboardProfile" ].toString();
-      if ( !m_keyboardProfileOverride && kbId != m_activeProfileKeyboardId )
-      {
-        m_activeProfileKeyboardId = kbId;
-        m_activeProfileKeyboardName = resolveKeyboardProfileName( kbId );
-        changed = true;
-      }
-
       if ( changed )
         emit activeProfileChanged();
     }
@@ -501,12 +470,7 @@ void TrayBackend::pollSlowState()
     }
   }
 
-  // Hardware toggles
-  if ( auto v = m_client->getWebcamEnabled(); v && *v != m_webcamEnabled )
-  {
-    m_webcamEnabled = *v;
-    emit webcamEnabledChanged();
-  }
+  // Hardware controls
   if ( auto v = m_client->getDisplayBrightness(); v && *v != m_displayBrightness )
   {
     m_displayBrightness = *v;
@@ -532,6 +496,8 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
                                           const QString &keyboardProfileId,
                                           const QString &fanProfileId )
 {
+  Q_UNUSED( keyboardProfileId );
+
   bool changed = false;
 
   if ( profileId != m_activeProfileId )
@@ -543,14 +509,6 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
     m_fanProfileOverride = false;
     m_keyboardProfileOverride = false;
     m_wcEnabledOverride = false;
-    changed = true;
-  }
-
-  if ( !keyboardProfileId.isEmpty() && keyboardProfileId != m_activeProfileKeyboardId )
-  {
-    m_keyboardProfileOverride = false;
-    m_activeProfileKeyboardId = keyboardProfileId;
-    m_activeProfileKeyboardName = resolveKeyboardProfileName( keyboardProfileId );
     changed = true;
   }
 
@@ -755,7 +713,7 @@ void TrayBackend::loadCapabilities()
   }
 }
 
-// Local settings loaders (custom fan + keyboard profiles from ~/.config/uccrc)
+// Local settings loaders (custom fan profiles from ~/.config/uccrc)
 
 void TrayBackend::loadLocalProfiles()
 {
@@ -814,61 +772,15 @@ void TrayBackend::loadLocalProfiles()
   if ( !m_activeProfileFanId.isEmpty() )
     m_activeProfileFanName = resolveFanProfileName( m_activeProfileFanId );
 
-  // 2. Keyboard Profiles (Built-in + Custom from Daemon)
+  // Keyboard hardware support is intentionally disabled for the uniwill-only port.
+  if ( !m_keyboardProfileIds.isEmpty() || !m_keyboardProfileNames.isEmpty() ||
+       !m_keyboardProfilesData.isEmpty() )
   {
-    QStringList kpNames, kpIds;
-    QJsonArray  kpData;
-
-    // Load from Daemon (Primary source)
-    if ( auto json = m_client->getCustomKeyboardProfiles() )
-    {
-      auto doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
-      if ( doc.isArray() )
-      {
-        for ( const auto &val : doc.array() )
-        {
-          auto obj = val.toObject();
-          QString id   = obj[ "id" ].toString();
-          QString name = obj[ "name" ].toString();
-          if ( id.isEmpty() ) continue;
-          kpIds.append( id );
-          kpNames.append( name );
-          kpData.append( obj );
-        }
-      }
-    }
-
-    // Merge legacy local ones if not already present by ID
-    if ( QFile::exists( uccrcPath ) )
-    {
-      QSettings settings( uccrcPath, QSettings::IniFormat );
-      QByteArray kbRaw = settings.value( "customKeyboardProfiles", "[]" ).toByteArray();
-      auto doc = QJsonDocument::fromJson( kbRaw );
-      if ( doc.isArray() )
-      {
-        for ( const auto &val : doc.array() )
-        {
-          auto obj = val.toObject();
-          QString id = obj[ "id" ].toString();
-          if ( id.isEmpty() || kpIds.contains( id ) ) continue;
-          kpIds.append( id );
-          kpNames.append( obj[ "name" ].toString() );
-          kpData.append( obj );
-        }
-      }
-    }
-
-    if ( kpIds != m_keyboardProfileIds || kpNames != m_keyboardProfileNames )
-    {
-      m_keyboardProfileIds   = kpIds;
-      m_keyboardProfileNames = kpNames;
-      m_keyboardProfilesData = kpData;
-      emit keyboardProfilesChanged();
-    }
+    m_keyboardProfileIds.clear();
+    m_keyboardProfileNames.clear();
+    m_keyboardProfilesData = {};
+    emit keyboardProfilesChanged();
   }
-
-  if ( !m_activeProfileKeyboardId.isEmpty() )
-    m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
 }
 
 // Resolvers: fan & keyboard profile ID -> display name

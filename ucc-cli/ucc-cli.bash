@@ -24,16 +24,15 @@ _ucc_cli()
     local cur prev words cword
     _init_completion || return
 
-    local commands="status monitor cpu gpu power-limits profile statemap fan brightness webcam watercooler charging help version"
+    local commands="status monitor cpu gpu power-limits profile statemap fan brightness watercooler charging help version"
 
     # Sub-commands per top-level command
     local profile_cmds="list get set defaults customs apply save delete"
     local statemap_cmds="get set"
     local fan_cmds="list get set apply revert"
     local brightness_cmds="get set"
-    local webcam_cmds="get set"
     local watercooler_cmds="status enable disable fan pump led led-off"
-    local charging_cmds="status set-profile set-priority set-thresholds"
+    local charging_cmds="status set-priority set-thresholds"
 
     # Global flags
     local global_flags="--json --help --version"
@@ -75,9 +74,6 @@ _ucc_cli()
             brightness|br)
                 COMPREPLY=( $(compgen -W "$brightness_cmds" -- "$cur") )
                 return ;;
-            webcam)
-                COMPREPLY=( $(compgen -W "$webcam_cmds" -- "$cur") )
-                return ;;
             watercooler|wc)
                 COMPREPLY=( $(compgen -W "$watercooler_cmds" -- "$cur") )
                 return ;;
@@ -116,11 +112,6 @@ _ucc_cli()
                     return ;;
             esac
             ;;
-        webcam)
-            case "$subcmd" in
-                set) COMPREPLY=( $(compgen -W "on off" -- "$cur") ); return ;;
-            esac
-            ;;
         watercooler|wc)
             case "$subcmd" in
                 enable|on|disable|off|fan|pump|led|led-off) ;;  # no further completion
@@ -128,8 +119,8 @@ _ucc_cli()
             ;;
         charging|charge)
             case "$subcmd" in
-                set-profile|set-priority)
-                    COMPREPLY=( $(compgen -W "high_capacity balanced stationary" -- "$cur") )
+                set-priority)
+                    COMPREPLY=( $(compgen -W "charging performance" -- "$cur") )
                     return ;;
             esac
             ;;

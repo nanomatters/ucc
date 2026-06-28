@@ -12,7 +12,7 @@ ucc-cli \- command-line interface for Uniwill Control Center
 is a command-line client for the Uniwill Control Center daemon
 .RB ( uccd ).
 It communicates over D-Bus to query and control CPU/GPU performance profiles,
-fan curves, display brightness, webcam, water cooler hardware, and battery
+fan curves, display brightness, water cooler hardware, and battery
 charging settings on Uniwill laptops.
 .PP
 The daemon must be running for any command to succeed.
@@ -117,12 +117,6 @@ Print the current display brightness (0\-100).
 .TP
 .B brightness set \fIVALUE\fR
 Set display brightness (0\-100).
-.TP
-.B webcam get
-Print webcam status (\fBenabled\fR or \fBdisabled\fR).
-.TP
-.B webcam set \fIon\fR|\fIoff\fR
-Enable or disable the webcam.
 .SS Water Cooler
 These commands control the Uniwill LCT water cooling system (if supported).
 .TP
@@ -158,11 +152,8 @@ Turn off the water cooler LED.
 .SS Charging
 .TP
 .B charging status
-Print charging profile, priority, type, and charge thresholds.
+Print charging priority, type, and charge thresholds.
 Only shown if the hardware supports charging control.
-.TP
-.B charging set-profile \fIDESCRIPTOR\fR
-Set the firmware-level charging profile.
 .TP
 .B charging set-priority \fIDESCRIPTOR\fR
 Set the USB-C PD charging priority.
@@ -219,8 +210,7 @@ systemctl enable uccd
 .SH FILES
 .TP
 .I ~/.config/uccrc
-Local user configuration (custom profiles, fan profiles, keyboard profiles,
-state map).
+Local user configuration (custom profiles, fan profiles, state map).
 Shared with
 .B ucc-gui
 and
