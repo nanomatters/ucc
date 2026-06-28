@@ -102,7 +102,7 @@ public:
   std::string device;
   std::string displayModes;
   std::atomic< bool > isX11;
-  std::atomic< bool > tuxedoWmiAvailable;
+  std::atomic< bool > uniwillDriverAvailable;
   std::atomic< bool > fanHwmonAvailable;
   std::string uccdVersion;
   std::string systemInfoJSON;
@@ -160,7 +160,7 @@ public:
     : device( "unknown" ),
       displayModes( "[]" ),
       isX11( false ),
-      tuxedoWmiAvailable( false ),
+      uniwillDriverAvailable( false ),
       fanHwmonAvailable( false ),
       uccdVersion( "0.0.0" ),
       fans( static_cast< size_t >( numberFans ) ),
@@ -261,6 +261,7 @@ public slots:
   bool IsDeviceSupported();
   QString GetDisplayModesJSON();
   bool GetIsX11();
+  bool UniwillDriverAvailable();
   bool TuxedoWmiAvailable();
   bool FanHwmonAvailable();
   QString UccdVersion();

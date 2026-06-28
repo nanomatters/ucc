@@ -382,9 +382,14 @@ bool UccDBusInterfaceAdaptor::GetIsX11()
   return m_data.isX11;
 }
 
+bool UccDBusInterfaceAdaptor::UniwillDriverAvailable()
+{
+  return m_data.uniwillDriverAvailable;
+}
+
 bool UccDBusInterfaceAdaptor::TuxedoWmiAvailable()
 {
-  return m_data.tuxedoWmiAvailable;
+  return UniwillDriverAvailable();
 }
 
 bool UccDBusInterfaceAdaptor::FanHwmonAvailable()
@@ -1963,9 +1968,9 @@ UccDBusService::UccDBusService()
   // detect display session type and initialize display modes
   initializeDisplayModes();
 
-  // Keep the legacy D-Bus property populated as "uniwill driver available"
-  // until the public interface is renamed.
-  m_dbusData.tuxedoWmiAvailable = m_uniwillDriverAvailable;
+  // Expose driver availability through the uniwill D-Bus method. The legacy
+  // TuxedoWmiAvailable() method remains as an alias for older clients.
+  m_dbusData.uniwillDriverAvailable = m_uniwillDriverAvailable;
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
@@ -2678,8 +2683,8 @@ void UccDBusService::onWork()
   if ( !m_dbusData.deviceSupported.load() )
     return;
 
-  // Legacy D-Bus property; see constructor comment.
-  m_dbusData.tuxedoWmiAvailable = m_uniwillDriverAvailable;
+  // Keep the driver availability cache visible to D-Bus clients.
+  m_dbusData.uniwillDriverAvailable = m_uniwillDriverAvailable;
 
   // Periodic NVIDIA cTGP offset validation (every 5 ticks = 5 s)
   if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )

@@ -2,8 +2,7 @@
  * SPDX-FileCopyrightText: 2026 Uniwill Control Center Contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Hardware tab — quick toggle controls for webcam, Fn Lock,
- * and display brightness.
+ * Hardware tab — quick toggle controls for webcam and display brightness.
  */
 
 import QtQuick
@@ -43,20 +42,6 @@ PC3.ScrollView {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.gridUnit
-
-                RowLayout {
-                    spacing: Kirigami.Units.smallSpacing
-                    PC3.Label { text: i18n("Fn Lock") }
-                    PC3.Switch {
-                        id: fnLockSwitch
-                        checked: hwTab.backend.fnLock
-                        Connections {
-                            target: hwTab.backend
-                            function onFnLockChanged() { fnLockSwitch.checked = hwTab.backend.fnLock }
-                        }
-                        onToggled: hwTab.backend.setFnLock(checked)
-                    }
-                }
 
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing

@@ -304,7 +304,6 @@ static int cmdStatus( ucc::UccdClient &c )
   std::puts( "--- Hardware ---" );
   printVal( "Display brightness:", c.getDisplayBrightness(), "%" );
   printVal( "Webcam enabled:",     c.getWebcamEnabled() );
-  printVal( "Fn Lock:",            c.getFnLock() );
 
   auto wcSupported = c.getWaterCoolerSupported();
   if ( wcSupported && *wcSupported )
@@ -1199,24 +1198,6 @@ static int cmdWebcamSet( ucc::UccdClient &c, bool enabled )
   return 0;
 }
 
-static int cmdFnLockGet( ucc::UccdClient &c )
-{
-  auto v = c.getFnLock();
-  if ( !v )
-  {
-    std::fputs( "Error: Could not read Fn Lock status\n", stderr );
-    return 1;
-  }
-  std::puts( *v ? "on" : "off" );
-  return 0;
-}
-
-static int cmdFnLockSet( ucc::UccdClient &c, bool enabled )
-{
-  ok( c.setFnLock( enabled ) );
-  return 0;
-}
-
 // Water Cooler
 
 static int cmdWaterCoolerStatus( ucc::UccdClient &c )
@@ -1572,22 +1553,11 @@ static void printUsage()
     "  fan apply <JSON>              Apply fan curves (keys: cpu, gpu, pump, waterCoolerFan)\n"
     "  fan revert                    Revert to saved fan profile\n"
     "\n"
-    "Keyboard backlight:\n"
-    "  keyboard info                 Show keyboard backlight capabilities\n"
-    "  keyboard get                  Show current per-zone backlight states\n"
-    "  keyboard set <JSON>           Set per-zone backlight states (JSON array)\n"
-    "  keyboard color <R> <G> <B> [BRIGHTNESS]\n"
-    "                                Set uniform color (0-255 each, brightness default 128)\n"
-    "  keyboard profiles             List custom keyboard profiles\n"
-    "  keyboard activate <ID>        Activate a keyboard profile by ID\n"
-    "\n"
     "Hardware controls:\n"
     "  brightness get                Get display brightness (0-100)\n"
     "  brightness set <VALUE>        Set display brightness (0-100)\n"
     "  webcam get                    Get webcam status\n"
     "  webcam set <on|off>           Enable/disable webcam\n"
-    "  fnlock get                    Get Fn Lock status\n"
-    "  fnlock set <on|off>           Enable/disable Fn Lock\n"
     "\n"
     "Water cooler:\n"
     "  watercooler status            Show water cooler status\n"
@@ -1689,7 +1659,6 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   QJsonObject hw;
   auto b = c.getDisplayBrightness(); if ( b ) hw["displayBrightness"] = *b;
   auto w = c.getWebcamEnabled();     if ( w ) hw["webcamEnabled"]     = *w;
-  auto f = c.getFnLock();            if ( f ) hw["fnLock"]            = *f;
   root["hardware"] = hw;
 
   // Water cooler
@@ -1999,28 +1968,6 @@ int main( int argc, char *argv[] )
       return cmdWebcamSet( client, v );
     }
     std::fprintf( stderr, "Unknown webcam subcommand: %s\n", sub );
-    return 1;
-  }
-
-  // fnlock ...
-  if ( matchArg( cmd, "fnlock" ) || matchArg( cmd, "fn-lock" ) )
-  {
-    if ( args.size() < 2 )
-    {
-      std::fputs( "Usage: ucc-cli fnlock <get|set>\n", stderr );
-      return 1;
-    }
-    const char *sub = args[1];
-    if ( matchArg( sub, "get" ) )
-      return cmdFnLockGet( client );
-    if ( matchArg( sub, "set" ) )
-    {
-      if ( args.size() < 3 ) { std::fputs( "Usage: ucc-cli fnlock set <on|off>\n", stderr ); return 1; }
-      bool v;
-      if ( !parseBool( args[2], v ) ) { std::fputs( "Error: expected on/off\n", stderr ); return 1; }
-      return cmdFnLockSet( client, v );
-    }
-    std::fprintf( stderr, "Unknown fnlock subcommand: %s\n", sub );
     return 1;
   }
 

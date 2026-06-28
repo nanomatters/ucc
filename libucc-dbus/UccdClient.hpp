@@ -51,6 +51,7 @@ public:
   // System Information
   std::optional< std::string > getSystemInfoJSON();
   std::optional< bool > isDeviceSupported();
+  std::optional< bool > isUniwillDriverAvailable();
 
   // Profile Management
   std::optional< std::string > getDefaultProfilesJSON();

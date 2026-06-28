@@ -45,11 +45,8 @@ void HardwareTab::setupUI( QWidget *parent )
   QGroupBox *quickControlsGroup = new QGroupBox( "General Quick Controls" );
   QHBoxLayout *controlsLayout = new QHBoxLayout( quickControlsGroup );
   m_webcamCheckBox = new QCheckBox( "Webcam Enabled" );
-  m_fnLockCheckBox = new QCheckBox( "Fn Lock Enabled" );
   m_webcamCheckBox->setLayoutDirection( Qt::RightToLeft );
-  m_fnLockCheckBox->setLayoutDirection( Qt::RightToLeft );
   controlsLayout->addWidget( m_webcamCheckBox );
-  controlsLayout->addWidget( m_fnLockCheckBox );
   QLabel *brightnessLabel = new QLabel( "Display Brightness:" );
   m_displayBrightnessSlider = new QSlider( Qt::Horizontal );
   m_displayBrightnessSlider->setMinimum( 0 );
@@ -77,9 +74,6 @@ void HardwareTab::connectSignals()
   connect( m_webcamCheckBox, &QCheckBox::toggled,
            this, &HardwareTab::onWebcamToggled );
 
-  connect( m_fnLockCheckBox, &QCheckBox::toggled,
-           this, &HardwareTab::onFnLockToggled );
-
   // Inbound: daemon state -> widgets
   if ( m_systemMonitor )
   {
@@ -87,8 +81,6 @@ void HardwareTab::connectSignals()
              this, &HardwareTab::onDisplayBrightnessUpdated );
     connect( m_systemMonitor, &SystemMonitor::webcamEnabledChanged,
              this, &HardwareTab::onWebcamEnabledUpdated );
-    connect( m_systemMonitor, &SystemMonitor::fnLockChanged,
-             this, &HardwareTab::onFnLockUpdated );
   }
 }
 
@@ -107,7 +99,6 @@ void HardwareTab::initializeFromMonitor()
   }
 
   m_webcamCheckBox->setChecked( m_systemMonitor->webcamEnabled() );
-  m_fnLockCheckBox->setChecked( m_systemMonitor->fnLock() );
 
   m_updatingFromMonitor = false;
 }
@@ -137,15 +128,6 @@ void HardwareTab::onWebcamToggled( bool checked )
     m_systemMonitor->setWebcamEnabled( checked );
 }
 
-void HardwareTab::onFnLockToggled( bool checked )
-{
-  if ( m_updatingFromMonitor )
-    return;
-
-  if ( m_systemMonitor )
-    m_systemMonitor->setFnLock( checked );
-}
-
 void HardwareTab::onDisplayBrightnessUpdated()
 {
   if ( not m_systemMonitor )
@@ -165,16 +147,6 @@ void HardwareTab::onWebcamEnabledUpdated()
 
   m_updatingFromMonitor = true;
   m_webcamCheckBox->setChecked( m_systemMonitor->webcamEnabled() );
-  m_updatingFromMonitor = false;
-}
-
-void HardwareTab::onFnLockUpdated()
-{
-  if ( not m_systemMonitor )
-    return;
-
-  m_updatingFromMonitor = true;
-  m_fnLockCheckBox->setChecked( m_systemMonitor->fnLock() );
   m_updatingFromMonitor = false;
 }
 

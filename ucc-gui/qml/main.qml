@@ -148,12 +148,6 @@
                                 checked: systemMonitor.webcamEnabled
                                 onToggled: systemMonitor.webcamEnabled = checked
                             }
-
-                            Switch {
-                                text: qsTr("Fn Lock")
-                                checked: systemMonitor.fnLock
-                                onToggled: systemMonitor.fnLock = checked
-                            }
                         }
                     }
 

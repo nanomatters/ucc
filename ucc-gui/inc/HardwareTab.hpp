@@ -48,12 +48,10 @@ public:
 private slots:
     void onDisplayBrightnessSliderChanged( int value );
     void onWebcamToggled( bool checked );
-    void onFnLockToggled( bool checked );
 
     // Feedback from daemon via SystemMonitor
     void onDisplayBrightnessUpdated();
     void onWebcamEnabledUpdated();
-    void onFnLockUpdated();
 
 private:
     void setupUI( QWidget *parent );
@@ -69,7 +67,6 @@ private:
 
     // Quick controls
     QCheckBox *m_webcamCheckBox = nullptr;
-    QCheckBox *m_fnLockCheckBox = nullptr;
 };
 
 }

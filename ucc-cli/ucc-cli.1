@@ -12,8 +12,8 @@ ucc-cli \- command-line interface for Uniwill Control Center
 is a command-line client for the Uniwill Control Center daemon
 .RB ( uccd ).
 It communicates over D-Bus to query and control CPU/GPU performance profiles,
-fan curves, keyboard backlighting, display brightness, webcam, Fn Lock,
-water cooler hardware, and battery charging settings on Uniwill laptops.
+fan curves, display brightness, webcam, water cooler hardware, and battery
+charging settings on Uniwill laptops.
 .PP
 The daemon must be running for any command to succeed.
 Check with
@@ -110,36 +110,6 @@ The JSON must contain keys:
 .TP
 .B fan revert
 Revert fan curves to the profile stored in the daemon.
-.SS Keyboard Backlight
-.TP
-.B keyboard info
-Print keyboard backlight capabilities (zone count, max brightness, max RGB values).
-.TP
-.B keyboard get
-Print the current per-zone backlight state as a JSON array.
-.TP
-.B keyboard set \fIJSON\fR
-Set per-zone backlight states from a JSON array.
-Each element:
-.nf
-  { "mode": 0, "brightness": N, "red": R, "green": G, "blue": B }
-.fi
-.TP
-.B keyboard color \fIR\fR \fIG\fR \fIB\fR [\fIBRIGHTNESS\fR]
-Set a uniform colour across all keyboard zones.
-.IR R ,
-.IR G ,
-.I B
-are 0\-255.
-.I BRIGHTNESS
-defaults to 128.
-.TP
-.B keyboard profiles
-List custom keyboard profiles (from local settings) with their UUIDs and names.
-.TP
-.B keyboard activate \fIPROFILE_ID\fR
-Activate a custom keyboard profile by its UUID.
-The profile's backlight data is sent to the daemon.
 .SS Hardware Controls
 .TP
 .B brightness get
@@ -153,12 +123,6 @@ Print webcam status (\fBenabled\fR or \fBdisabled\fR).
 .TP
 .B webcam set \fIon\fR|\fIoff\fR
 Enable or disable the webcam.
-.TP
-.B fnlock get
-Print Fn Lock status (\fBon\fR or \fBoff\fR).
-.TP
-.B fnlock set \fIon\fR|\fIoff\fR
-Enable or disable Fn Lock.
 .SS Water Cooler
 These commands control the Uniwill LCT water cooling system (if supported).
 .TP
@@ -287,14 +251,6 @@ ucc-cli profile set 01234567-abcd-ef01-2345-6789abcdef01
 .fi
 .RE
 .PP
-Set keyboard to solid red at full brightness:
-.PP
-.RS
-.nf
-ucc-cli keyboard color 255 0 0 255
-.fi
-.RE
-.PP
 Get full status as JSON (for scripting):
 .PP
 .RS
@@ -328,14 +284,6 @@ ucc-cli fan set 01234567-abcd-ef01-2345-6789abcdef01
 .fi
 .RE
 .PP
-List and activate a keyboard profile:
-.PP
-.RS
-.nf
-ucc-cli keyboard profiles
-ucc-cli keyboard activate 01234567-abcd-ef01-2345-6789abcdef01
-.fi
-.RE
 .SH SEE ALSO
 .BR uccd (8),
 .BR ucc-gui (1),

@@ -303,14 +303,10 @@ void SystemMonitor::updateMetrics()
     }
   }
 
-  // Get Fn lock status
-  if ( auto fnLock = m_client->getFnLock() )
+  if ( m_fnLock )
   {
-    if ( m_fnLock != *fnLock )
-    {
-      m_fnLock = *fnLock;
-      emit fnLockChanged();
-    }
+    m_fnLock = false;
+    emit fnLockChanged();
   }
 }
 
@@ -334,11 +330,7 @@ void SystemMonitor::setWebcamEnabled( bool enabled )
 
 void SystemMonitor::setFnLock( bool enabled )
 {
-  if ( m_client->setFnLock( enabled ) )
-  {
-    m_fnLock = enabled;
-    emit fnLockChanged();
-  }
+  (void) enabled;
 }
 
 void SystemMonitor::refreshAll()

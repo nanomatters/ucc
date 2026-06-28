@@ -233,6 +233,11 @@ std::optional< bool > UccdClient::isDeviceSupported()
   return callMethod< bool >( "IsDeviceSupported" );
 }
 
+std::optional< bool > UccdClient::isUniwillDriverAvailable()
+{
+  return callMethod< bool >( "UniwillDriverAvailable" );
+}
+
 // Profile Management
 std::optional< std::string > UccdClient::getDefaultProfilesJSON()
 {
@@ -404,15 +409,16 @@ std::optional< bool > UccdClient::getHwpDynamicBoostSupported()
   return callMethod< bool >( "GetHwpDynamicBoostSupported" );
 }
 
-// Fn Lock
+// Keyboard compatibility stubs
 bool UccdClient::setFnLock( bool enabled )
 {
-  return callVoidMethod( "SetFnLockStatus", enabled );
+  (void) enabled;
+  return false;
 }
 
 std::optional< bool > UccdClient::getFnLock()
 {
-  return callMethod< bool >( "GetFnLockStatus" );
+  return false;
 }
 
 // Stub implementations for remaining methods

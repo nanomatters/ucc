@@ -24,16 +24,14 @@ _ucc_cli()
     local cur prev words cword
     _init_completion || return
 
-    local commands="status monitor cpu gpu power-limits profile statemap fan keyboard brightness webcam fnlock watercooler charging help version"
+    local commands="status monitor cpu gpu power-limits profile statemap fan brightness webcam watercooler charging help version"
 
     # Sub-commands per top-level command
     local profile_cmds="list get set defaults customs apply save delete"
     local statemap_cmds="get set"
     local fan_cmds="list get set apply revert"
-    local keyboard_cmds="info get set color profiles activate"
     local brightness_cmds="get set"
     local webcam_cmds="get set"
-    local fnlock_cmds="get set"
     local watercooler_cmds="status enable disable fan pump led led-off"
     local charging_cmds="status set-profile set-priority set-thresholds"
 
@@ -74,17 +72,11 @@ _ucc_cli()
             fan)
                 COMPREPLY=( $(compgen -W "$fan_cmds" -- "$cur") )
                 return ;;
-            keyboard|kb)
-                COMPREPLY=( $(compgen -W "$keyboard_cmds" -- "$cur") )
-                return ;;
             brightness|br)
                 COMPREPLY=( $(compgen -W "$brightness_cmds" -- "$cur") )
                 return ;;
             webcam)
                 COMPREPLY=( $(compgen -W "$webcam_cmds" -- "$cur") )
-                return ;;
-            fnlock|fn-lock)
-                COMPREPLY=( $(compgen -W "$fnlock_cmds" -- "$cur") )
                 return ;;
             watercooler|wc)
                 COMPREPLY=( $(compgen -W "$watercooler_cmds" -- "$cur") )
@@ -124,23 +116,7 @@ _ucc_cli()
                     return ;;
             esac
             ;;
-        keyboard|kb)
-            case "$subcmd" in
-                activate|use)
-                    # Complete with keyboard profile IDs
-                    local -a ids
-                    mapfile -t ids < <(ucc-cli keyboard profiles 2>/dev/null | _ucc_cli_ids)
-                    local IFS=$'\n'
-                    COMPREPLY=( $(compgen -W "${ids[*]}" -- "$cur") )
-                    return ;;
-            esac
-            ;;
         webcam)
-            case "$subcmd" in
-                set) COMPREPLY=( $(compgen -W "on off" -- "$cur") ); return ;;
-            esac
-            ;;
-        fnlock|fn-lock)
             case "$subcmd" in
                 set) COMPREPLY=( $(compgen -W "on off" -- "$cur") ); return ;;
             esac

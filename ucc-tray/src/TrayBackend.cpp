@@ -145,11 +145,7 @@ bool TrayBackend::fnLock() const { return m_fnLock; }
 
 void TrayBackend::setFnLock( bool v )
 {
-  if ( m_client->setFnLock( v ) )
-  {
-    m_fnLock = v;
-    emit fnLockChanged();
-  }
+  (void) v;
 }
 
 int TrayBackend::displayBrightness() const { return m_displayBrightness; }
@@ -510,11 +506,6 @@ void TrayBackend::pollSlowState()
   {
     m_webcamEnabled = *v;
     emit webcamEnabledChanged();
-  }
-  if ( auto v = m_client->getFnLock(); v && *v != m_fnLock )
-  {
-    m_fnLock = *v;
-    emit fnLockChanged();
   }
   if ( auto v = m_client->getDisplayBrightness(); v && *v != m_displayBrightness )
   {
