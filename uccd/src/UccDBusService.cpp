@@ -1595,6 +1595,12 @@ bool UccDBusInterfaceAdaptor::SetChargeType( const QString &type )
   return result;
 }
 
+QString UccDBusInterfaceAdaptor::GetBatteryHealth()
+{
+  std::lock_guard< std::mutex > lock( m_data.dataMutex );
+  return QString::fromStdString( m_data.batteryHealth );
+}
+
 // fn lock methods (stubs for now)
 
 bool UccDBusInterfaceAdaptor::GetFnLockSupported()
@@ -2383,6 +2389,7 @@ void UccDBusService::readHardwareCapabilities()
     m_dbusData.currentChargingProfile = "";
     m_dbusData.chargeStartAvailableThresholds = "[]";
     m_dbusData.chargeEndAvailableThresholds = "[]";
+    m_dbusData.batteryHealth = "";
 
     // USB-C power priority
     const auto priority = ucc::uniwill::readUsbCPowerPriority();
@@ -2413,6 +2420,7 @@ void UccDBusService::readHardwareCapabilities()
     {
       m_dbusData.chargeStartThreshold = battery->getChargeControlStartThreshold();
       m_dbusData.chargeEndThreshold = battery->getChargeControlEndThreshold();
+      m_dbusData.batteryHealth = battery->getHealth();
 
       // Map charge type
       auto chargeType = battery->getChargeType();

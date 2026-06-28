@@ -138,6 +138,7 @@ public:
   std::atomic< int32_t > chargeStartThreshold;
   std::atomic< int32_t > chargeEndThreshold;
   std::string chargeType;
+  std::string batteryHealth;
   std::atomic< bool > fnLockSupported;
   std::atomic< bool > fnLockStatus;
   std::atomic< bool > sensorDataCollectionStatus;
@@ -195,6 +196,7 @@ public:
       chargeStartThreshold( -1 ),
       chargeEndThreshold( -1 ),
       chargeType( "Unknown" ),
+      batteryHealth( "" ),
       fnLockSupported( false ),
       fnLockStatus( false ),
       sensorDataCollectionStatus( false ),
@@ -352,6 +354,7 @@ public slots:
   bool SetChargeEndThreshold( int value );
   QString GetChargeType();
   bool SetChargeType( const QString &type );
+  QString GetBatteryHealth();
 
   // fn lock methods
   bool GetFnLockSupported();

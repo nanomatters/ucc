@@ -339,6 +339,10 @@ static int cmdStatus( ucc::UccdClient &c )
     if ( chargeType && *chargeType != "Unknown" && *chargeType != "N/A" && !chargeType->empty() )
       chLines.emplace_back( "Charge type:", *chargeType );
 
+    auto batteryHealth = c.getBatteryHealth();
+    if ( batteryHealth && !batteryHealth->empty() )
+      chLines.emplace_back( "Battery health:", *batteryHealth );
+
     if ( jsonArrayHasEntries( c.getChargeEndAvailableThresholds() ) )
     {
       auto chargeStart = c.getChargeStartThreshold();
@@ -1009,6 +1013,10 @@ static int cmdChargingStatus( ucc::UccdClient &c )
   if ( chargeType && *chargeType != "Unknown" && *chargeType != "N/A" && !chargeType->empty() )
     lines.emplace_back( "Charge type:", *chargeType );
 
+  auto batteryHealth = c.getBatteryHealth();
+  if ( batteryHealth && !batteryHealth->empty() )
+    lines.emplace_back( "Battery health:", *batteryHealth );
+
   if ( jsonArrayHasEntries( c.getChargeEndAvailableThresholds() ) )
   {
     auto chargeStart = c.getChargeStartThreshold();
@@ -1374,6 +1382,9 @@ static int cmdStatusJSON( ucc::UccdClient &c )
     auto ct = c.getChargeType();
     if ( ct && *ct != "Unknown" && *ct != "N/A" && !ct->empty() )
       ch["type"] = QString::fromStdString( *ct );
+    auto bh = c.getBatteryHealth();
+    if ( bh && !bh->empty() )
+      ch["health"] = QString::fromStdString( *bh );
 
     if ( jsonArrayHasEntries( c.getChargeEndAvailableThresholds() ) )
     {

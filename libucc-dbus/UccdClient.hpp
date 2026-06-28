@@ -121,6 +121,7 @@ public:
   // Charge Type
   std::optional< std::string > getChargeType();
   bool setChargeType( const std::string &type );
+  std::optional< std::string > getBatteryHealth();
 
   // GPU Control
   bool setNVIDIAPowerOffset( int offset );

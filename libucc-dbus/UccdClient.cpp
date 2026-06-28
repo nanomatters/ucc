@@ -680,6 +680,18 @@ bool UccdClient::setChargeType( const std::string &type )
   return callVoidMethod( "SetChargeType", QString::fromStdString( type ) );
 }
 
+std::optional< std::string > UccdClient::getBatteryHealth()
+{
+  if ( auto result = callMethod< QString >( "GetBatteryHealth" ) )
+  {
+    const std::string value = result->toStdString();
+    if ( !value.empty() )
+      return value;
+  }
+
+  return std::nullopt;
+}
+
 bool UccdClient::setNVIDIAPowerOffset( int offset )
 {
   return callVoidMethod( "SetNVIDIAPowerOffset", offset );

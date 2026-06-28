@@ -114,6 +114,15 @@ public:
   }
 
   /**
+   * @brief Get battery health from the standard power_supply health attribute
+   * @return Kernel-reported health string, or empty when unavailable
+   */
+  [[nodiscard]] std::string getHealth() const noexcept
+  {
+    return SysfsNode< std::string >( m_basePath + "/health" ).read().value_or( "" );
+  }
+
+  /**
    * @brief Get charge control start threshold
    * @return Start threshold percentage or -1 if not available
    */

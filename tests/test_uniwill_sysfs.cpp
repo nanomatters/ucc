@@ -403,6 +403,18 @@ private slots:
     QCOMPARE( thresholds.back(), 100 );
   }
 
+  void readsBatteryHealth()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path batteryPath = rootPath( dir ) / "BAT0";
+
+    writeFile( batteryPath / "health", "Unspecified failure\n" );
+
+    const PowerSupplyController battery( batteryPath.string() );
+    QCOMPARE( battery.getHealth(), std::string( "Unspecified failure" ) );
+  }
+
   void sysfsWriteDetailedReportsErrno()
   {
     QTemporaryDir dir;

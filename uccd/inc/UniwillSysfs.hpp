@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -399,7 +400,7 @@ struct HwmonTelemetry
   return std::nullopt;
 }
 
-[[nodiscard]] inline std::optional< fs::path > findHwmonDevice( const std::string &sysfsRoot )
+[[nodiscard]] inline std::optional< fs::path > findHwmonDeviceUncached( const std::string &sysfsRoot )
 {
   const fs::path root = sysfsPath( sysfsRoot, "class/hwmon" );
 
@@ -419,6 +420,27 @@ struct HwmonTelemetry
   }
 
   return std::nullopt;
+}
+
+[[nodiscard]] inline std::optional< fs::path > findHwmonDevice( const std::string &sysfsRoot )
+{
+  if ( sysfsRoot != "/sys" and not sysfsRoot.empty() )
+    return findHwmonDeviceUncached( sysfsRoot );
+
+  static std::mutex cacheMutex;
+  static std::optional< fs::path > cachedHwmonPath;
+
+  std::lock_guard< std::mutex > lock( cacheMutex );
+  if ( cachedHwmonPath )
+  {
+    if ( auto name = readFirstLine( *cachedHwmonPath / "name" ); name and *name == "uniwill" )
+      return cachedHwmonPath;
+
+    cachedHwmonPath.reset();
+  }
+
+  cachedHwmonPath = findHwmonDeviceUncached( "/sys" );
+  return cachedHwmonPath;
 }
 
 [[nodiscard]] inline std::optional< PlatformProfileSink > findNamedPlatformProfile(
