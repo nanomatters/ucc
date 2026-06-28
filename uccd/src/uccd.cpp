@@ -36,9 +36,8 @@
 #include <QSocketNotifier>
 #include <QTimer>
 
-// Hardware abstraction layer
-#include "tuxedo_io_lib/tuxedo_io_api.hh"
 #include "workers/HardwareMonitorWorker.hpp"
+#include "UniwillSysfs.hpp"
 #include "UccDBusService.hpp"
 #include "SettingsManager.hpp"
 #include "version.h"
@@ -205,29 +204,19 @@ int run_daemon()
   // Ensure configuration directory exists
   ensure_config_directory();
 
-  // Initialize hardware interface
+  // Check whether the new uniwill driver is present. The daemon still starts in
+  // passive mode if hardware is absent so D-Bus clients can query support.
   try
   {
-    TuxedoIOAPI io;
-    syslog( LOG_INFO, "Hardware interface initialized" );
-
-    // Detect device capabilities
-    bool identified = false;
-    if ( io.identify( identified ) and identified )
+    const auto driverPaths = ucc::uniwill::discover();
+    if ( driverPaths.isAvailable() )
     {
-      std::string interface_id, model_id;
-      if ( io.deviceInterfaceIdStr( interface_id ) )
-      {
-        syslog( LOG_INFO, "Detected interface: %s", interface_id.c_str() );
-      }
-      if ( io.deviceModelIdStr( model_id ) )
-      {
-        syslog( LOG_INFO, "Detected model: %s", model_id.c_str() );
-      }
+      syslog( LOG_INFO, "Detected uniwill driver at %s",
+              driverPaths.platformDevicePath.c_str() );
     }
     else
     {
-      syslog( LOG_WARNING, "No compatible hardware device detected" );
+      syslog( LOG_WARNING, "No uniwill driver platform device detected" );
     }
 
     // Initialize DBus service

@@ -2011,7 +2011,6 @@ void UccDBusInterfaceAdaptor::emitWaterCoolerStatusChanged( const std::string &s
 UccDBusService::UccDBusService()
   : DaemonWorker( std::chrono::milliseconds( 1000 ), false ),
     m_dbusData(),
-    m_io(),
     m_dbusObject( nullptr ),
     m_adaptor( nullptr ),
     m_started( false ),
@@ -2060,8 +2059,9 @@ UccDBusService::UccDBusService()
   // detect display session type and initialize display modes
   initializeDisplayModes();
 
-  // check tuxedo wmi availability
-  m_dbusData.tuxedoWmiAvailable = m_io.wmiAvailable();
+  // Keep the legacy D-Bus property populated as "uniwill driver available"
+  // until the public interface is renamed.
+  m_dbusData.tuxedoWmiAvailable = ucc::uniwill::discover().isAvailable();
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
@@ -2174,18 +2174,8 @@ UccDBusService::UccDBusService()
     isDisplayMuxDevice
   );
 
-  // webcam monitoring via HardwareMonitorWorker (replaces former WebcamWorker)
-  m_hardwareMonitorWorker->setWebcamCallbacks(
-    [this]() -> std::pair< bool, bool > {
-      bool status = false;
-      bool available = m_io.getWebcam( status );
-      return { available, status };
-    },
-    [this]( bool available, bool status ) {
-      m_dbusData.webcamSwitchAvailable = available;
-      m_dbusData.webcamSwitchStatus = status;
-    }
-  );
+  m_dbusData.webcamSwitchAvailable = false;
+  m_dbusData.webcamSwitchStatus = false;
 
   // CPU frequency monitoring via HardwareMonitorWorker (every cycle about 800ms)
   m_hardwareMonitorWorker->setCpuFrequencyCallback(
@@ -2794,8 +2784,8 @@ void UccDBusService::onWork()
   if ( !m_dbusData.deviceSupported.load() )
     return;
 
-  // update tuxedo wmi availability (matches typescript implementation)
-  m_dbusData.tuxedoWmiAvailable = m_io.wmiAvailable();
+  // Legacy D-Bus property; see constructor comment.
+  m_dbusData.tuxedoWmiAvailable = ucc::uniwill::discover().isAvailable();
 
   // Periodic NVIDIA cTGP offset validation (every 5 ticks = 5 s)
   if ( m_dbusData.nvidiaPowerCTRLAvailable.load() && m_profileSettingsWorker )
@@ -3683,11 +3673,6 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
   const std::string productSKU = SysfsNode< std::string >( dmiBasePath + "/product_sku" ).read().value_or( "" );
   const std::string productName = SysfsNode< std::string >( dmiBasePath + "/product_name" )
                                     .read().value_or( "" );
-  const std::string boardName = SysfsNode< std::string >( dmiBasePath + "/board_name" ).read().value_or( "" );
-
-  // get module info from tuxedo_io
-  std::string deviceModelId;
-  m_io.deviceModelIdStr( deviceModelId );
 
   // create dmi sku to device map (matches typescript version)
   std::map< std::string, UniwillDeviceID > dmiSKUDeviceMap;
@@ -3742,28 +3727,6 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
        productNameIt != dmiProductNameDeviceMap.end() )
   {
     return productNameIt->second;
-  }
-
-  // check uwid (univ wmi interface) device mapping
-  std::map< int, UniwillDeviceID > uwidDeviceMap;
-  uwidDeviceMap[ 0x13 ] = UniwillDeviceID::IBP14G6_TUX;
-  uwidDeviceMap[ 0x12 ] = UniwillDeviceID::IBP14G6_TRX;
-  uwidDeviceMap[ 0x14 ] = UniwillDeviceID::IBP14G6_TQF;
-  uwidDeviceMap[ 0x17 ] = UniwillDeviceID::IBP14G7_AQF_ARX;
-
-  int modelId = 0;
-  try
-  {
-    modelId = std::stoi( deviceModelId );
-  }
-  catch ( ... )
-  {
-    // ignore parse errors
-  }
-
-  if ( auto uwidIt = uwidDeviceMap.find( modelId ); uwidIt != uwidDeviceMap.end() )
-  {
-    return uwidIt->second;
   }
 
   // no device match found

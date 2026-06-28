@@ -48,7 +48,6 @@
 #include "TccSettings.hpp"
 #include "MetricsHistoryStore.hpp"
 #include "SystemInfo.hpp"
-#include "tuxedo_io_lib/tuxedo_io_api.hh"
 
 // Forward declarations
 class HardwareMonitorWorker;
@@ -532,7 +531,6 @@ protected:
 private:
   static constexpr const char* INTERFACE_NAME = "com.uniwill.uccd";
   UccDBusData m_dbusData;
-  TuxedoIOAPI m_io;
   std::unique_ptr< UccDBusObject > m_dbusObject;  // The QObject registered on the D-Bus bus
   std::unique_ptr< UccDBusInterfaceAdaptor > m_adaptor;
   bool m_started;

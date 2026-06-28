@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(uccd VERSION ${CMAKE_PROJECT_VERSION})
 
-# Add 3rdparty
-add_subdirectory(3rdparty)
-
 # Set default build type to RelWithDebInfo if not specified
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
@@ -41,11 +38,6 @@ add_executable(uccd
 
 # Include directories
 target_include_directories(uccd PRIVATE inc/ ${CMAKE_SOURCE_DIR}/../libucc-dbus ${Qt6Core_INCLUDE_DIRS} ${Qt6Bluetooth_INCLUDE_DIRS} ${Qt6DBus_INCLUDE_DIRS} /usr/include)
-
-# Link to tuxedo_io_lib
-target_link_libraries(uccd PRIVATE
-  tuxedo_io_lib
-)
 
 # Link system libraries
 target_link_libraries(uccd PRIVATE
