@@ -10,11 +10,11 @@ PumpCurveEditorWidget::PumpCurveEditorWidget(QWidget *parent)
 {
     // Default 3 threshold points: each one bumps pump level up by 1
     // Levels: Off -> V7 -> V8 -> V11
-    // 12V intentionally omitted — it can be harmful to the pump
+    // 12V intentionally omitted - it can be harmful to the pump
     m_points = {
-        {40.0, 1},  // at 40°C: pump goes to level 1 (V7)
-        {55.0, 2},  // at 55°C: pump goes to level 2 (V8)
-        {70.0, 3},  // at 70°C: pump goes to level 3 (V11)
+        {40.0, 1},  // at 40 degC: pump goes to level 1 (V7)
+        {55.0, 2},  // at 55 degC: pump goes to level 2 (V8)
+        {70.0, 3},  // at 70 degC: pump goes to level 3 (V11)
     };
     setMouseTracking(true);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -94,7 +94,7 @@ QRectF PumpCurveEditorWidget::pointRect(const Point& pt) const {
 }
 
 void PumpCurveEditorWidget::enforceOrdering() {
-    // Ensure temperatures are in ascending order with minimum 1°C gap
+    // Ensure temperatures are in ascending order with minimum 1 degC gap
     for (int i = 1; i < m_points.size(); ++i) {
         if (m_points[i].temp <= m_points[i-1].temp) {
             m_points[i].temp = std::min(m_points[i-1].temp + 1.0, 100.0);
@@ -163,7 +163,7 @@ void PumpCurveEditorWidget::paintEvent(QPaintEvent*) {
         p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter, levelLabel(lvl));
     }
 
-    // X grid/ticks/labels: 20–100°C every 5°C
+    // X grid/ticks/labels: 20-100 degC every 5 degC
     for (int i = 0; i <= 16; ++i) {
         double frac = i / 16.0;
         qreal x = plotRect.left() + frac * plotRect.width();

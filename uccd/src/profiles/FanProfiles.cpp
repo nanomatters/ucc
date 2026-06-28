@@ -220,7 +220,7 @@ std::string getFanProfileJson( const std::string &idOrName )
   }
   json += "],";
 
-  // tableGPU - return the sampled entries (already at 5°C steps from 20 to 100)
+  // tableGPU - return the sampled entries (already at 5 degC steps from 20 to 100)
   json += "\"tableGPU\":[";
   for ( size_t i = 0; i < fp->tableGPU.size(); ++i )
   {

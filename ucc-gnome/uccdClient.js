@@ -44,7 +44,7 @@ export class UccdClient {
 
     /**
      * Start watching the daemon service on the system bus.
-     * @param {function(boolean)} cb  Invoked with true/false on appear/vanish
+     * @param {function(boolean)} cb Invoked with true/false on appear/vanish
      */
     watch(cb) {
         this._onConnectionChanged = cb;
@@ -55,9 +55,7 @@ export class UccdClient {
         );
     }
 
-    // -----------------------------------------------------------------------
     // Low-level helpers
-    // -----------------------------------------------------------------------
 
     /** Call a D-Bus method and return the first result value (or null). */
     _call(method, args = null, signature = null) {
@@ -103,8 +101,8 @@ export class UccdClient {
      * Extract a value from fan data maps (GetFanDataCPU / GPU1 / GPU2).
      * Returns null when data is missing or has timestamp==0.
      *
-     * The daemon returns a{sv} → { speed: a{sv}{timestamp:x, data:i},
-     *                               temp:  a{sv}{timestamp:x, data:i} }
+     * The daemon returns a{sv} -> { speed: a{sv}{timestamp:x, data:i},
+     * temp: a{sv}{timestamp:x, data:i} }
      */
     _readFanData(method, key) {
         const outer = this._call(method);
@@ -127,9 +125,7 @@ export class UccdClient {
         } catch { return null; }
     }
 
-    // -----------------------------------------------------------------------
-    // Monitoring — fast poll (temperatures, frequencies, power, fans)
-    // -----------------------------------------------------------------------
+    // Monitoring - fast poll (temperatures, frequencies, power, fans)
 
     getCpuTemperature() {
         return this._readFanData('GetFanDataCPU', 'temp') ?? -1;
@@ -188,9 +184,7 @@ export class UccdClient {
     getWaterCoolerFanSpeed()  { return this._call('GetWaterCoolerFanSpeed')  ?? -1; }
     getWaterCoolerPumpLevel() { return this._call('GetWaterCoolerPumpLevel') ?? -1; }
 
-    // -----------------------------------------------------------------------
-    // Slow poll — profiles, state, hardware toggles
-    // -----------------------------------------------------------------------
+    // Slow poll - profiles, state, hardware toggles
 
     getActiveProfileJSON()   { return this._call('GetActiveProfileJSON'); }
     getPowerState()          { return this._call('GetPowerState'); }
@@ -214,9 +208,7 @@ export class UccdClient {
 
     getFanProfile(name) { return this._call('GetFanProfile', [name], 's'); }
 
-    // -----------------------------------------------------------------------
     // Setters
-    // -----------------------------------------------------------------------
 
     setActiveProfile(id) {
         return this._callVoid('SetActiveProfile', [id], 's');
@@ -263,9 +255,7 @@ export class UccdClient {
         return this._callVoid('TurnOffWaterCoolerLED');
     }
 
-    // -----------------------------------------------------------------------
     // Cleanup
-    // -----------------------------------------------------------------------
 
     destroy() {
         if (this._watchId) {

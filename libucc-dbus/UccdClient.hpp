@@ -175,14 +175,14 @@ public:
   std::optional< double > getGpuPower();
   std::optional< double > getIGpuPower();
   // Extended discrete GPU metrics (NVIDIA, -1 when unavailable)
-  std::optional< int > getDGpuComputeUtilPct();       ///< Compute utilization 0–100 %
-  std::optional< int > getDGpuMemoryUtilPct();        ///< Memory-controller utilization 0–100 %
+  std::optional< int > getDGpuComputeUtilPct();       ///< Compute utilization 0-100 %
+  std::optional< int > getDGpuMemoryUtilPct();        ///< Memory-controller utilization 0-100 %
   std::optional< int > getDGpuVramUsedMiB();          ///< Used VRAM in MiB
   std::optional< int > getDGpuVramTotalMiB();         ///< Total VRAM in MiB
   std::optional< std::string > getDGpuPerfLimitReason(); ///< Perf-cap/throttle reason
-  std::optional< int > getDGpuEncoderUtilPct();       ///< NVENC utilization 0–100 %
-  std::optional< int > getDGpuDecoderUtilPct();       ///< NVDEC utilization 0–100 %
-  std::optional< int > getDGpuCurrentPstate();        ///< Current P-state index (0–15)
+  std::optional< int > getDGpuEncoderUtilPct();       ///< NVENC utilization 0-100 %
+  std::optional< int > getDGpuDecoderUtilPct();       ///< NVDEC utilization 0-100 %
+  std::optional< int > getDGpuCurrentPstate();        ///< Current P-state index (0-15)
   std::optional< int > getDGpuGrClockOffsetMHz();     ///< Graphics-clock offset at current P-state
   std::optional< int > getDGpuMemClockOffsetMHz();    ///< Memory-clock offset at current P-state
   std::optional< int > getDGpuVramFrequencyMHz();     ///< VRAM frequency in MHz
@@ -235,7 +235,7 @@ private slots:
 
 private:
   void connectToDaemon();          ///< (Re)create the interface and subscribe to D-Bus signals
-  void subscribeDbusSignals();     ///< Connect D-Bus signals (idempotent — disconnects first)
+  void subscribeDbusSignals();     ///< Connect D-Bus signals (idempotent - disconnects first)
 
   std::unique_ptr< QDBusInterface > m_interface;
   QDBusServiceWatcher *m_serviceWatcher = nullptr;

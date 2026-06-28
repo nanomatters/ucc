@@ -33,9 +33,9 @@
  *
  * Three authorization levels are defined:
  *
- *  - com.uniwill.uccd.read            (read-only queries)
- *  - com.uniwill.uccd.control         (profiles, backlight, fan curves, etc.)
- *  - com.uniwill.uccd.manage-hardware (TDP, fan disable, charge thresholds, cTGP, pump voltage)
+ * - com.uniwill.uccd.read (read-only queries)
+ * - com.uniwill.uccd.control (profiles, backlight, fan curves, etc.)
+ * - com.uniwill.uccd.manage-hardware (TDP, fan disable, charge thresholds, cTGP, pump voltage)
  */
 class PolkitAuthority
 {
@@ -48,9 +48,9 @@ public:
   /**
    * @brief Check whether the D-Bus caller is authorized for a Polkit action.
    *
-   * @param connection   The QDBusConnection the call arrived on (system bus)
-   * @param message      The incoming QDBusMessage (contains the caller's service name)
-   * @param actionId     One of the ACTION_* constants above
+   * @param connection The QDBusConnection the call arrived on (system bus)
+   * @param message The incoming QDBusMessage (contains the caller's service name)
+   * @param actionId One of the ACTION_* constants above
    * @return true if authorized, false otherwise
    */
   static bool checkAuthorization( const QDBusConnection &connection,
@@ -98,7 +98,7 @@ public:
       subject << QString( "unix-process" ) << subjectDetails;
       subject.endStructure();
 
-      // Details: a{ss} (empty map of string→string)
+      // Details: a{ss} (empty map of string->string)
       QDBusArgument details;
       details.beginMap( QMetaType::fromType< QString >(), QMetaType::fromType< QString >() );
       details.endMap();

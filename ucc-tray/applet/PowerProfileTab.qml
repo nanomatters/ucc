@@ -33,7 +33,7 @@ PC3.ScrollView {
                 margins: Kirigami.Units.largeSpacing
             }
 
-            // ── System Profile ──
+            // System Profile
             PC3.Label { text: i18n("System Profile:"); opacity: 0.7 }
             PC3.ComboBox {
                 id: profileCombo
@@ -62,7 +62,7 @@ PC3.ScrollView {
                 }
             }
 
-            // ── Fan Profile ──
+            // Fan Profile
             PC3.Label {
                 text: i18n("Fan profile:")
                 opacity: 0.7
@@ -96,7 +96,7 @@ PC3.ScrollView {
                 }
             }
 
-            // ── Keyboard Profile ──
+            // Keyboard Profile
             PC3.Label {
                 text: i18n("Keyboard profile:")
                 opacity: 0.7
@@ -139,7 +139,7 @@ PC3.ScrollView {
 
             Kirigami.Separator { Layout.fillWidth: true }
 
-            // ── ODM Performance Profile ──
+            // ODM Performance Profile
             PlasmaExtras.Heading {
                 level: 4
                 text: i18n("ODM Performance Mode")

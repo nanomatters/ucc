@@ -153,7 +153,7 @@ void FanCurveEditorWidget::paintEvent(QPaintEvent*) {
         p.drawText(labelRect, Qt::AlignRight|Qt::AlignVCenter, label);
     }
 
-    // X grid/ticks/labels (20-100°C every 5°C)
+    // X grid/ticks/labels (20-100 degC every 5 degC)
     for (int i = 0; i <= 16; ++i) {
         double frac = i / 16.0;
         qreal x = plotRect.left() + frac * plotRect.width();
@@ -380,7 +380,7 @@ void FanCurveEditorWidget::contextMenuEvent(QContextMenuEvent*) {
 }
 
 void FanCurveEditorWidget::addPoint(const Point& pt) {
-    // Snap temperature to nearest 5°C grid position
+    // Snap temperature to nearest 5 degC grid position
     double snappedTemp = std::round((pt.temp - 20.0) / 5.0) * 5.0 + 20.0;
     snappedTemp = std::clamp(snappedTemp, 20.0, 100.0);
 

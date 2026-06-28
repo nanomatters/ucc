@@ -512,7 +512,7 @@ public:
   friend class UccDBusInterfaceAdaptor;
 
 public:
-  /// Register the D-Bus service.  Call from the main thread before start().
+  /// Register the D-Bus service. Call from the main thread before start().
   bool initDBus();
 
   /// Resolve and apply the startup profile for the current power state.
@@ -559,18 +559,18 @@ private:
   // on the way down the pump only steps down once the temperature has fallen
   // at least PUMP_HYSTERESIS_DEG below the threshold that caused the last step-up.
   static constexpr int PUMP_HYSTERESIS_DEG = 3;
-  int m_pumpHysSpeedIdx{ 0 };    // last applied speed index (0=Off … 4=V12)
+  int m_pumpHysSpeedIdx{ 0 };    // last applied speed index (0=Off ... 4=V12)
   int m_pumpHysThreshold{ 0 };   // table entryTemp that last triggered a step-up
 
   // EWMA filter for the temperature fed to water-cooler fan + pump auto-control.
   // The FanControlWorker has its own EWMA per fan, but the WC callback receives
-  // the raw sensor reading.  This filter smooths it with the same asymmetric
+  // the raw sensor reading. This filter smooths it with the same asymmetric
   // weights (fast rise, slow fall) so the pump doesn't bounce on noisy sensors.
   double m_wcTempFiltered{ -1.0 };
   static constexpr double WC_TEMP_ALPHA_RISING  = 0.5;
   static constexpr double WC_TEMP_ALPHA_FALLING = 0.15;
 
-  // Water cooler debounce – avoids reacting to brief BLE connect/disconnect
+  // Water cooler debounce - avoids reacting to brief BLE connect/disconnect
   // glitches that cause rapid power-state oscillation.
   bool m_wcDebouncePending = false;
   bool m_wcDebouncedTarget = false;                           // the state we are debouncing towards
@@ -610,7 +610,7 @@ private:
   KeyboardBacklightController m_keyboardBacklightController;
   std::unique_ptr< LCTWaterCoolerWorker > m_waterCoolerWorker;
 
-  // Shared NVML instance — created once, used by all workers and readHardwareCapabilities
+  // Shared NVML instance - created once, used by all workers and readHardwareCapabilities
   std::shared_ptr< NvmlWrapper > m_nvml;
 
   // identified device

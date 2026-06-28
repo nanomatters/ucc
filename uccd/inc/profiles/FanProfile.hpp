@@ -41,7 +41,7 @@ struct FanTableEntry
 /**
  * @brief Fan profile
  *
- * Contains temperature-to-fan-speed mapping tables for CPU, GPU, and pump fans.
+ * Contains temperature-to-fan-speed mapping tables for CPU, GPU and pump fans.
  * Mirrors the ITccFanProfile TypeScript interface.
  */
 class FanProfile
@@ -116,7 +116,7 @@ public:
    *
    * @param temp Temperature in degrees Celsius
    * @param useCPU true to use CPU table, false for GPU table
-   * @return Fan speed percentage (0-100), or -1 if not found
+   * @return Fan speed percentage (0-100) or -1 if not found
    */
   [[nodiscard]] int32_t getSpeedForTemp( int32_t temp, bool useCPU = true ) const noexcept
   {
@@ -198,7 +198,7 @@ public:
    * values are discrete voltage levels (0=Off, 1=V7, 2=V8, 3=V11, 4=V12).
    *
    * @param temp Temperature in degrees Celsius
-   * @return Pump speed value (0-3), or -1 if pump table is empty
+   * @return Pump speed value (0-3) or -1 if pump table is empty
    */
   [[nodiscard]] ucc::PumpVoltage getPumpSpeedForTemp( int32_t temp ) const noexcept
   {
@@ -208,7 +208,7 @@ public:
 
     for ( const auto &[ entryTemp, speed ] : tablePump )
     {
-      // std::cout << "[FanProfile] Checking pump table entry: temp=" << entryTemp << "°C, speed=" << speed << std::endl;
+      // std::cout << "[FanProfile] Checking pump table entry: temp=" << entryTemp << " degC, speed=" << speed << std::endl;
       if ( temp >= entryTemp )
         result = pumpSpeedToVoltage[ std::min( speed, 4 ) ];
       else

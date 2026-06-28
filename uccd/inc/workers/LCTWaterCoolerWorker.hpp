@@ -54,10 +54,10 @@ enum class WaterCoolerState
  * Uses a QTimer for periodic tick instead of a dedicated QThread, eliminating
  * all cross-thread dispatch overhead for the internal state machine.
  *
- * Handles BLE device discovery, connection, and control of fan, pump, and LED.
+ * Handles BLE device discovery, connection and control of fan, pump and LED.
  *
  * Thread safety: public control methods (setFanSpeed, setPumpVoltage, etc.)
- * are safe to call from any thread — they dispatch to the main thread when
+ * are safe to call from any thread - they dispatch to the main thread when
  * needed via BlockingQueuedConnection.
  */
 class LCTWaterCoolerWorker : public QObject
@@ -105,14 +105,14 @@ public:
   bool isConnected() const;
 
   /**
-   * @brief Set fan speed (thread-safe — can be called from any thread)
+   * @brief Set fan speed (thread-safe - can be called from any thread)
    * @param dutyCyclePercent Fan speed percentage (0-100)
    * @return true if command sent successfully
    */
   bool setFanSpeed( int dutyCyclePercent );
 
   /**
-   * @brief Set pump voltage (thread-safe — can be called from any thread)
+   * @brief Set pump voltage (thread-safe - can be called from any thread)
    * @param voltage Pump voltage setting
    * @return true if command sent successfully
    */
@@ -125,7 +125,7 @@ public:
   int32_t getLastPumpVoltage() const;
 
   /**
-   * @brief Set LED color (thread-safe — can be called from any thread)
+   * @brief Set LED color (thread-safe - can be called from any thread)
    * @param red Red component (0-255)
    * @param green Green component (0-255)
    * @param blue Blue component (0-255)
@@ -224,7 +224,7 @@ private:
   int64_t secondsSinceLastDiscovery() const;
   ucc::LCTDeviceModel deviceModelFromName( const QString& name ) const;
 
-  // ── BLE constants ─────────────────────────────────────────────────
+  // BLE constants
   static const QString NORDIC_UART_SERVICE_UUID;
   static const QString NORDIC_UART_CHAR_TX;
   static const QString NORDIC_UART_CHAR_RX;
@@ -237,7 +237,7 @@ private:
   static constexpr uint8_t CMD_PUMP = 0x1c;
   static constexpr uint8_t CMD_RGB = 0x1e;
 
-  // ── Device info (private, replaces ucc::DeviceInfo) ───────────────
+  // Device info (private, replaces ucc::DeviceInfo)
   struct DeviceInfo
   {
     QString uuid;
@@ -246,7 +246,7 @@ private:
     QBluetoothDeviceInfo deviceInfo;
   };
 
-  // ── State machine ─────────────────────────────────────────────────
+  // State machine
   UccDBusData& m_dbusData;
   std::atomic<WaterCoolerState> m_state = WaterCoolerState::Disconnected;
   WaterCoolerState m_previousState = WaterCoolerState::Disconnected;
@@ -257,7 +257,7 @@ private:
   StatusCallback m_statusCallback;
   QTimer* m_tickTimer = nullptr;
 
-  // ── BLE infrastructure ────────────────────────────────────────────
+  // BLE infrastructure
   QBluetoothDeviceDiscoveryAgent* m_deviceDiscoveryAgent = nullptr;
   QLowEnergyController* m_bleController = nullptr;
   QLowEnergyService* m_uartService = nullptr;
@@ -287,7 +287,7 @@ private:
   bool m_waitingForResponse = false;
   QByteArray m_pendingData;
 
-  // BLE write throttle – minimum gap between successive UART writes
+  // BLE write throttle - minimum gap between successive UART writes
   static constexpr int BLE_WRITE_GAP_MS = 80;
   std::chrono::steady_clock::time_point m_lastBleWrite{};
 

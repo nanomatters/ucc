@@ -682,7 +682,7 @@ bool NvmlWrapper::resetPowerLimit( unsigned int deviceIndex )
   return m_setPowerLimit( *devOpt, defaultMw ) == nvml::NVML_SUCCESS;
 }
 
-// ---- Live monitoring getters (replace nvidia-smi subprocess calls) ----
+// Live monitoring getters (replace nvidia-smi subprocess calls)
 
 std::optional< unsigned int > NvmlWrapper::getTemperatureDegC( unsigned int deviceIndex ) const noexcept
 {

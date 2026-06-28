@@ -36,19 +36,19 @@ class TrayBackend : public QObject
   Q_OBJECT
   QML_ELEMENT
 
-  // ── Connection ──
+  // Connection
   Q_PROPERTY( bool connected READ connected NOTIFY connectedChanged )
 
-  // ── Device support ──
+  // Device support
   Q_PROPERTY( bool deviceSupported READ deviceSupported NOTIFY deviceSupportedChanged )
 
-  // ── System Info (static, loaded once) ──
+  // System Info (static, loaded once)
   Q_PROPERTY( QString laptopModel  READ laptopModel  NOTIFY systemInfoChanged )
   Q_PROPERTY( QString cpuModel     READ cpuModel     NOTIFY systemInfoChanged )
   Q_PROPERTY( QString dGpuModel    READ dGpuModel    NOTIFY systemInfoChanged )
   Q_PROPERTY( QString iGpuModel    READ iGpuModel    NOTIFY systemInfoChanged )
 
-  // ── Dashboard / Monitoring ──
+  // Dashboard / Monitoring
   Q_PROPERTY( int cpuTemp        READ cpuTemp        NOTIFY metricsUpdated )
   Q_PROPERTY( int gpuTemp        READ gpuTemp        NOTIFY metricsUpdated )
   Q_PROPERTY( int cpuFreqMHz     READ cpuFreqMHz     NOTIFY metricsUpdated )
@@ -75,20 +75,20 @@ class TrayBackend : public QObject
   Q_PROPERTY( int  gpuVramFreqMHz READ gpuVramFreqMHz NOTIFY metricsUpdated )
   Q_PROPERTY( int  gpuCoreVoltageMv READ gpuCoreVoltageMv NOTIFY metricsUpdated )
 
-  // ── profiles ──
+  // profiles
   Q_PROPERTY( QString      activeProfileId READ activeProfileId NOTIFY activeProfileChanged )
   Q_PROPERTY( QString      activeProfileName READ activeProfileName NOTIFY activeProfileChanged )
   Q_PROPERTY( QString      powerState      READ powerState      NOTIFY powerStateChanged )
 
-  // ── Keyboard Backlight control flag ──
+  // Keyboard Backlight control flag
   Q_PROPERTY( bool keyboardBacklightControlSupported READ keyboardBacklightControlSupported NOTIFY keyboardBacklightControlSupportedChanged )
 
-  // ── Hardware toggles ──
+  // Hardware toggles
   Q_PROPERTY( bool webcamEnabled  READ webcamEnabled  WRITE setWebcamEnabled  NOTIFY webcamEnabledChanged )
   Q_PROPERTY( bool fnLock         READ fnLock         WRITE setFnLock         NOTIFY fnLockChanged )
   Q_PROPERTY( int  displayBrightness READ displayBrightness WRITE setDisplayBrightness NOTIFY displayBrightnessChanged )
 
-  // ── Water cooler ──
+  // Water cooler
   Q_PROPERTY( bool waterCoolerSupported READ waterCoolerSupported NOTIFY waterCoolerSupportedChanged )
   Q_PROPERTY( bool wcConnected          READ wcConnected          NOTIFY wcConnectedChanged )
   Q_PROPERTY( bool wcAutoControl        READ wcAutoControl        NOTIFY wcAutoControlChanged )
@@ -103,11 +103,11 @@ class TrayBackend : public QObject
   Q_PROPERTY( int  wcLedGreen        READ wcLedGreen        NOTIFY wcControlStateChanged )
   Q_PROPERTY( int  wcLedBlue         READ wcLedBlue         NOTIFY wcControlStateChanged )
 
-  // ── ODM Performance Profile ──
+  // ODM Performance Profile
   Q_PROPERTY( QStringList availableODMProfiles READ availableODMProfiles NOTIFY odmProfilesAvailableChanged )
   Q_PROPERTY( QString     odmPerformanceProfile READ odmPerformanceProfile NOTIFY odmPerformanceProfileChanged )
 
-  // ── Profile lists as parallel name/id QStringLists (reliable ComboBox model) ──
+  // Profile lists as parallel name/id QStringLists (reliable ComboBox model)
   Q_PROPERTY( QStringList profileNames        READ profileNames        NOTIFY profilesChanged )
   Q_PROPERTY( QStringList profileIds          READ profileIds          NOTIFY profilesChanged )
   Q_PROPERTY( QStringList fanProfileNames     READ fanProfileNames     NOTIFY fanProfilesChanged )
@@ -115,7 +115,7 @@ class TrayBackend : public QObject
   Q_PROPERTY( QStringList keyboardProfileNames READ keyboardProfileNames NOTIFY keyboardProfilesChanged )
   Q_PROPERTY( QStringList keyboardProfileIds   READ keyboardProfileIds   NOTIFY keyboardProfilesChanged )
 
-  // ── Active profile sub-profile info ──
+  // Active profile sub-profile info
   Q_PROPERTY( QString activeProfileFanName      READ activeProfileFanName      NOTIFY activeProfileChanged )
   Q_PROPERTY( QString activeProfileFanId        READ activeProfileFanId        NOTIFY activeProfileChanged )
   Q_PROPERTY( QString activeProfileKeyboardName READ activeProfileKeyboardName NOTIFY activeProfileChanged )
@@ -125,19 +125,19 @@ public:
   explicit TrayBackend( QObject *parent = nullptr );
   ~TrayBackend() override = default;
 
-  // ── Connection ──
+  // Connection
   bool connected() const;
 
-  // ── Device support ──
+  // Device support
   bool deviceSupported() const;
 
-  // ── System Info ──
+  // System Info
   QString laptopModel() const;
   QString cpuModel() const;
   QString dGpuModel() const;
   QString iGpuModel() const;
 
-  // ── Monitoring ──
+  // Monitoring
   int cpuTemp() const;
   int gpuTemp() const;
   int cpuFreqMHz() const;
@@ -164,14 +164,14 @@ public:
   int gpuVramFreqMHz() const;
   int gpuCoreVoltageMv() const;
 
-  // ── Profiles ──
+  // Profiles
   QStringList profileNames() const;
   QStringList profileIds() const;
   QString activeProfileId() const;
   QString activeProfileName() const;
   QString powerState() const;
 
-  // ── Hardware ──
+  // Hardware
   bool webcamEnabled() const;
   Q_INVOKABLE void setWebcamEnabled( bool v );
   bool fnLock() const;
@@ -179,7 +179,7 @@ public:
   int displayBrightness() const;
   Q_INVOKABLE void setDisplayBrightness( int v );
 
-  // ── Water cooler ──
+  // Water cooler
   bool waterCoolerSupported() const;
   bool wcConnected() const;
   bool wcAutoControl() const;
@@ -193,25 +193,25 @@ public:
   int  wcLedGreen() const;
   int  wcLedBlue() const;
 
-  // ── ODM ──
+  // ODM
   QStringList availableODMProfiles() const;
   QString odmPerformanceProfile() const;
 
-  // ── Fan profiles ──
+  // Fan profiles
   QStringList fanProfileNames() const;
   QStringList fanProfileIds() const;
 
-  // ── Keyboard profiles ──
+  // Keyboard profiles
   QStringList keyboardProfileNames() const;
   QStringList keyboardProfileIds() const;
 
-  // ── Active profile sub-profile info ──
+  // Active profile sub-profile info
   QString activeProfileFanName() const;
   QString activeProfileFanId() const;
   QString activeProfileKeyboardName() const;
   QString activeProfileKeyboardId() const;
 
-  // ── Invokables for QML ──
+  // Invokables for QML
   Q_INVOKABLE void setActiveProfile( const QString &profileId );
   Q_INVOKABLE void setActiveFanProfile( const QString &fanProfileId );
   Q_INVOKABLE void setActiveKeyboardProfile( const QString &keyboardProfileId );
@@ -264,8 +264,8 @@ private:
   bool keyboardBacklightControlSupported() const;
 
   std::unique_ptr< ucc::UccdClient > m_client;
-  QTimer *m_fastTimer = nullptr;   // ~1 s  — temps, fans
-  QTimer *m_slowTimer = nullptr;   // ~5 s  — profiles, hw toggles
+  QTimer *m_fastTimer = nullptr;   // ~1 s - temps, fans
+  QTimer *m_slowTimer = nullptr;   // ~5 s - profiles, hw toggles
   QFileSystemWatcher *m_settingsWatcher = nullptr;
 
   // Cached monitoring values
@@ -295,7 +295,7 @@ private:
   int m_gpuVramFreqMHz = -1;
   int m_gpuCoreVoltageMv = -1;
 
-  // Profiles (parallel lists: names[i] ↔ ids[i])
+  // Profiles (parallel lists: names[i] <-> ids[i])
   QStringList m_profileNames;
   QStringList m_profileIds;
   QString m_activeProfileId;
@@ -328,7 +328,7 @@ private:
   bool m_waterCoolerSupported = false;
   bool m_wcAutoControl = true;
   bool m_wcEnabled = true;  // true = daemon controls fan/pump automatically
-  bool m_wcEnabledOverride = false;  // user explicitly toggled — don't overwrite from poll
+  bool m_wcEnabledOverride = false;  // user explicitly toggled - don't overwrite from poll
 
   // ODM profiles
   QStringList m_availableODMProfiles;

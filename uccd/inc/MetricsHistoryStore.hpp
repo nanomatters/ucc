@@ -44,7 +44,7 @@ enum class MetricId : uint8_t
   GpuFrequency,
   GpuVramFrequency,
   GpuCoreVoltage,
-  Count  ///< Sentinel — must be last
+  Count  ///< Sentinel - must be last
 };
 
 /**
@@ -81,7 +81,7 @@ struct MetricDataPoint
  * @brief Thread-safe ring buffer for hardware monitoring metrics.
  *
  * Workers push data from their own threads; the D-Bus adaptor reads via
- * querySince().  A shared_mutex allows concurrent readers with exclusive
+ * querySince(). A shared_mutex allows concurrent readers with exclusive
  * writers (each push only locks one metric's deque, so contention is minimal).
  *
  * Eviction is age-based: points older than the configured horizon are pruned
@@ -96,9 +96,7 @@ public:
 
   MetricsHistoryStore() = default;
 
-  // -----------------------------------------------------------------------
   // Writer API (called from worker threads)
-  // -----------------------------------------------------------------------
 
   /**
    * @brief Push a new data point for the given metric.
@@ -128,9 +126,7 @@ public:
     push( id, now, value );
   }
 
-  // -----------------------------------------------------------------------
   // Reader API (called from D-Bus thread)
-  // -----------------------------------------------------------------------
 
   /**
    * @brief Serialize all metrics with timestamps >= sinceMs to a JSON string.
@@ -138,9 +134,9 @@ public:
    * Output format:
    * @code
    * {
-   *   "cpuTemp": [[ts, val], [ts, val], ...],
-   *   "cpuFanDuty": [[ts, val], ...],
-   *   ...
+   * "cpuTemp": [[ts, val], [ts, val], ...],
+   * "cpuFanDuty": [[ts, val], ...],
+   * ...
    * }
    * @endcode
    *
@@ -190,15 +186,15 @@ public:
   /**
    * @brief Serialize all metrics with timestamps >= sinceMs to a compact binary blob.
    *
-   * Wire layout (native endian — same-host IPC only):
+   * Wire layout (native endian - same-host IPC only):
    * @code
-   *   Repeated for each non-empty metric series:
-   *     uint8_t  metricId
-   *     uint32_t count         (number of data points)
-   *     count × { int64_t timestampMs, double value }   (16 bytes each)
+   * Repeated for each non-empty metric series:
+   * uint8_t metricId
+   * uint32_t count (number of data points)
+   * count * { int64_t timestampMs, double value } (16 bytes each)
    * @endcode
    *
-   * Empty series are omitted.  The caller detects end-of-data by consuming
+   * Empty series are omitted. The caller detects end-of-data by consuming
    * exactly (1 + 4 + count * 16) bytes per block until the buffer is exhausted.
    */
   [[nodiscard]] std::vector< uint8_t > querySinceBinary( int64_t sinceMs ) const
@@ -223,14 +219,14 @@ public:
 
       const uint32_t count = static_cast< uint32_t >( std::distance( it, buf.end() ) );
 
-      // --- header: metricId (1 byte) + count (4 bytes) ---
+      // header: metricId (1 byte) + count (4 bytes)
       const uint8_t id = static_cast< uint8_t >( i );
       out.push_back( id );
       out.insert( out.end(),
                   reinterpret_cast< const uint8_t * >( &count ),
                   reinterpret_cast< const uint8_t * >( &count ) + sizeof( count ) );
 
-      // --- data points: int64_t ts + double value (16 bytes each) ---
+      // data points: int64_t ts + double value (16 bytes each)
       for ( ; it != buf.end(); ++it )
       {
         out.insert( out.end(),
@@ -245,14 +241,12 @@ public:
     return out;
   }
 
-  // -----------------------------------------------------------------------
   // Configuration
-  // -----------------------------------------------------------------------
 
   /**
    * @brief Set the history horizon in seconds.
    *
-   * Points older than (now – horizon) will be evicted on the next push().
+   * Points older than (now - horizon) will be evicted on the next push().
    */
   void setHorizon( int seconds )
   {

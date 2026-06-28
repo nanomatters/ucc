@@ -25,11 +25,9 @@ import * as Slider from 'resource:///org/gnome/shell/ui/slider.js';
 
 import { UccdClient } from './uccdClient.js';
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
-/** Create a label pair:  "CPU Temp    68 °C" */
+/** Create a label pair: "CPU Temp 68 degC" */
 function labelRow(labelText) {
     const box = new St.BoxLayout({
         style_class: 'ucc-metric-row',
@@ -63,13 +61,13 @@ function mapPowerState(raw) {
  * Unwrap a QSettings @ByteArray()-encoded INI value.
  *
  * Qt's QSettings (IniFormat) stores QByteArray values as:
- *   key="@ByteArray(payload)"
+ * key="@ByteArray(payload)"
  * with all inner quotes and backslashes escaped (\" and \\).
  *
  * GLib.KeyFile.get_value() returns the raw line value, so we must:
- *   1. Strip the surrounding double-quotes
- *   2. Unescape INI encoding (\x → x)
- *   3. Strip the @ByteArray(...) wrapper
+ * 1. Strip the surrounding double-quotes
+ * 2. Unescape INI encoding (\x -> x)
+ * 3. Strip the @ByteArray(...) wrapper
  * before JSON.parse() can consume the payload.
  */
 function unwrapQByteArray(raw) {
@@ -78,16 +76,14 @@ function unwrapQByteArray(raw) {
     // 1. Strip surrounding double-quotes added by QSettings IniFormat
     if (val.startsWith('"') && val.endsWith('"'))
         val = val.slice(1, -1);
-    // 2. Unescape: \" → ", \\ → \  (any \x → x in one pass)
+    // 2. Unescape: \" -> ", \\ -> \ (any \x -> x in one pass)
     val = val.replace(/\\(.)/g, '$1');
     // 3. Strip @ByteArray(...) wrapper
     const m = val.match(/^@ByteArray\((.*)\)$/s);
     return m ? m[1] : val;
 }
 
-// ---------------------------------------------------------------------------
 // Indicator
-// ---------------------------------------------------------------------------
 
 const UccIndicator = GObject.registerClass(
 class UccIndicator extends PanelMenu.Button {
@@ -96,7 +92,7 @@ class UccIndicator extends PanelMenu.Button {
         super._init(0.5, 'UCC');
         this._ext = extensionObj;
 
-        // Panel icon — use the project's own tray icon (installed to share/pixmaps)
+        // Panel icon - use the project's own tray icon (installed to share/pixmaps)
         this._icon = new St.Icon({
             icon_name: 'ucc-tray',
             style_class: 'system-status-icon',
@@ -167,12 +163,10 @@ class UccIndicator extends PanelMenu.Button {
         this._startTimers();
     }
 
-    // -----------------------------------------------------------------------
     // Popup layout
-    // -----------------------------------------------------------------------
 
     _buildPopup() {
-        // --- Tab bar ---
+        // Tab bar
         const tabItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
         this._tabBar = new St.BoxLayout({ style_class: 'ucc-tab-bar', x_expand: true });
         tabItem.add_child(this._tabBar);
@@ -194,7 +188,7 @@ class UccIndicator extends PanelMenu.Button {
         // Separator
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // --- Tab content container ---
+        // Tab content container
         const contentItem = new PopupMenu.PopupBaseMenuItem({
             reactive: false,
             can_focus: false,
@@ -215,7 +209,7 @@ class UccIndicator extends PanelMenu.Button {
         // Separator before footer
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // --- Footer: connection status + power state ---
+        // Footer: connection status + power state
         const footerItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
         const footerBox = new St.BoxLayout({ style_class: 'ucc-footer', x_expand: true });
         this._connLabel = new St.Label({
@@ -258,9 +252,7 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
-    // -----------------------------------------------------------------------
     // Dashboard tab
-    // -----------------------------------------------------------------------
 
     _buildDashboardTab() {
         const box = new St.BoxLayout({
@@ -277,7 +269,7 @@ class UccIndicator extends PanelMenu.Button {
         this._sysModelLabel.visible = false;
         box.add_child(this._sysModelLabel);
 
-        // ── CPU Section ──
+        // CPU Section
         this._cpuTitleLabel = new St.Label({
             text: 'CPU',
             style_class: 'ucc-cpu-gpu-model',
@@ -291,7 +283,7 @@ class UccIndicator extends PanelMenu.Button {
         this._lCpuFan   = labelRow('Fan');    cpuGrid.add_child(this._lCpuFan.box);
         box.add_child(cpuGrid);
 
-        // ── GPU Section ──
+        // GPU Section
         this._gpuTitleLabel = new St.Label({
             text: 'GPU',
             style_class: 'ucc-cpu-gpu-model',
@@ -316,10 +308,8 @@ class UccIndicator extends PanelMenu.Button {
         this._tabs['dashboard'] = box;
     }
 
-    // -----------------------------------------------------------------------
-    // Profile tab  (GNOME-native PopupMenu with radio-dot ornaments,
+    // Profile tab (GNOME-native PopupMenu with radio-dot ornaments,
     //               like the Power Mode / Wi-Fi / Bluetooth selectors)
-    // -----------------------------------------------------------------------
 
     _buildProfileTab() {
         // We use a PopupMenuSection so we get native GNOME menu items
@@ -337,7 +327,7 @@ class UccIndicator extends PanelMenu.Button {
         });
         scroll.set_child(box);
 
-        // ── System Profile ──
+        // System Profile
         box.add_child(new St.Label({ text: 'System Profile', style_class: 'ucc-section-title' }));
         this._profileListBox = new St.BoxLayout({
             vertical: true,
@@ -346,7 +336,7 @@ class UccIndicator extends PanelMenu.Button {
         });
         box.add_child(this._profileListBox);
 
-        // ── Fan Profile ──
+        // Fan Profile
         this._fanProfileHeader = new St.Label({ text: 'Fan Profile', style_class: 'ucc-section-title' });
         box.add_child(this._fanProfileHeader);
         this._fanProfileListBox = new St.BoxLayout({
@@ -356,7 +346,7 @@ class UccIndicator extends PanelMenu.Button {
         });
         box.add_child(this._fanProfileListBox);
 
-        // ── Keyboard Profile ──
+        // Keyboard Profile
         this._kbProfileHeader = new St.Label({ text: 'Keyboard Profile', style_class: 'ucc-section-title' });
         box.add_child(this._kbProfileHeader);
         this._kbProfileListBox = new St.BoxLayout({
@@ -369,9 +359,7 @@ class UccIndicator extends PanelMenu.Button {
         this._tabs['profile'] = scroll;
     }
 
-    // -----------------------------------------------------------------------
     // Hardware tab
-    // -----------------------------------------------------------------------
 
     _buildHardwareTab() {
         const box = new St.BoxLayout({
@@ -457,9 +445,7 @@ class UccIndicator extends PanelMenu.Button {
         this._tabs['hardware'] = box;
     }
 
-    // -----------------------------------------------------------------------
     // Water Cooler tab
-    // -----------------------------------------------------------------------
 
     _buildWaterCoolerTab() {
         const box = new St.BoxLayout({
@@ -571,9 +557,7 @@ class UccIndicator extends PanelMenu.Button {
         this._tabs['watercooler'] = box;
     }
 
-    // -----------------------------------------------------------------------
-    // Profile UI rebuild  (radio-dot ornament style, like GNOME Power Mode)
-    // -----------------------------------------------------------------------
+    // Profile UI rebuild (radio-dot ornament style, like GNOME Power Mode)
 
     /** Build a single chooser row with a radio-dot icon for the active item. */
     _makeChooserRow(name, isActive, onActivate) {
@@ -699,9 +683,7 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
-    // -----------------------------------------------------------------------
     // Connection UI
-    // -----------------------------------------------------------------------
 
     _updateConnectionUI() {
         const c = this._state.connected;
@@ -714,9 +696,7 @@ class UccIndicator extends PanelMenu.Button {
             : 'dialog-warning-symbolic';
     }
 
-    // -----------------------------------------------------------------------
     // Data loading
-    // -----------------------------------------------------------------------
 
     _loadCapabilities() {
         if (!this._client.isDeviceSupported()) {
@@ -775,7 +755,7 @@ class UccIndicator extends PanelMenu.Button {
             } catch { /* ignore */ }
         }
 
-        // Load uccrc once — QSettings (IniFormat) wraps byte arrays with
+        // Load uccrc once - QSettings (IniFormat) wraps byte arrays with
         // @ByteArray(...) which GLib.KeyFile returns verbatim.
         // We must use get_value() (raw) instead of get_string() because
         // GLib cannot interpret the @ByteArray encoding.
@@ -918,9 +898,7 @@ class UccIndicator extends PanelMenu.Button {
         return idx >= 0 ? s.keyboardProfileIds[idx] : ref;
     }
 
-    // -----------------------------------------------------------------------
     // Polling
-    // -----------------------------------------------------------------------
 
     _startTimers() {
         this._fastTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
@@ -1036,9 +1014,7 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
-    // -----------------------------------------------------------------------
     // Dashboard update
-    // -----------------------------------------------------------------------
 
     _updateDashboard() {
         const s = this._state;
@@ -1088,13 +1064,9 @@ class UccIndicator extends PanelMenu.Button {
         }
     }
 
-    // -----------------------------------------------------------------------
     // Lifecycle
-    // -----------------------------------------------------------------------
 
-    // -----------------------------------------------------------------------
     // Water cooler control enable/disable (matches KDE wcConnected logic)
-    // -----------------------------------------------------------------------
 
     _updateWaterCoolerControlsEnabled() {
         const enabled = this._state.wcConnected && !this._state.wcAutoControl;
@@ -1110,14 +1082,12 @@ class UccIndicator extends PanelMenu.Button {
         if (this._wcLedSwitch) this._wcLedSwitch.reactive = wcConnected;
     }
 
-    // -----------------------------------------------------------------------
     // uccrc file monitor
-    // -----------------------------------------------------------------------
 
     _startUccrcMonitor() {
         try {
             const file = Gio.File.new_for_path(this._uccrcPath);
-            // Monitor the parent directory — some editors replace the file
+            // Monitor the parent directory - some editors replace the file
             // (delete + create) which breaks a direct file monitor
             const parent = file.get_parent();
             if (!parent) return;
@@ -1167,9 +1137,7 @@ class UccIndicator extends PanelMenu.Button {
     }
 });  // end GObject.registerClass
 
-// ---------------------------------------------------------------------------
 // Extension entry point
-// ---------------------------------------------------------------------------
 
 export default class UccExtension extends Extension {
     enable() {

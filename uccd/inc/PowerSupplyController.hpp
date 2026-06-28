@@ -36,8 +36,8 @@ enum class PowerSupplyType
  * @brief Charge type enumeration
  *
  * Definitions as of 2023-08-11 from
- *   https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-power
- *   Section: /sys/class/power_supply/<supply_name>/charge_type
+ * https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-power
+ * Section: /sys/class/power_supply/<supply_name>/charge_type
  */
 enum class ChargeType
 {
@@ -256,7 +256,7 @@ public:
 
   /**
    * @brief Get the first battery power supply
-   * @return Optional PowerSupplyController for first battery, or nullopt if none found
+   * @return Optional PowerSupplyController for first battery or nullopt if none found
    */
   [[nodiscard]] static std::optional< PowerSupplyController > getFirstBattery() noexcept
   {
@@ -270,7 +270,7 @@ public:
 
   /**
    * @brief Get the first battery that supports charge_type
-   * @return Optional PowerSupplyController for a battery supporting charge_type, or nullopt if none found
+   * @return Optional PowerSupplyController for a battery supporting charge_type or nullopt if none found
    */
   [[nodiscard]] static std::optional< PowerSupplyController > getFirstBatteryWithChargeType() noexcept
   {

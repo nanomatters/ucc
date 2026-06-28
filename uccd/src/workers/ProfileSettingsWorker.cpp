@@ -28,7 +28,7 @@ void ProfileSettingsWorker::start()
 
   // Hardware capabilities (TDP limits, charging, YCbCr420, NVIDIA power limits)
   // are read directly by UccDBusService::readHardwareCapabilities() before this
-  // worker is created.  We only need to initialise charging internal state here
+  // worker is created. We only need to initialise charging internal state here
   // so that the getter methods (getCurrentChargingProfile etc.) work.
   initializeChargingSettings();
 }
@@ -217,7 +217,7 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
 }
 
 // =====================================================================
-//  Private methods — ODM Profile
+//  Private methods - ODM Profile
 // =====================================================================
 
 void ProfileSettingsWorker::detectODMProfileType()
@@ -384,7 +384,7 @@ void ProfileSettingsWorker::applyProfileViaAPI( const std::string &chosenProfile
 }
 
 // =====================================================================
-//  Private methods — ODM Power Limits
+//  Private methods - ODM Power Limits
 // =====================================================================
 
 void ProfileSettingsWorker::logLine( const std::string &message )
@@ -488,7 +488,7 @@ void ProfileSettingsWorker::applyODMPowerLimits()
 }
 
 // =====================================================================
-//  Private methods — Charging
+//  Private methods - Charging
 // =====================================================================
 
 void ProfileSettingsWorker::initializeChargingSettings() noexcept
@@ -515,7 +515,7 @@ void ProfileSettingsWorker::initializeChargingSettings() noexcept
 }
 
 // =====================================================================
-//  Private methods — YCbCr 4:2:0
+//  Private methods - YCbCr 4:2:0
 // =====================================================================
 
 void ProfileSettingsWorker::checkYCbCr420Availability()
@@ -606,7 +606,7 @@ void ProfileSettingsWorker::applyYCbCr420Workaround()
 }
 
 // =====================================================================
-//  Private methods — NVIDIA Power Control
+//  Private methods - NVIDIA Power Control
 // =====================================================================
 
 void ProfileSettingsWorker::initNVIDIAPowerCTRL()

@@ -226,7 +226,7 @@ void MainWindow::onKeyboardBrightnessChanged( int value )
   if ( m_initializing )
     return;
 
-  // Update visualizer preview — block colorsChanged signal to avoid double hardware write
+  // Update visualizer preview - block colorsChanged signal to avoid double hardware write
   if ( m_keyboardVisualizer )
   {
     m_keyboardVisualizer->blockSignals( true );
@@ -534,7 +534,7 @@ void MainWindow::onRemoveKeyboardProfileClicked()
 
   if ( reply == QMessageBox::Yes )
   {
-    // Remove from persistent storage — this emits customKeyboardProfilesChanged
+    // Remove from persistent storage - this emits customKeyboardProfilesChanged
     // which rebuilds the combo automatically via reloadKeyboardProfiles()
     if ( not m_profileManager->deleteKeyboardProfile( currentId ) )
       QMessageBox::warning(this, "Remove Failed", "Failed to remove custom keyboard profile.");

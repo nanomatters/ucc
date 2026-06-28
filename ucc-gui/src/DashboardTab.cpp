@@ -121,7 +121,7 @@ void DashboardTab::setupUI()
   const QString innerTextHex = (windowBg.value() < 128) ? QString("#ffffff") : QString("#000000");
   m_ringColorHex = QString("#d32f2f");  // Red for disconnected state and other alerts
 
-  // Title — use laptop model from daemon if available
+  // Title - use laptop model from daemon if available
   // Use a grid so the title is centered over the full row width while
   // the checkbox floats to the right edge, both occupying the same cell.
   QGridLayout *titleLayout = new QGridLayout();
@@ -153,7 +153,7 @@ void DashboardTab::setupUI()
     m_waterCoolerEnableCheckBox->setVisible( false );
   }
 
-  // Both widgets share the same cell — title centered, checkbox right-aligned
+  // Both widgets share the same cell - title centered, checkbox right-aligned
   titleLayout->addWidget( titleLabel,                0, 0, Qt::AlignCenter );
   titleLayout->addWidget( m_waterCoolerEnableCheckBox, 0, 0, Qt::AlignRight | Qt::AlignVCenter );
   layout->addLayout( titleLayout );
@@ -168,7 +168,7 @@ void DashboardTab::setupUI()
   m_waterCoolerStatusLabel->setStyleSheet( QString("font-weight: bold; color: %1;").arg(m_ringColorHex) );
   m_waterCoolerStatusLabel->setVisible( false );
 
-  // makeCard: compact value+unit+caption cell — no border (the panel provides it)
+  // makeCard: compact value+unit+caption cell - no border (the panel provides it)
   auto makeCard = [&]( const QString &caption, const QString &unit, QLabel *&valueLabel ) -> QWidget * {
     QWidget *card = new QWidget();
     QVBoxLayout *vl = new QVBoxLayout( card );
@@ -266,7 +266,7 @@ void DashboardTab::setupUI()
     makeCard( "CPU - Power",     "W",  m_cpuPowerLabel )
   }) );
 
-  // GPU section — single section with toggle between dGPU and iGPU
+  // GPU section - single section with toggle between dGPU and iGPU
   // Initial GPU header text: prefer dGPU model, fall back to iGPU model
   const QString gpuHeaderText = !m_dGpuModel.isEmpty() ? m_dGpuModel
                                : !m_iGpuModel.isEmpty() ? m_iGpuModel
@@ -281,14 +281,14 @@ void DashboardTab::setupUI()
             "QPushButton:hover { background-color: %2; }").arg(midHex, highlightHex) );
   m_gpuToggleButton->setVisible( false );  // Hidden until both GPUs detected
 
-  // Same grid trick as title row: both share cell (0,0) — label centered, button right-aligned
+  // Same grid trick as title row: both share cell (0,0) - label centered, button right-aligned
   QGridLayout *gpuHeaderLayout = new QGridLayout();
   gpuHeaderLayout->setContentsMargins( 0, 0, 0, 0 );
   gpuHeaderLayout->addWidget( m_gpuHeaderLabel,  0, 0, Qt::AlignCenter );
   gpuHeaderLayout->addWidget( m_gpuToggleButton, 0, 0, Qt::AlignRight | Qt::AlignVCenter );
   layout->addLayout( gpuHeaderLayout );
 
-  // dGPU panel (default view) — two-row box: main metrics + NVIDIA extended row (hidden until data)
+  // dGPU panel (default view) - two-row box: main metrics + NVIDIA extended row (hidden until data)
   m_dGpuGaugeContainer = new QWidget();
   {
     QVBoxLayout *outerVL = new QVBoxLayout( m_dGpuGaugeContainer );
@@ -320,7 +320,7 @@ void DashboardTab::setupUI()
     m_dGpuExtraHSep->setVisible( false );
     panelVL->addWidget( m_dGpuExtraHSep );
 
-    // Row 2: NVIDIA extended metrics — hidden until data arrives
+    // Row 2: NVIDIA extended metrics - hidden until data arrives
     m_dGpuExtraRow = makeCardRow({
       makeCard( "GPU Load",     "%",   m_gpuComputeUtilLabel ),
       makeCard( "VRAM Load",    "%",   m_gpuMemoryUtilLabel ),
@@ -427,7 +427,7 @@ void DashboardTab::connectSignals()
 
   Q_UNUSED(m_waterCoolerDbus)
 
-  // Water cooler enable toggle button → emit signal for cross-tab sync and update status
+  // Water cooler enable toggle button -> emit signal for cross-tab sync and update status
   connect( m_waterCoolerEnableCheckBox, &QPushButton::toggled,
            this, [this]() {
              updateWaterCoolerStatus();
@@ -479,7 +479,7 @@ void DashboardTab::updateWaterCoolerStatus()
       QString("<span style='color: %1;'>&#9679;</span> Water Cooler: %2").arg( colorHex, statusText ) );
   };
 
-  // Status progression: Disabled → Disconnected → Searching → Connected
+  // Status progression: Disabled -> Disconnected -> Searching -> Connected
   if ( !wcEnabled )
   {
     emitStatus( QStringLiteral("Disabled"), m_ringColorHex );

@@ -92,15 +92,15 @@ void KeyboardVisualizerWidget::setupKeyboardLayout()
   createKeyButton( 123, getKeyLabel(123), 0, 18 ); // Page Up
   createKeyButton( 124, getKeyLabel(124), 0, 19 ); // Page Down
 
-  // Row 1: ^ 1 2 3 4 5 6 7 8 9 0 ß ' + Backspace
+  // Row 1: ^ 1 2 3 4 5 6 7 8 9 0 ss ' + Backspace
   createKeyButton( 84, getKeyLabel(84), 1, 0 );   // ^
   for ( int i = 0; i < 12; ++i )
   {
-    createKeyButton( 85 + i, getKeyLabel(85 + i), 1, i + 1 );  // 1-0 ß '
+    createKeyButton( 85 + i, getKeyLabel(85 + i), 1, i + 1 );  // 1-0 ss '
   }
   createKeyButton( 98, getKeyLabel(98), 1, 13, 2, 1 );  // Backspace (wider)
 
-  // Row 2: Tab + q w e r t z u i o p ü +
+  // Row 2: Tab + q w e r t z u i o p u umlaut +
   createKeyButton( 63, getKeyLabel(63), 2, 0, 2, 1 );  // Tab (wider)
   createKeyButton( 65, getKeyLabel(65), 2, 2 );  // q
   createKeyButton( 66, getKeyLabel(66), 2, 3 );  // w
@@ -112,10 +112,10 @@ void KeyboardVisualizerWidget::setupKeyboardLayout()
   createKeyButton( 72, getKeyLabel(72), 2, 9 );  // i
   createKeyButton( 73, getKeyLabel(73), 2, 10 ); // o
   createKeyButton( 74, getKeyLabel(74), 2, 11 ); // p
-  createKeyButton( 75, getKeyLabel(75), 2, 12 ); // ü
+  createKeyButton( 75, getKeyLabel(75), 2, 12 ); // u umlaut
   createKeyButton( 76, getKeyLabel(76), 2, 13 ); // +
 
-  // Row 3: Caps + a s d f g h j k l ö ä # + Enter
+  // Row 3: Caps + a s d f g h j k l o umlaut a umlaut # + Enter
   createKeyButton( 42, getKeyLabel(42), 3, 0, 2, 1 );  // Caps Lock (wider)
   createKeyButton( 44, getKeyLabel(44), 3, 2 );  // a
   createKeyButton( 45, getKeyLabel(45), 3, 3 );  // s
@@ -126,8 +126,8 @@ void KeyboardVisualizerWidget::setupKeyboardLayout()
   createKeyButton( 50, getKeyLabel(50), 3, 8 );  // j
   createKeyButton( 51, getKeyLabel(51), 3, 9 );  // k
   createKeyButton( 52, getKeyLabel(52), 3, 10 ); // l
-  createKeyButton( 53, getKeyLabel(53), 3, 11 ); // ö
-  createKeyButton( 54, getKeyLabel(54), 3, 12 ); // ä
+  createKeyButton( 53, getKeyLabel(53), 3, 11 ); // o umlaut
+  createKeyButton( 54, getKeyLabel(54), 3, 12 ); // a umlaut
   createKeyButton( 55, getKeyLabel(55), 3, 13 ); // #
   createKeyButton( 77, getKeyLabel(77), 2, 14, 1, 2 );  // Enter (taller, spans 2 cols)
 

@@ -26,7 +26,7 @@ public:
     void setTitle(const QString &title) { m_title = title; update(); }
     QString title() const { return m_title; }
 
-    /** Set the live crosshair position (temperature in °C, duty in %). */
+    /** Set the live crosshair position (temperature in degC, duty in %). */
     void setCrosshair( double temp, double duty );
     /** Remove the crosshair from the display. */
     void clearCrosshair();

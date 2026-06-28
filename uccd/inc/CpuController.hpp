@@ -109,7 +109,7 @@ public:
  * @brief Controller for CPU frequency and governor settings
  *
  * Manages scaling governors, frequencies, energy performance preferences,
- * online cores, and turbo/boost settings for all logical cores.
+ * online cores and turbo/boost settings for all logical cores.
  */
 class CpuController
 {
@@ -245,10 +245,10 @@ public:
    * P-core vs other P-cores vs E-cores all have different cpuinfo_max_freq on
    * heterogeneous Intel/AMD CPUs with Turbo Boost Max 3.0 or hybrid topologies).
    *
-   * @param core          The logical core to compute for
-   * @param targetMax     The requested maximum frequency (same semantics as setGovernorScalingMaxFrequency)
-   * @param acpiFallback  True when scaling driver is acpi-cpufreq and boost is available
-   * @return The effective frequency that will be set, or nullopt if sysfs nodes are unavailable
+   * @param core The logical core to compute for
+   * @param targetMax The requested maximum frequency (same semantics as setGovernorScalingMaxFrequency)
+   * @param acpiFallback True when scaling driver is acpi-cpufreq and boost is available
+   * @return The effective frequency that will be set or nullopt if sysfs nodes are unavailable
    */
   static std::optional< int32_t > computeEffectiveMaxFreq( const LogicalCpuController &core,
                                                            std::optional< int32_t > targetMax,
@@ -311,9 +311,9 @@ public:
    * Mirrors the per-core clamping and frequency-snapping logic of
    * setGovernorScalingMinFrequency().
    *
-   * @param core       The logical core to compute for
-   * @param targetMin  The requested minimum frequency (same semantics as setGovernorScalingMinFrequency)
-   * @return The effective frequency that will be set, or nullopt if sysfs nodes are unavailable
+   * @param core The logical core to compute for
+   * @param targetMin The requested minimum frequency (same semantics as setGovernorScalingMinFrequency)
+   * @return The effective frequency that will be set or nullopt if sysfs nodes are unavailable
    */
   static std::optional< int32_t > computeEffectiveMinFreq( const LogicalCpuController &core,
                                                            std::optional< int32_t > targetMin )

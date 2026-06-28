@@ -32,7 +32,7 @@
 #include <syslog.h>
 
 /**
- * @brief Manages TCC profile loading, saving, and manipulation
+ * @brief Manages TCC profile loading, saving and manipulation
  *
  * Handles reading/writing profiles from/to JSON files, profile validation,
  * and merging with default profiles. Mirrors TypeScript ConfigHandler functionality.
@@ -157,11 +157,11 @@ public:
    */
   /**
    * @brief Parse profile from JSON string
-   * 
+   *
    * SECURITY NOTE (VULN-27): This function uses hand-rolled JSON parsing.
    * For better security and maintainability, this should be refactored to use
    * nlohmann::json instead. The library is already a project dependency and
-   * provides automatic escaping, proper error handling, and type safety.
+   * provides automatic escaping, proper error handling and type safety.
   * Refactoring should preserve support for the current profile JSON schema.
    */
   [[nodiscard]] static UccProfile parseProfileJSON( const std::string &json )
@@ -381,10 +381,10 @@ public:
    * Determines power state, looks up the assigned profile ID from the state map,
    * and returns the parsed profile (from saved or built-in sources).
    *
-   * @param deviceId  Device identifier for device-specific built-in profiles
-   * @param stateMap  Map of power-state string -> profile ID
-   * @param savedProfiles  Map of profile ID -> serialized JSON
-   * @return The resolved UccProfile, or a default-constructed (empty) profile on failure
+   * @param deviceId Device identifier for device-specific built-in profiles
+   * @param stateMap Map of power-state string -> profile ID
+   * @param savedProfiles Map of profile ID -> serialized JSON
+   * @return The resolved UccProfile or a default-constructed (empty) profile on failure
    */
   [[nodiscard]] UccProfile resolveStartupProfile(
     std::optional< UniwillDeviceID > deviceId,
@@ -592,11 +592,11 @@ private:
     return oss.str();
   }
 
-  // --- Public serialization utilities ---
+  // Public serialization utilities
 public:
   /**
    * @brief Serialize single profile to JSON (complete format for file storage)
-   * 
+   *
    * SECURITY NOTE (VULN-27): This function uses string concatenation to build JSON.
    * Modern approach: refactor to use nlohmann::json::object for type-safe serialization
    * with automatic proper escaping and validation. The library is already a dependency.

@@ -1,6 +1,6 @@
 /*
- * Unit tests for ProfileManager – parseProfileJSON() / profileToJSON()
- * round-trip, and the low-level extract helpers.
+ * Unit tests for ProfileManager - parseProfileJSON() / profileToJSON()
+ * round-trip and the low-level extract helpers.
  */
 
 #include <QTest>
@@ -60,7 +60,7 @@ private:
 
 private slots:
 
-  // ---- parseProfileJSON() – field extraction ---------------------------
+  // parseProfileJSON() - field extraction
 
   void parseProfile_idName()
   {
@@ -147,7 +147,7 @@ private slots:
     QCOMPARE( p.chargeEndThreshold,    80 );
   }
 
-  // ---- round-trip: parse → serialize → re-parse -------------------------
+  // round-trip: parse -> serialize -> re-parse
 
   void roundTrip()
   {
@@ -178,7 +178,7 @@ private slots:
     }
   }
 
-  // ---- parseFanTableFromJSON() -----------------------------------------
+  // parseFanTableFromJSON()
 
   void parseFanTable_valid()
   {

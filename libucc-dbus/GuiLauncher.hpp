@@ -30,8 +30,8 @@ namespace ucc
  * installation prefix. Falls back to invoking via @c /usr/bin/env when the
  * executable is not on the standard search path (e.g. custom installs).
  *
- * @param args  Optional arguments forwarded to ucc-gui.
- * @return true  if the OS accepted the launch request.
+ * @param args Optional arguments forwarded to ucc-gui.
+ * @return true if the OS accepted the launch request.
  * @return false if the executable could not be started.
  */
 inline bool launchGui( const QStringList &args = {} )

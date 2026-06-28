@@ -20,9 +20,7 @@
 
 #include <algorithm>
 
-// ---------------------------------------------------------------------------
 // Construction
-// ---------------------------------------------------------------------------
 
 TrayBackend::TrayBackend( QObject *parent )
   : QObject( parent )
@@ -70,9 +68,7 @@ TrayBackend::TrayBackend( QObject *parent )
   m_slowTimer->start();
 }
 
-// ---------------------------------------------------------------------------
 // Connection
-// ---------------------------------------------------------------------------
 
 bool TrayBackend::connected() const
 {
@@ -89,20 +85,15 @@ bool TrayBackend::keyboardBacklightControlSupported() const
   return m_keyboardBacklightControlSupported;
 }
 
-// ---------------------------------------------------------------------------
 // Monitoring getters
-// ---------------------------------------------------------------------------
 // System info getters
-// ---------------------------------------------------------------------------
 
 QString TrayBackend::laptopModel() const { return m_laptopModel; }
 QString TrayBackend::cpuModel()    const { return m_cpuModel; }
 QString TrayBackend::dGpuModel()   const { return m_dGpuModel; }
 QString TrayBackend::iGpuModel()   const { return m_iGpuModel; }
 
-// ---------------------------------------------------------------------------
 // Monitoring getters
-// ---------------------------------------------------------------------------
 
 int    TrayBackend::cpuTemp()      const { return m_cpuTemp; }
 int    TrayBackend::gpuTemp()      const { return m_gpuTemp; }
@@ -129,9 +120,7 @@ int    TrayBackend::gpuMemClockOffsetMHz() const { return m_gpuMemClockOffsetMHz
 int    TrayBackend::gpuVramFreqMHz() const { return m_gpuVramFreqMHz; }
 int    TrayBackend::gpuCoreVoltageMv() const { return m_gpuCoreVoltageMv; }
 
-// ---------------------------------------------------------------------------
 // Profile getters
-// ---------------------------------------------------------------------------
 
 QStringList TrayBackend::profileNames() const { return m_profileNames; }
 QStringList TrayBackend::profileIds()   const { return m_profileIds; }
@@ -139,9 +128,7 @@ QString TrayBackend::activeProfileId() const { return m_activeProfileId; }
 QString TrayBackend::activeProfileName() const { return m_activeProfileName; }
 QString TrayBackend::powerState() const { return m_powerState; }
 
-// ---------------------------------------------------------------------------
 // Hardware toggles
-// ---------------------------------------------------------------------------
 
 bool TrayBackend::webcamEnabled() const { return m_webcamEnabled; }
 
@@ -176,9 +163,7 @@ void TrayBackend::setDisplayBrightness( int v )
   }
 }
 
-// ---------------------------------------------------------------------------
 // Water cooler
-// ---------------------------------------------------------------------------
 
 bool TrayBackend::waterCoolerSupported() const { return m_waterCoolerSupported; }
 bool TrayBackend::wcConnected()           const { return m_powerState == QStringLiteral( "AC w/ Water Cooler" ); }
@@ -251,39 +236,29 @@ void TrayBackend::setWcLed( int r, int g, int b, int mode )
   }
 }
 
-// ---------------------------------------------------------------------------
 // ODM profiles
-// ---------------------------------------------------------------------------
 
 QStringList TrayBackend::availableODMProfiles() const { return m_availableODMProfiles; }
 QString TrayBackend::odmPerformanceProfile() const { return m_odmPerformanceProfile; }
 
-// ---------------------------------------------------------------------------
 // Fan profiles
-// ---------------------------------------------------------------------------
 
 QStringList TrayBackend::fanProfileNames() const { return m_fanProfileNames; }
 QStringList TrayBackend::fanProfileIds()   const { return m_fanProfileIds; }
 
-// ---------------------------------------------------------------------------
 // Active profile sub-profile info
-// ---------------------------------------------------------------------------
 
 QString TrayBackend::activeProfileFanName() const { return m_activeProfileFanName; }
 QString TrayBackend::activeProfileFanId() const { return m_activeProfileFanId; }
 QString TrayBackend::activeProfileKeyboardName() const { return m_activeProfileKeyboardName; }
 QString TrayBackend::activeProfileKeyboardId() const { return m_activeProfileKeyboardId; }
 
-// ---------------------------------------------------------------------------
 // Keyboard profiles (from local settings)
-// ---------------------------------------------------------------------------
 
 QStringList TrayBackend::keyboardProfileNames() const { return m_keyboardProfileNames; }
 QStringList TrayBackend::keyboardProfileIds()   const { return m_keyboardProfileIds; }
 
-// ---------------------------------------------------------------------------
 // Invokable actions
-// ---------------------------------------------------------------------------
 
 void TrayBackend::setActiveProfile( const QString &profileId )
 {
@@ -295,7 +270,7 @@ void TrayBackend::setActiveProfile( const QString &profileId )
     m_activeProfileName = ( idx >= 0 ) ? m_profileNames[ idx ] : profileId;
     emit activeProfileChanged();
 
-    // Refresh power limits – they may change with the profile
+    // Refresh power limits - they may change with the profile
     pollSlowState();
   }
 }
@@ -379,9 +354,7 @@ void TrayBackend::refreshAll()
   pollSlowState();
 }
 
-// ---------------------------------------------------------------------------
 // Polling slots
-// ---------------------------------------------------------------------------
 
 void TrayBackend::pollMetrics()
 {
@@ -472,7 +445,7 @@ void TrayBackend::pollSlowState()
         m_wcEnabledOverride = false;
       }
 
-      // Extract fan profile reference — skip if user manually overrode it
+      // Extract fan profile reference - skip if user manually overrode it
       auto fanObj = obj[ "fan" ].toObject();
       auto fanId = fanObj[ "fanProfile" ].toString();
 
@@ -501,7 +474,7 @@ void TrayBackend::pollSlowState()
         changed = true;
       }
 
-      // Extract keyboard profile reference — skip if user manually overrode it
+      // Extract keyboard profile reference - skip if user manually overrode it
       auto kbId = obj[ "selectedKeyboardProfile" ].toString();
       if ( !m_keyboardProfileOverride && kbId != m_activeProfileKeyboardId )
       {
@@ -562,9 +535,7 @@ void TrayBackend::pollSlowState()
 
 }
 
-// ---------------------------------------------------------------------------
 // Daemon signal handlers
-// ---------------------------------------------------------------------------
 
 void TrayBackend::onDaemonProfileChanged( const QString &profileId,
                                           const QString &keyboardProfileId,
@@ -610,7 +581,7 @@ void TrayBackend::onDaemonProfileChanged( const QString &profileId,
 void TrayBackend::onSettingsFileChanged( const QString &path )
 {
   // Some editors replace the file (delete + create) rather than writing in-place,
-  // which removes it from the watch list.  Re-add after a short delay.
+  // which removes it from the watch list. Re-add after a short delay.
   QTimer::singleShot( 500, this, [this, path]() {
     if ( QFile::exists( path ) && !m_settingsWatcher->files().contains( path ) )
       m_settingsWatcher->addPath( path );
@@ -646,9 +617,7 @@ void TrayBackend::onConnectionStatusChanged( bool connected )
   }
 }
 
-// ---------------------------------------------------------------------------
 // One-time loaders
-// ---------------------------------------------------------------------------
 
 void TrayBackend::loadProfiles()
 {
@@ -795,9 +764,7 @@ void TrayBackend::loadCapabilities()
   }
 }
 
-// ---------------------------------------------------------------------------
 // Local settings loaders (custom fan + keyboard profiles from ~/.config/uccrc)
-// ---------------------------------------------------------------------------
 
 void TrayBackend::loadLocalProfiles()
 {
@@ -913,9 +880,7 @@ void TrayBackend::loadLocalProfiles()
     m_activeProfileKeyboardName = resolveKeyboardProfileName( m_activeProfileKeyboardId );
 }
 
-// ---------------------------------------------------------------------------
-// Resolvers: fan & keyboard profile ID → display name
-// ---------------------------------------------------------------------------
+// Resolvers: fan & keyboard profile ID -> display name
 
 QString TrayBackend::resolveFanProfileName( const QString &fanProfileId ) const
 {

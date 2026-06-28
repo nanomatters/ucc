@@ -179,7 +179,7 @@ struct UccProfileKeyboard
  * @brief Complete TCC profile
  *
  * Contains all settings for a system profile including CPU, display,
- * fan control, webcam, ODM, and keyboard settings.
+ * fan control, webcam, ODM and keyboard settings.
  */
 struct UccProfile
 {
@@ -198,7 +198,7 @@ struct UccProfile
   std::string chargingPriority; ///< USB-C PD charging priority (e.g. "charge_battery", "performance")
   std::string chargeType;       ///< charge type: "Standard" or "Custom"
   int32_t chargeStartThreshold = -1; ///< start charging below this % (-1 = not set)
-  int32_t chargeEndThreshold   = -1; ///< stop charging at this %  (-1 = not set)
+  int32_t chargeEndThreshold   = -1; ///< stop charging at this % (-1 = not set)
 
   UccProfile() = default;
 

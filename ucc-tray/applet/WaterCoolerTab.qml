@@ -19,7 +19,7 @@ PC3.ScrollView {
     clip: true
 
     // PumpVoltage enum values indexed by combo position:
-    //   0→Off(4)  1→7V(2)  2→8V(3)  3→11V(0)
+    //   0->Off(4) 1->7V(2) 2->8V(3) 3->11V(0)
     readonly property var pumpVoltageCodes: [4, 2, 3, 0]
     readonly property var pumpVoltageLabels: ["High", "Max", "Low", "Medium", "Off"]
 
@@ -51,7 +51,7 @@ PC3.ScrollView {
                 margins: Kirigami.Units.largeSpacing
             }
 
-            // ── Status ──
+            // Status
             PlasmaExtras.Heading {
                 level: 4
                 text: i18n("Water Cooler Status")
@@ -97,7 +97,7 @@ PC3.ScrollView {
 
             Kirigami.Separator { Layout.fillWidth: true }
 
-            // ── Fan Speed & Pump Voltage ──
+            // Fan Speed & Pump Voltage
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
@@ -172,7 +172,7 @@ PC3.ScrollView {
 
             Kirigami.Separator { Layout.fillWidth: true }
 
-            // ── LED Control ──
+            // LED Control
             PlasmaExtras.Heading {
                 level: 4
                 text: i18n("LED")

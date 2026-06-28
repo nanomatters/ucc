@@ -31,14 +31,14 @@ enum class FanLogicType { CPU, GPU };
 /**
  * @brief Temperature filter using Exponentially Weighted Moving Average (EWMA)
  *
- * Replaces the old trimmed-mean buffer.  EWMA reacts faster to genuine
+ * Replaces the old trimmed-mean buffer. EWMA reacts faster to genuine
  * temperature changes while still rejecting single-sample noise.
  * Two different smoothing factors are used:
- *   - alphaRising  (0.5) — when new reading is above current estimate,
- *                           respond quickly to heating.
- *   - alphaFalling (0.15) — when new reading is below current estimate,
- *                           cool-down is smoothed more aggressively to
- *                           prevent premature fan-speed drops.
+ * - alphaRising (0.5) - when new reading is above current estimate,
+ * respond quickly to heating.
+ * - alphaFalling (0.15) - when new reading is below current estimate,
+ * cool-down is smoothed more aggressively to
+ * prevent premature fan-speed drops.
  */
 class TemperatureFilter
 {
@@ -53,7 +53,7 @@ public:
   {
     if ( m_value < 0.0 )
     {
-      // First sample — initialise immediately
+      // First sample - initialise immediately
       m_value = static_cast< double >( raw );
       return;
     }
@@ -74,25 +74,25 @@ private:
 };
 
 /**
- * @brief Fan speed controller with interpolation, hysteresis, and EWMA smoothing
+ * @brief Fan speed controller with interpolation, hysteresis and EWMA smoothing
  *
  * Improvements over the original algorithm:
  *
- * 1. **Linear interpolation** — Uses FanProfile::getSpeedForTemp() instead of
- *    step-wise table lookup. Eliminates discrete jumps between curve points.
+ * 1. **Linear interpolation** - Uses FanProfile::getSpeedForTemp() instead of
+ * step-wise table lookup. Eliminates discrete jumps between curve points.
  *
- * 2. **Hysteresis** — The temperature used for curve lookup is biased:
- *    when the filtered temperature is falling and near a curve inflection
- *    point, the effective temperature is held slightly higher (by HYSTERESIS_DEG)
- *    to prevent the fan from dropping prematurely. This avoids the classic
- *    heat→fan-up→cool→fan-down→heat cycle.
+ * 2. **Hysteresis** - The temperature used for curve lookup is biased:
+ * when the filtered temperature is falling and near a curve inflection
+ * point, the effective temperature is held slightly higher (by HYSTERESIS_DEG)
+ * to prevent the fan from dropping prematurely. This avoids the classic
+ * heat->fan-up->cool->fan-down->heat cycle.
  *
- * 3. **EWMA speed smoothing** — The raw curve speed is fed through an
- *    exponentially weighted moving average with asymmetric weights:
- *      - Rising (alphaUp = 0.4): fans spin up within 2-3 seconds
- *      - Falling (alphaDown = 0.08): fans spin down over ~12 seconds
- *    This replaces both the old trimmed-mean temperature filter and the
- *    hard −2%/sec rate limiter, giving much smoother transitions.
+ * 3. **EWMA speed smoothing** - The raw curve speed is fed through an
+ * exponentially weighted moving average with asymmetric weights:
+ * - Rising (alphaUp = 0.4): fans spin up within 2-3 seconds
+ * - Falling (alphaDown = 0.08): fans spin down over ~12 seconds
+ * This replaces both the old trimmed-mean temperature filter and the
+ * hard -2%/sec rate limiter, giving much smoother transitions.
  *
  * 4. **Critical temperature override** is preserved unchanged.
  */
@@ -136,7 +136,7 @@ private:
    * @brief Apply hysteresis to prevent oscillation at curve boundaries.
    *
    * When temperature is falling, the effective temperature is held up to
-   * HYSTERESIS_DEG above the filtered reading.  It tracks
+   * HYSTERESIS_DEG above the filtered reading. It tracks
    * min(lastEffective, filteredTemp + HYSTERESIS_DEG), so large drops
    * are damped but it still converges.
    * When temperature is rising, the effective temperature follows immediately.
@@ -147,19 +147,19 @@ private:
 
     if ( m_lastEffectiveTemp < 0 )
     {
-      // First call — no history
+      // First call - no history
       m_lastEffectiveTemp = filteredTemp;
       return filteredTemp;
     }
 
     if ( filteredTemp >= m_lastEffectiveTemp )
     {
-      // Temperature rising or stable — follow immediately
+      // Temperature rising or stable - follow immediately
       m_lastEffectiveTemp = filteredTemp;
     }
     else
     {
-      // Temperature falling — hold the effective temp higher by up to HYSTERESIS_DEG
+      // Temperature falling - hold the effective temp higher by up to HYSTERESIS_DEG
       int floor = filteredTemp + HYSTERESIS_DEG;
       int newEffective = std::min( m_lastEffectiveTemp, floor );
       // Never go below the actual filtered temperature
@@ -194,8 +194,8 @@ private:
    * @brief EWMA smoothing on the speed output.
    *
    * Uses asymmetric alpha:
-   *   - alphaUp   = 0.4  → fans reach target in ~3 cycles (3 sec)
-   *   - alphaDown = 0.08 → fans take ~12 cycles to settle
+   * - alphaUp = 0.4 -> fans reach target in ~3 cycles (3 sec)
+   * - alphaDown = 0.08 -> fans take ~12 cycles to settle
    *
    * This replaces both the old trimmed-mean filter and the hard rate limiter.
    */
@@ -237,7 +237,7 @@ private:
   {
     const int filteredTemp = m_tempFilter.getFilteredValue();
 
-    // Apply hysteresis — effective temp may lag behind during cool-down
+    // Apply hysteresis - effective temp may lag behind during cool-down
     const int effectiveTemp = applyHysteresis( filteredTemp );
 
     // Linear interpolation on the fan curve (instead of step-wise lookup)
@@ -493,7 +493,8 @@ protected:
 
         // Log the temperature and speed we are about to set for debugging
         //syslog( LOG_DEBUG, "FanControlWorker: fan %d temp=%d calculated=%d set=%d sameSpeed=%d",
-        //        static_cast< int >( fanIndex ), fanTemps[fanIndex], fanSpeedsSet[fanIndex], speedToSet, m_modeSameSpeed ? 1 : 0 );
+        //        static_cast< int >( fanIndex ), fanTemps[fanIndex],
+        //        fanSpeedsSet[fanIndex], speedToSet, m_modeSameSpeed ? 1 : 0 );
 
         m_io.setFanSpeedPercent( static_cast< int >( fanIndex ), speedToSet );
       }

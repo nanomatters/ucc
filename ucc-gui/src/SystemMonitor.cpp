@@ -347,7 +347,7 @@ void SystemMonitor::refreshAll()
 }
 
 // =====================================================================
-//  Charging — one-time initialization
+//  Charging - one-time initialization
 // =====================================================================
 
 void SystemMonitor::initializeChargingState()
@@ -448,7 +448,7 @@ void SystemMonitor::initializeChargingState()
 }
 
 // =====================================================================
-//  Charging — setters
+//  Charging - setters
 // =====================================================================
 
 void SystemMonitor::setCurrentChargingProfile( const QString &profile )

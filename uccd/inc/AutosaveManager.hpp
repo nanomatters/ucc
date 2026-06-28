@@ -59,7 +59,7 @@ public:
 
   /**
    * @brief Read autosave data from disk
-   * @return Autosave data, or default if file doesn't exist
+   * @return Autosave data or default if file doesn't exist
    */
   [[nodiscard]] TccAutosave readAutosave() noexcept
   {

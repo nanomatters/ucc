@@ -33,7 +33,7 @@ PC3.ScrollView {
                 margins: Kirigami.Units.largeSpacing
             }
 
-            // ── Active Profile ──
+            // Active Profile
             PlasmaExtras.Heading {
                 level: 4
                 text: i18n("Active Profile")
@@ -59,7 +59,7 @@ PC3.ScrollView {
 
             Kirigami.Separator { Layout.fillWidth: true }
 
-            // ── CPU Section ──
+            // CPU Section
             PlasmaExtras.Heading {
                 level: 4
                 text: dashTab.backend.cpuModel || i18n("CPU")
@@ -84,7 +84,7 @@ PC3.ScrollView {
 
             Kirigami.Separator { Layout.fillWidth: true }
 
-            // ── GPU Section ──
+            // GPU Section
             PlasmaExtras.Heading {
                 level: 4
                 text: dashTab.backend.dGpuModel || dashTab.backend.iGpuModel || i18n("GPU")
@@ -106,7 +106,7 @@ PC3.ScrollView {
                 PC3.Label { text: i18n("Fan"); opacity: 0.7 }
                 PC3.Label { text: dashTab.backend.gpuFanRPM + " RPM (" + dashTab.backend.gpuFanPercent + "%)"; font.bold: true }
 
-                // Extended NVIDIA metrics — shown only when data is available
+                // Extended NVIDIA metrics - shown only when data is available
                 PC3.Label {
                     text: i18n("GPU Load")
                     opacity: 0.7

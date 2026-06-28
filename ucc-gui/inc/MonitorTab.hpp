@@ -54,7 +54,7 @@ class UccdClient;
  */
 enum class MetricGroup
 {
-  Temp,   ///< Temperature (°C)
+  Temp,   ///< Temperature ( degC)
   Duty,   ///< Fan duty cycle (%)
   Power,  ///< Power consumption (W)
   Freq,   ///< Clock frequency (MHz)
@@ -87,7 +87,7 @@ private slots:
   void fetchData();
 
 private:
-  // --- Setup helpers ---
+  // Setup helpers
   void setupUI();
   void setupTemperatureChart();
   void setupDutyChart();
@@ -142,7 +142,7 @@ private:
   /** Update the X-axis range to [now - window, now]. */
   void updateAxes();
 
-  // --- Data model ---
+  // Data model
   struct SeriesInfo
   {
     QLineSeries    *series = nullptr;
@@ -155,7 +155,7 @@ private:
   // One entry per metric key string (e.g. "cpuTemp")
   std::map< std::string, SeriesInfo > m_seriesMap;
 
-  // --- Charts ---
+  // Charts
   QChart *m_tempChart     = nullptr;
   QChart *m_dutyChart     = nullptr;
   QChart *m_powerChart    = nullptr;
@@ -180,7 +180,7 @@ private:
   QValueAxis *m_freqYAxis  = nullptr;
   QValueAxis *m_voltYAxis  = nullptr;
 
-  // --- Unified "all-in-one" chart ---
+  // Unified "all-in-one" chart
   QChart          *m_unifiedChart     = nullptr;
   QChartView      *m_unifiedChartView = nullptr;
   QDateTimeAxis   *m_unifiedXAxis     = nullptr;
@@ -188,7 +188,7 @@ private:
   QStackedWidget  *m_chartStack       = nullptr;  ///< index 0 = per-group, 1 = unified
   QWidget         *m_perGroupPage     = nullptr;
 
-  // --- Hover callout ---
+  // Hover callout
   struct Callout
   {
     QGraphicsRectItem       *bg   = nullptr;
@@ -196,7 +196,7 @@ private:
   };
   std::map< QChart *, Callout > m_callouts;
 
-  // --- Sticky marks (click-to-pin) ---
+  // Sticky marks (click-to-pin)
   static constexpr int MAX_STICKY_MARKS = 10;
 
   struct MarkGfx
@@ -244,7 +244,7 @@ private:
   QChart *chartForGroup( MetricGroup g ) const;
   static int metricIndexForKey( const std::string &key );
 
-  // --- Unified crosshair ---
+  // Unified crosshair
   struct CrosshairLabel
   {
     QGraphicsRectItem       *bg   = nullptr;
@@ -262,7 +262,7 @@ private:
   void hideCrosshair();
   void crosshairClick( const QPointF &widgetPos );
 
-  // --- Ctrl+LMB rubber-band zoom ---
+  // Ctrl+LMB rubber-band zoom
   QRubberBand *m_zoomBand       = nullptr;  ///< Rubber-band selection rectangle
   QPoint       m_zoomOrigin;                ///< Viewport origin of the drag
   bool         m_zoomDragging   = false;    ///< Currently dragging a zoom rect?
@@ -270,11 +270,11 @@ private:
   void applyZoomRect( const QRect &viewportRect );
   void resetZoom();
 
-  // --- Controls ---
+  // Controls
   QCheckBox *m_unifiedCheckBox = nullptr;
   QLabel    *m_pauseLabel      = nullptr;  ///< Status indicator for pause mode
 
-  // --- State ---
+  // State
   UccdClient *m_client = nullptr;
   QTimer      m_fetchTimer;
   qint64      m_lastTimestamp = 0;    ///< Last fetched timestamp (ms since epoch)

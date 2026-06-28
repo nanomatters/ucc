@@ -71,7 +71,7 @@ FanControlTab::FanControlTab( UccdClient *client,
   connectSignals();
 }
 
-// ── UI construction ─────────────────────────────────────────────────
+// UI construction
 
 void FanControlTab::setupUI()
 {
@@ -79,7 +79,7 @@ void FanControlTab::setupUI()
   mainLayout->setContentsMargins( 0, 0, 0, 0 );
   mainLayout->setSpacing( 0 );
 
-  // ── Top bar: fan profile selection ──
+  // Top bar: fan profile selection
   QHBoxLayout *selectLayout = new QHBoxLayout();
   m_fanProfileCombo = new QComboBox();
   m_fanProfileCombo->setEditable( true );
@@ -129,13 +129,13 @@ void FanControlTab::setupUI()
   separator->setFrameShape( QFrame::HLine );
   mainLayout->addWidget( separator );
 
-  // ── Sub-tabs ──
+  // Sub-tabs
   QTabWidget *subTabs = new QTabWidget();
   subTabs->setStyleSheet(
     "QTabWidget::pane { border: none; }"
     "QTabBar::tab { padding: 6px 18px; }" );
 
-  // ── Sub-tab 1: System (CPU / GPU) ──
+  // Sub-tab 1: System (CPU / GPU)
   {
     QWidget *systemWidget = new QWidget();
     QScrollArea *scroll = new QScrollArea();
@@ -162,7 +162,7 @@ void FanControlTab::setupUI()
     subTabs->addTab( scroll, "System (CPU / GPU)" );
   }
 
-  // ── Sub-tab 2: Water Cooler (only if water cooler supported) ──
+  // Sub-tab 2: Water Cooler (only if water cooler supported)
   if ( m_waterCoolerSupported )
   {
     QWidget *wcWidget = new QWidget();
@@ -172,7 +172,7 @@ void FanControlTab::setupUI()
     layout->setContentsMargins( 5, 5, 5, 5 );
     layout->setSpacing( 8 );
 
-    // ── Water cooler hardware controls ──
+    // Water cooler hardware controls
     QHBoxLayout *wcHw = new QHBoxLayout();
     wcHw->setContentsMargins( 0, 0, 0, 0 );
     wcHw->setSpacing( 4 );
@@ -248,7 +248,7 @@ void FanControlTab::setupUI()
     waterCoolerWidget->setLayout( wcHw );
     layout->addWidget( waterCoolerWidget );
 
-    // ── Water cooler fan curve editor ──
+    // Water cooler fan curve editor
     QVBoxLayout *wcFanLayout = new QVBoxLayout();
     wcFanLayout->setSpacing( 0 );
     m_waterCoolerFanCurveEditor = new FanCurveEditorWidget();
@@ -256,7 +256,7 @@ void FanControlTab::setupUI()
     wcFanLayout->addWidget( m_waterCoolerFanCurveEditor );
     layout->addLayout( wcFanLayout );
 
-    // ── Pump voltage curve editor ──
+    // Pump voltage curve editor
     QVBoxLayout *pumpLayout = new QVBoxLayout();
     pumpLayout->setSpacing( 0 );
     m_pumpCurveEditor = new PumpCurveEditorWidget();
@@ -271,7 +271,7 @@ void FanControlTab::setupUI()
   mainLayout->addWidget( subTabs );
 }
 
-// ── Signal wiring ───────────────────────────────────────────────────
+// Signal wiring
 
 void FanControlTab::connectSignals()
 {
@@ -286,7 +286,7 @@ void FanControlTab::connectSignals()
   connect( m_fanProfileCombo->lineEdit(), &QLineEdit::editingFinished,
            this, &FanControlTab::onFanProfileComboRenamed );
 
-  // Curve editors → signals
+  // Curve editors -> signals
   connect( m_cpuFanCurveEditor, &FanCurveEditorWidget::pointsChanged,
            this, &FanControlTab::cpuPointsChanged );
   connect( m_gpuFanCurveEditor, &FanCurveEditorWidget::pointsChanged,
@@ -300,7 +300,7 @@ void FanControlTab::connectSignals()
              this, &FanControlTab::pumpPointsChanged );
   }
 
-  // Action buttons → signals
+  // Action buttons -> signals
   connect( m_applyFanProfilesButton, &QPushButton::clicked,
            this, &FanControlTab::applyRequested );
   connect( m_saveFanProfilesButton, &QPushButton::clicked,
@@ -331,7 +331,7 @@ void FanControlTab::connectSignals()
   updateWaterCoolerPolling();
 }
 
-// ── Public helpers ──────────────────────────────────────────────────
+// Public helpers
 
 void FanControlTab::reloadFanProfiles()
 {
@@ -447,7 +447,7 @@ void FanControlTab::setWaterCoolerEnabled( bool enabled )
   // This method is called during profile loading to update the UI checkbox.
   // Calling EnableWaterCooler would restart BLE scanning (destroying any
   // active connection) or disconnect the water cooler, causing the
-  // connected → disconnected → reconnecting oscillation on GUI startup.
+  // connected -> disconnected -> reconnecting oscillation on GUI startup.
   // The D-Bus call only happens via onWaterCoolerEnableToggled() when the
   // user explicitly toggles the checkbox.
 }
@@ -463,7 +463,7 @@ bool FanControlTab::isWaterCoolerEnabled() const
   return m_waterCoolerEnableCheckBox ? m_waterCoolerEnableCheckBox->isChecked() : true;
 }
 
-// ── Water cooler hardware slots ─────────────────────────────────────
+// Water cooler hardware slots
 
 void FanControlTab::onWaterCoolerEnableToggled( bool enabled )
 {

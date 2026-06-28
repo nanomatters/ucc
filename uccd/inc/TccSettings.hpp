@@ -61,7 +61,7 @@ struct TccSettings
   std::optional< std::string > chargingPriority;  // null in TypeScript
   // keyboardBacklightStates omitted for now - complex nested structure
 
-  // Default constructor – stateMap starts empty.
+  // Default constructor - stateMap starts empty.
   // uccd must not auto-assign profiles; it waits for ucc-gui to assign them.
   TccSettings() = default;
 };

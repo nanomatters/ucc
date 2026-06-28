@@ -49,11 +49,11 @@ struct TDPInfo
  * @brief ProfileSettingsWorker - Merged worker for idle profile-related subsystems
  *
  * Replaces the former ODMProfileWorker, ODMPowerLimitWorker, ChargingWorker,
- * and YCbCr420WorkaroundWorker.  None of those needed periodic onWork() activity;
+ * and YCbCr420WorkaroundWorker. None of those needed periodic onWork() activity;
  * they only did real work at start-up and on explicit reapplyProfile() calls.
  * Combining them eliminates four dedicated QThreads.
  *
- * Lives on the main thread -- no DaemonWorker / QThread inheritance.
+ * Lives on the main thread; no DaemonWorker / QThread inheritance.
  */
 class ProfileSettingsWorker
 {
@@ -96,7 +96,7 @@ public:
   void start();
 
   // =====================================================================
-  //  ODM Power Limit API  (was ODMPowerLimitWorker)
+  //  ODM Power Limit API (was ODMPowerLimitWorker)
   // =====================================================================
 
   void reapplyProfile()
@@ -107,23 +107,23 @@ public:
   }
 
   // =====================================================================
-  //  Charging API  (was ChargingWorker)
+  //  Charging API (was ChargingWorker)
   // =====================================================================
 
   bool applyChargingProfile( const std::string &profileDescriptor ) noexcept;
   bool applyChargingPriority( const std::string &priorityDescriptor ) noexcept;
 
-  // --- Charge Thresholds ---
+  // Charge Thresholds
 
   bool setChargeStartThreshold( int value ) noexcept;
   bool setChargeEndThreshold( int value ) noexcept;
 
-  // --- Charge Type ---
+  // Charge Type
 
   bool setChargeType( const std::string &type ) noexcept;
 
   // =====================================================================
-  //  NVIDIA Power Control API  (was NVIDIAPowerCTRLListener)
+  //  NVIDIA Power Control API (was NVIDIAPowerCTRLListener)
   // =====================================================================
 
   /**
@@ -133,15 +133,15 @@ public:
   bool applyNVIDIAPowerOffset( int32_t offset );
 
   /**
-   * @brief Periodic validation — checks if an external process changed the cTGP offset
-   *        and re-applies the profile value if needed.
+   * @brief Periodic validation - checks if an external process changed the cTGP offset
+   * and re-applies the profile value if needed.
    *
    * Call this from the service's onWork() loop (original interval was 5 000 ms).
    */
   void validateNVIDIACTGPOffset();
 
 private:
-  // ----- ODM Profile internals -----
+  // ODM Profile internals
 
   enum class ODMProfileType
   {
@@ -160,7 +160,7 @@ private:
   ODMProfileType m_odmProfileType = ODMProfileType::None;
   bool m_skipAcpiPlatformProfile = false;
 
-  // --- Sysfs path constants ---
+  // Sysfs path constants
 
   static inline const std::string TUXEDO_PLATFORM_PROFILE =
     "/sys/bus/platform/devices/tuxedo_platform_profile/platform_profile";
@@ -202,7 +202,7 @@ private:
     const std::string &chosenProfileName );
   void applyProfileViaAPI( const std::string &chosenProfileName );
 
-  // ----- ODM Power Limit internals -----
+  // ODM Power Limit internals
 
   std::vector< TDPInfo > getTDPInfo();
   bool setTDPValues( const std::vector< uint32_t > &values );
@@ -210,7 +210,7 @@ private:
   void publishODMPowerLimitsJSON( const std::vector< TDPInfo > &tdpInfo );
   void applyODMPowerLimits();
 
-  // ----- Charging internals -----
+  // Charging internals
 
   std::string m_currentChargingProfile;
   std::string m_currentChargingPriority;
@@ -248,13 +248,13 @@ private:
 
   void initializeChargingSettings() noexcept;
 
-  // ----- YCbCr 4:2:0 internals -----
+  // YCbCr 4:2:0 internals
 
   TccSettings &m_settings;
   std::atomic< bool > &m_modeReapplyPending;
   bool m_ycbcr420Available = false;
 
-  // ----- NVIDIA Power Control internals -----
+  // NVIDIA Power Control internals
 
   int32_t m_lastAppliedNVIDIAOffset = 0;
   std::atomic< int32_t > &m_nvidiaPowerCTRLDefaultPowerLimit;
@@ -271,7 +271,7 @@ private:
   void checkYCbCr420Availability();
   void applyYCbCr420Workaround();
 
-  // ----- NVIDIA Power Control private methods -----
+  // NVIDIA Power Control private methods
 
   void initNVIDIAPowerCTRL();
   bool applyNVIDIACTGPOffset( int32_t offset );
@@ -284,5 +284,5 @@ private:
   }
 
 
-  // executeNvidiaSmi removed — replaced by NvmlWrapper direct API calls
+  // executeNvidiaSmi removed - replaced by NvmlWrapper direct API calls
 };

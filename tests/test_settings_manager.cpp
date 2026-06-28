@@ -1,6 +1,6 @@
 /*
- * Unit tests for SettingsManager – parseSettingsJSON() / settingsToJSON()
- * round-trip, and malformed-input robustness.
+ * Unit tests for SettingsManager - parseSettingsJSON() / settingsToJSON()
+ * round-trip and malformed-input robustness.
  */
 
 #include <QTest>
@@ -39,7 +39,7 @@ private:
 
 private slots:
 
-  // ---- parseSettingsJSON() – happy path --------------------------------
+  // parseSettingsJSON() - happy path
 
   void parse_stateMap()
   {
@@ -82,7 +82,7 @@ private slots:
     QCOMPARE( *opt->chargingPriority, std::string( "performance" ) );
   }
 
-  // ---- malformed input → nullopt ----------------------------------------
+  // malformed input -> nullopt
 
   void parse_malformedJSON()
   {
@@ -96,7 +96,7 @@ private slots:
     QVERIFY( !opt.has_value() );
   }
 
-  // ---- round-trip: parse → serialize → re-parse -------------------------
+  // round-trip: parse -> serialize -> re-parse
 
   void roundTrip()
   {
@@ -104,7 +104,7 @@ private slots:
     QVERIFY( opt1.has_value() );
 
     // settingsToJSON is private, but we can go through writeSettings-style
-    // round-trip by re-parsing the output.  Since settingsToJSON is private
+    // round-trip by re-parsing the output. Since settingsToJSON is private
     // but called by writeSettings which writes to disk, we test the public
     // parseSettingsJSON on a pre-known serialized form instead.
 
@@ -133,7 +133,7 @@ private slots:
     QCOMPARE( *p.chargingProfile,              *s.chargingProfile );
   }
 
-  // ---- defaults survive missing keys ------------------------------------
+  // defaults survive missing keys
 
   void parse_minimalJSON()
   {

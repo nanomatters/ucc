@@ -4,7 +4,7 @@
  * Uses GNOME Shell's CSS dialect (St/Clutter CSS, not full web CSS).
  */
 
-/* ── Tab bar ── */
+/* Tab bar */
 
 .ucc-tab-bar {
     spacing: 4px;
@@ -31,7 +31,7 @@
     border-color: rgba(255, 255, 255, 0.25);
 }
 
-/* ── Tab content ── */
+/* Tab content */
 
 .ucc-tab-content {
     padding: 6px 12px;
@@ -39,7 +39,7 @@
     min-width: 250px;
 }
 
-/* ── Section titles ── */
+/* Section titles */
 
 .ucc-section-title {
     font-size: 10px;
@@ -50,7 +50,7 @@
     padding-bottom: 2px;
 }
 
-/* ── Model names (CPU, GPU, System) ── */
+/* Model names (CPU, GPU, System) */
 
 .ucc-cpu-gpu-model {
     font-size: 14px;
@@ -68,7 +68,7 @@
     padding-bottom: 4px;
 }
 
-/* ── Metric rows ── */
+/* Metric rows */
 
 .ucc-grid {
     spacing: 2px;
@@ -92,7 +92,7 @@
     text-align: right;
 }
 
-/* ── Profile ── */
+/* Profile */
 
 .ucc-active-profile {
     font-size: 13px;
@@ -105,7 +105,7 @@
     max-height: 400px;
 }
 
-/* ── Chooser list (radio-dot style, like GNOME Power Mode / Wi-Fi) ── */
+/* Chooser list (radio-dot style, like GNOME Power Mode / Wi-Fi) */
 
 .ucc-chooser-list {
     spacing: 1px;
@@ -173,7 +173,7 @@
     border-color: rgba(53, 132, 228, 0.5);
 }
 
-/* ── Hardware toggles ── */
+/* Hardware toggles */
 
 .ucc-hw-row {
     padding: 4px 0;
@@ -205,7 +205,7 @@
     padding-left: 6px;
 }
 
-/* ── Combo buttons (pump voltage) ── */
+/* Combo buttons (pump voltage) */
 
 .ucc-combo-row {
     spacing: 4px;
@@ -231,7 +231,7 @@
     border-color: rgba(53, 132, 228, 0.5);
 }
 
-/* ── Open Control Center button ── */
+/* Open Control Center button */
 
 .ucc-open-btn {
     padding: 6px 12px;
@@ -248,7 +248,7 @@
     background-color: rgba(53, 132, 228, 0.5);
 }
 
-/* ── Footer ── */
+/* Footer */
 
 .ucc-footer {
     padding: 2px 8px;

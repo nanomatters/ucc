@@ -33,7 +33,7 @@ namespace ucc
 UccdClient::UccdClient( QObject *parent )
   : QObject( parent )
 {
-  // Initial connection attempt (uccd may not be running yet — that's fine)
+  // Initial connection attempt (uccd may not be running yet - that's fine)
   connectToDaemon();
 
   // Watch for uccd appearing or disappearing on the system bus
@@ -51,9 +51,7 @@ UccdClient::UccdClient( QObject *parent )
   emit connectionStatusChanged( m_connected );
 }
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 
 void UccdClient::subscribeDbusSignals()
 {
@@ -76,7 +74,7 @@ void UccdClient::subscribeDbusSignals()
 
 void UccdClient::connectToDaemon()
 {
-  // Check if the service actually has an owner on the bus.  We must NOT
+  // Check if the service actually has an owner on the bus. We must NOT
   // just create a QDBusInterface, because with a D-Bus activation .service
   // file the bus would auto-start uccd during the introspection call that
   // QDBusInterface performs in its constructor.
@@ -89,8 +87,8 @@ void UccdClient::connectToDaemon()
     return;
   }
 
-  // The service is running — safe to introspect without triggering activation.
-  // Do NOT pass a parent to QDBusInterface — unique_ptr owns its lifetime.
+  // The service is running - safe to introspect without triggering activation.
+  // Do NOT pass a parent to QDBusInterface - unique_ptr owns its lifetime.
   m_interface = std::make_unique< QDBusInterface >(
     DBUS_SERVICE,
     DBUS_PATH,
@@ -110,9 +108,7 @@ void UccdClient::connectToDaemon()
   }
 }
 
-// ---------------------------------------------------------------------------
 // D-Bus service watcher slots
-// ---------------------------------------------------------------------------
 
 void UccdClient::onServiceRegistered( const QString &service )
 {
@@ -1008,7 +1004,7 @@ std::optional< double > UccdClient::getIGpuPower()
   return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
 }
 
-// ---- Extended discrete GPU metrics ----
+// Extended discrete GPU metrics
 
 std::optional< int > UccdClient::getDGpuComputeUtilPct()
 {
@@ -1169,7 +1165,7 @@ std::optional< int > UccdClient::getWaterCoolerPumpLevel()
   return callMethod< int >( "GetWaterCoolerPumpLevel" );
 }
 
-// --- Monitoring history ---
+// Monitoring history
 
 std::optional< QByteArray > UccdClient::getMonitorDataSince( qint64 sinceTimestampMs )
 {

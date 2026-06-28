@@ -27,9 +27,7 @@
 
 namespace fs = std::filesystem;
 
-// ---------------------------------------------------------------------------
 //  Internal helpers
-// ---------------------------------------------------------------------------
 
 namespace
 {
@@ -58,9 +56,7 @@ std::string readFile( const std::string &path )
   return trim( line );
 }
 
-// ---------------------------------------------------------------------------
 //  CPU detection
-// ---------------------------------------------------------------------------
 
 /**
  * @brief Extract the CPU model name from /proc/cpuinfo
@@ -86,9 +82,7 @@ std::string detectCpuModel()
   return {};
 }
 
-// ---------------------------------------------------------------------------
 //  GPU detection via PCI sysfs
-// ---------------------------------------------------------------------------
 
 // PCI class codes for display / 3D controllers
 static constexpr unsigned PCI_CLASS_DISPLAY_VGA = 0x030000;
@@ -107,11 +101,11 @@ struct PciGpu
  * @brief Look up a device name from the system pci.ids database
  *
  * The pci.ids file uses a simple text format:
- *   VVVV  Vendor Name          (vendor line, no indent, 4-digit lowercase hex)
- *   \tDDDD  Device Name        (device line, one tab indent, under that vendor)
+ * VVVV Vendor Name (vendor line, no indent, 4-digit lowercase hex)
+ * \tDDDD Device Name (device line, one tab indent, under that vendor)
  *
  * Common locations: /usr/share/hwdata/pci.ids (Fedora/Arch/NixOS),
- *                   /usr/share/misc/pci.ids  (Debian/Ubuntu)
+ * /usr/share/misc/pci.ids (Debian/Ubuntu)
  */
 std::string lookupPciIds( unsigned vendor, unsigned device )
 {
@@ -157,7 +151,7 @@ std::string lookupPciIds( unsigned vendor, unsigned device )
       {
         if ( line.compare( 1, 4, deviceHex ) == 0 )
         {
-          // Found it — extract the name after "DDDD  "
+          // Found it - extract the name after "DDDD "
           auto nameStart = line.find_first_not_of( " \t", 5 );
           if ( nameStart != std::string::npos )
             return trim( line.substr( nameStart ) );
@@ -186,7 +180,7 @@ std::string decodePciName( unsigned vendor, [[maybe_unused]] unsigned device,
   }
 
   // Try the DRM card sysfs for a more descriptive name
-  // /sys/bus/pci/devices/<addr>/drm/card*/device/product_name   (NVIDIA)
+  // /sys/bus/pci/devices/<addr>/drm/card*/device/product_name (NVIDIA)
   // The NVIDIA proprietary driver exposes the marketing name in
   // /proc/driver/nvidia/gpus/<addr>/information, but parsing the DRM
   // subsystem is more portable and works with nouveau too.
@@ -199,7 +193,7 @@ std::string decodePciName( unsigned vendor, [[maybe_unused]] unsigned device,
     {
       for ( const auto &entry : fs::directory_iterator( drmDir ) )
       {
-        // card0, card1, …
+        // card0, card1, ...
         const auto cardName = entry.path().filename().string();
         if ( cardName.rfind( "card", 0 ) != 0 )
           continue;
@@ -305,7 +299,7 @@ void detectGpus( std::string &iGpu, std::string &dGpu )
       // Heuristic: Intel and AMD integrated GPUs sit on bus 00.
       // Discrete GPUs (NVIDIA, AMD dGPU) are typically on bus 01+.
       const std::string busAddr = entry.path().filename().string();
-      // Format: "DDDD:BB:DD.F" — extract BB
+      // Format: "DDDD:BB:DD.F" - extract BB
       bool integrated = false;
       if ( busAddr.size() >= 7 )
       {
@@ -342,9 +336,7 @@ void detectGpus( std::string &iGpu, std::string &dGpu )
   }
 }
 
-// ---------------------------------------------------------------------------
 //  Manufacturer / laptop model detection
-// ---------------------------------------------------------------------------
 
 /**
  * @brief Determine the laptop manufacturer from DMI vendor strings
@@ -391,7 +383,7 @@ std::string manufacturerToString( LaptopManufacturer m )
 }
 
 /**
- * @brief Map UniwillDeviceID → human-readable laptop model including year
+ * @brief Map UniwillDeviceID -> human-readable laptop model including year
  *
  * The model strings follow the pattern: "<Brand> <ProductLine> <Size> <CPU vendor> <Generation> (<Year>)"
  */
@@ -501,9 +493,7 @@ std::string buildLaptopModel( std::optional< UniwillDeviceID > deviceId,
   return "Unknown Laptop";
 }
 
-// ---------------------------------------------------------------------------
 //  JSON serialisation helper
-// ---------------------------------------------------------------------------
 
 std::string jsonEscapeValue( const std::string &s )
 {
@@ -525,9 +515,7 @@ std::string jsonEscapeValue( const std::string &s )
 
 } // anonymous namespace
 
-// ---------------------------------------------------------------------------
 //  Public API
-// ---------------------------------------------------------------------------
 
 std::string SystemInfo::toJSON() const
 {

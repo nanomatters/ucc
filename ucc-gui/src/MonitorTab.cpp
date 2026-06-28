@@ -33,9 +33,7 @@
 namespace ucc
 {
 
-// ---------------------------------------------------------------------------
-// Clickable graphics rect — calls a callback on mouse press
-// ---------------------------------------------------------------------------
+// Clickable graphics rect - calls a callback on mouse press
 
 class ClickableRectItem : public QGraphicsRectItem
 {
@@ -61,10 +59,8 @@ private:
   std::function< void() > m_onClick;
 };
 
-// ---------------------------------------------------------------------------
-// Metric definitions — higher-contrast palette with more greens to improve
+// Metric definitions - higher-contrast palette with more greens to improve
 // readability between neighbouring lines.
-// ---------------------------------------------------------------------------
 struct MetricDef
 {
   const char *key;       // JSON key from MetricsHistoryStore
@@ -90,9 +86,7 @@ static const MetricDef kMetrics[ METRIC_COUNT ] =
   { "gpuCoreVoltage",      "dGPU Core Voltage",   QColor( 174, 234, 0 ),   MetricGroup::Volt  },
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * @brief Undo the normalisation applied to a metric value to restore its real value.
@@ -102,11 +96,11 @@ double MonitorTab::metricFromNormalisedScale( double normalisedValue, MetricGrou
 {
   switch ( g )
   {
-    case MetricGroup::Temp:  return normalisedValue / (100.0 / 105.0);  // 0–100 → 0–105 °C
+    case MetricGroup::Temp:  return normalisedValue / (100.0 / 105.0);  // 0-100 -> 0-105 degC
     case MetricGroup::Duty:  return normalisedValue;                     // already %
-    case MetricGroup::Power: return normalisedValue / (100.0 / m_maxPowerW);  // 0–100 → 0–m_maxPowerW W
-    case MetricGroup::Freq:  return normalisedValue / (100.0 / 6000.0);  // 0–100 → 0–6000 MHz
-    case MetricGroup::Volt:  return normalisedValue / (100.0 / 1500.0);  // 0–100 → 0–1500 mV
+    case MetricGroup::Power: return normalisedValue / (100.0 / m_maxPowerW);  // 0-100 -> 0-m_maxPowerW W
+    case MetricGroup::Freq:  return normalisedValue / (100.0 / 6000.0);  // 0-100 -> 0-6000 MHz
+    case MetricGroup::Volt:  return normalisedValue / (100.0 / 1500.0);  // 0-100 -> 0-1500 mV
   }
   return normalisedValue;
 }
@@ -119,11 +113,11 @@ double MonitorTab::metricToNormalisedScale( MetricGroup g )
 {
   switch ( g )
   {
-    case MetricGroup::Temp:  return 100.0 / 105.0;  // 0–105 °C  → 0–100
+    case MetricGroup::Temp:  return 100.0 / 105.0;  // 0-105 degC -> 0-100
     case MetricGroup::Duty:  return 1.0;             // already %
-    case MetricGroup::Power: return 100.0 / m_maxPowerW;  // 0–m_maxPowerW W → 0–100
-    case MetricGroup::Freq:  return 100.0 / 6000.0;  // 0–6000 MHz→ 0–100
-    case MetricGroup::Volt:  return 100.0 / 1500.0;  // 0–1500 mV → 0–100
+    case MetricGroup::Power: return 100.0 / m_maxPowerW;  // 0-m_maxPowerW W -> 0-100
+    case MetricGroup::Freq:  return 100.0 / 6000.0;  // 0-6000 MHz-> 0-100
+    case MetricGroup::Volt:  return 100.0 / 1500.0;  // 0-1500 mV -> 0-100
   }
   return 1.0;
 }
@@ -165,7 +159,7 @@ void MonitorTab::initializeMaxPowerFromHardware()
 static QChart *createChart()
 {
   auto *chart = new QChart();
-  // Don't set title — will save vertical space for graphs
+  // Don't set title - will save vertical space for graphs
   chart->setAnimationOptions( QChart::NoAnimation );
   chart->legend()->setVisible( false );
   chart->setMargins( QMargins( 4, 4, 4, 4 ) );
@@ -216,9 +210,7 @@ static QChartView *createChartView( QChart *chart )
   return view;
 }
 
-// ---------------------------------------------------------------------------
 // Construction
-// ---------------------------------------------------------------------------
 
 MonitorTab::MonitorTab( UccdClient *client, QWidget *parent )
   : QWidget( parent )
@@ -253,8 +245,8 @@ void MonitorTab::setMonitoringActive( bool active )
       }
     }
 
-    // Only fetch data that fits in the current visible window — not the full
-    // daemon history horizon (which can be 30 minutes).  This bounds the
+    // Only fetch data that fits in the current visible window - not the full
+    // daemon history horizon (which can be 30 minutes). This bounds the
     // initial render cost to m_windowSeconds worth of points.
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     m_lastTimestamp = now - static_cast< qint64 >( m_windowSeconds ) * 1000;
@@ -268,9 +260,7 @@ void MonitorTab::setMonitoringActive( bool active )
   }
 }
 
-// ---------------------------------------------------------------------------
 // UI Setup
-// ---------------------------------------------------------------------------
 
 void MonitorTab::setupUI()
 {
@@ -278,7 +268,7 @@ void MonitorTab::setupUI()
 
   setupControls();
 
-  // ── (1) Legend / series-toggle group box — full width at top ──────────
+  // (1) Legend / series-toggle group box - full width at top
   auto *legendBox = new QGroupBox();
   auto *legendLayout = new QGridLayout( legendBox );
   legendLayout->setContentsMargins( 4, 4, 4, 4 );
@@ -321,7 +311,7 @@ void MonitorTab::setupUI()
 
   mainLayout->addWidget( legendBox );
 
-  // ---------- Per-group page (4 charts filling available space) ----------
+  // Per-group page (4 charts filling available space)
   auto *chartsWidget = new QWidget();
   auto *chartsLayout = new QVBoxLayout( chartsWidget );
   chartsLayout->setContentsMargins( 0, 0, 0, 0 );
@@ -349,10 +339,10 @@ void MonitorTab::setupUI()
 
   m_perGroupPage = scrollArea;  // stacked page 0
 
-  // ---------- Unified "all-in-one" chart (page 1) ----------
+  // Unified "all-in-one" chart (page 1)
   setupUnifiedChart();
 
-  // ---------- Stacked widget to switch between the two views ----------
+  // Stacked widget to switch between the two views
   m_chartStack = new QStackedWidget();
   m_chartStack->addWidget( m_perGroupPage );      // index 0
   m_chartStack->addWidget( m_unifiedChartView );   // index 1
@@ -360,7 +350,7 @@ void MonitorTab::setupUI()
 
   mainLayout->addWidget( m_chartStack, 1 );
 
-  // ---------- Install hover callout on every chart ----------
+  // Install hover callout on every chart
   installHoverCallout( m_tempChart );
   installHoverCallout( m_dutyChart );
   installHoverCallout( m_powerChart );
@@ -369,7 +359,7 @@ void MonitorTab::setupUI()
   // Unified chart hover is installed lazily in setUnifiedMode()
   // because its series don't exist yet at this point.
 
-  // ---------- Load saved checkbox states ----------
+  // Load saved checkbox states
   loadCheckboxStates();
 
   // Connect all checkboxes to auto-save on toggle and update group visibility
@@ -413,7 +403,7 @@ void MonitorTab::setTimeWindow( int seconds )
   if ( m_paused )
   {
     // When paused we cannot re-fetch, so just shift the visible axis range.
-    // Do NOT trim or clear buffers — the data must survive zoom-in so that a
+    // Do NOT trim or clear buffers - the data must survive zoom-in so that a
     // subsequent zoom-out can reveal it again.
     updateAxes();
     updateStickyMarkPositions();
@@ -466,9 +456,7 @@ void MonitorTab::wheelEvent( QWheelEvent *event )
   event->accept();
 }
 
-// ---------------------------------------------------------------------------
-// Unified chart — normalised 0–100 % Y axis
-// ---------------------------------------------------------------------------
+// Unified chart - normalised 0-100 % Y axis
 
 void MonitorTab::setupUnifiedChart()
 {
@@ -492,7 +480,7 @@ void MonitorTab::setupUnifiedChart()
   // unified view is first activated.
   m_unifiedChartView = createChartView( m_unifiedChart );
 
-  // --- Crosshair line (hidden by default) ---
+  // Crosshair line (hidden by default)
   m_crosshairLine = new QGraphicsLineItem( m_unifiedChart );
   m_crosshairLine->setPen( QPen( QColor( 200, 200, 200, 150 ), 1, Qt::DashLine ) );
   m_crosshairLine->setZValue( 80 );
@@ -570,7 +558,7 @@ void MonitorTab::destroyUnifiedSeries()
   for ( auto *abstractSeries : allSeries )
   {
     if ( !abstractSeries->isVisible() && abstractSeries->name().isEmpty() )
-      continue;   // invisible anchor — keep
+      continue;   // invisible anchor - keep
     m_unifiedChart->removeSeries( abstractSeries );
     delete abstractSeries;
   }
@@ -607,9 +595,7 @@ void MonitorTab::setUnifiedMode( bool unified )
   updateStickyMarkPositions();
 }
 
-// ---------------------------------------------------------------------------
-// Hover callout — shows exact value under the pointer
-// ---------------------------------------------------------------------------
+// Hover callout - shows exact value under the pointer
 
 void MonitorTab::installHoverCallout( QChart *chart )
 {
@@ -624,7 +610,7 @@ void MonitorTab::installHoverCallout( QChart *chart )
   }
 
   // Create a semi-transparent background rect + text item living in the
-  // chart's scene.  Hidden by default; shown on hover.
+  // chart's scene. Hidden by default; shown on hover.
   auto *bg   = new QGraphicsRectItem( chart );
   auto *text = new QGraphicsSimpleTextItem( chart );
   bg->setBrush( QBrush( QColor( 30, 30, 30, 200 ) ) );
@@ -693,7 +679,7 @@ void MonitorTab::installHoverCallout( QChart *chart )
       co.text->show();
     } );
 
-    // Sticky mark — click to pin/unpin a data-point label
+    // Sticky mark - click to pin/unpin a data-point label
     connect( ls, &QLineSeries::clicked,
              this, [this, ls]( const QPointF &point )
     {
@@ -702,9 +688,7 @@ void MonitorTab::installHoverCallout( QChart *chart )
   }
 }
 
-// ---------------------------------------------------------------------------
-// Sticky marks — click to pin/unpin a data-point callout
-// ---------------------------------------------------------------------------
+// Sticky marks - click to pin/unpin a data-point callout
 
 int MonitorTab::metricIndexForKey( const std::string &key )
 {
@@ -805,7 +789,7 @@ void MonitorTab::handleSeriesClick( QLineSeries *ls, const QPointF &point )
   if ( idx < 0 )
     return;
 
-  // Determine raw value — denormalize if this is a unified shadow series
+  // Determine raw value - denormalize if this is a unified shadow series
   const QVariant rvProp = ls->property( "_realScale" );
   const double rawValue = rvProp.isValid()
                           ? point.y() * rvProp.toDouble()
@@ -836,7 +820,7 @@ void MonitorTab::handleSeriesClick( QLineSeries *ls, const QPointF &point )
     }
   }
 
-  // Create a single-metric group mark — place box at vertical centre of plot
+  // Create a single-metric group mark - place box at vertical centre of plot
   addStickyMarkGroup( snapTs, 0.5, { { key, snapVal } } );
 }
 
@@ -936,7 +920,7 @@ void MonitorTab::updateStickyMarkPositions()
 {
   for ( auto &mark : m_stickyMarks )
   {
-    // --- Per-group chart positioning (one per entry) ---
+    // Per-group chart positioning (one per entry)
     for ( size_t e = 0; e < mark.entries.size(); ++e )
     {
       if ( e >= mark.groupGfxList.size() )
@@ -971,7 +955,7 @@ void MonitorTab::updateStickyMarkPositions()
           QPointF( static_cast< qreal >( mark.timestamp ), entry.rawValue ), label );
     }
 
-    // --- Unified chart grouped label ---
+    // Unified chart grouped label
     if ( !mark.uniBg || !m_unifiedChart )
       continue;
 
@@ -1066,7 +1050,7 @@ void MonitorTab::updateStickyMarkPositions()
     if ( bx + boxW > plotArea.right() )
       bx = sceneX.x() - boxW - 8;
 
-    // Place box at the stored plot-fraction Y — independent of axis zoom
+    // Place box at the stored plot-fraction Y - independent of axis zoom
     qreal by = plotArea.top() + mark.clickDataY * plotArea.height() - boxH / 2.0;
     by = std::max( plotArea.top() + 2.0, by );
     by = std::min( plotArea.bottom() - boxH - 2.0, by );
@@ -1164,9 +1148,7 @@ void MonitorTab::destroyUnifiedMarkGfx()
   }
 }
 
-// ---------------------------------------------------------------------------
-// Unified crosshair — vertical line + per-series labels on Ctrl
-// ---------------------------------------------------------------------------
+// Unified crosshair - vertical line + per-series labels on Ctrl
 
 bool MonitorTab::eventFilter( QObject *watched, QEvent *event )
 {
@@ -1422,7 +1404,7 @@ void MonitorTab::updateCrosshair( const QPointF &widgetPos, bool ctrlHeld )
     ++labelIndex;
   }
 
-  // Time label — always shown at the bottom of the stack (white)
+  // Time label - always shown at the bottom of the stack (white)
   {
     constexpr qreal pad = 3.0;
     auto *bg   = new QGraphicsRectItem( m_unifiedChart );
@@ -1531,9 +1513,7 @@ void MonitorTab::crosshairClick( const QPointF &widgetPos )
   }
 }
 
-// ---------------------------------------------------------------------------
 // Ctrl+LMB rubber-band zoom
-// ---------------------------------------------------------------------------
 
 void MonitorTab::applyZoomRect( const QRect &viewportRect )
 {
@@ -1557,8 +1537,8 @@ void MonitorTab::applyZoomRect( const QRect &viewportRect )
   const QPointF dataMin = m_unifiedChart->mapToValue( clampedTL );
   const QPointF dataMax = m_unifiedChart->mapToValue( clampedBR );
 
-  // dataMin.y() is the top of the rect → higher value (Y axis is inverted in screen coords)
-  // dataMax.y() is the bottom of the rect → lower value
+  // dataMin.y() is the top of the rect -> higher value (Y axis is inverted in screen coords)
+  // dataMax.y() is the bottom of the rect -> lower value
   const qreal yLo = std::min( dataMin.y(), dataMax.y() );
   const qreal yHi = std::max( dataMin.y(), dataMax.y() );
   const qint64 tLo = static_cast< qint64 >( std::min( dataMin.x(), dataMax.x() ) );
@@ -1590,9 +1570,7 @@ void MonitorTab::resetZoom()
   // The X axis will be restored by updateAxes() on the next tick
 }
 
-// ---------------------------------------------------------------------------
-// Chart setup helpers — attach series to charts
-// ---------------------------------------------------------------------------
+// Chart setup helpers - attach series to charts
 
 void MonitorTab::setupTemperatureChart()
 {
@@ -1689,9 +1667,7 @@ void MonitorTab::setupVoltageChart()
   m_voltChartView = createChartView( m_voltChart );
 }
 
-// ---------------------------------------------------------------------------
 // Incremental data fetch
-// ---------------------------------------------------------------------------
 
 void MonitorTab::fetchData()
 {
@@ -1702,7 +1678,7 @@ void MonitorTab::fetchData()
   if ( !result.has_value() || result->isEmpty() )
     return;
 
-  // ── Suspend painting on ALL chart views during the batch update ────
+  // Suspend painting on ALL chart views during the batch update
   m_tempChartView->setUpdatesEnabled( false );
   m_dutyChartView->setUpdatesEnabled( false );
   m_powerChartView->setUpdatesEnabled( false );
@@ -1716,7 +1692,7 @@ void MonitorTab::fetchData()
   updateAxes();
   updateStickyMarkPositions();
 
-  // ── Resume painting — triggers a single composite repaint ─────────
+  // Resume painting - triggers a single composite repaint
   m_tempChartView->setUpdatesEnabled( true );
   m_dutyChartView->setUpdatesEnabled( true );
   m_powerChartView->setUpdatesEnabled( true );
@@ -1729,9 +1705,7 @@ void MonitorTab::fetchData()
     updateCrosshair( m_lastCrosshairPos, m_annotationsVisible );
 }
 
-// ---------------------------------------------------------------------------
 // Pause / resume via spacebar
-// ---------------------------------------------------------------------------
 
 void MonitorTab::keyPressEvent( QKeyEvent *event )
 {
@@ -1753,11 +1727,11 @@ void MonitorTab::keyPressEvent( QKeyEvent *event )
 
 void MonitorTab::applyBinaryData( const QByteArray &data )
 {
-  // Wire layout (native endian — same-host IPC):
+  // Wire layout (native endian - same-host IPC):
   //   per non-empty metric: uint8_t metricId, uint32_t count,
-  //                         count × { int64_t timestampMs, double value }  (16 bytes each)
+  //                         count * { int64_t timestampMs, double value } (16 bytes each)
   //
-  // Points are appended to in-memory buffers only.  The actual QLineSeries
+  // Points are appended to in-memory buffers only. The actual QLineSeries
   // objects are updated in commitSeries() via a single replace() call,
   // which emits exactly one signal per series instead of one per append +
   // one per trim.
@@ -1837,7 +1811,7 @@ void MonitorTab::commitSeries()
     auto &info = m_seriesMap[ kMetrics[ i ].key ];
     info.series->replace( info.buffer );
 
-    // Update unified shadow series if active — build normalised list on the fly
+    // Update unified shadow series if active - build normalised list on the fly
     QVariant uv = info.series->property( "_uniSeries" );
     if ( uv.isValid() )
     {
@@ -1860,7 +1834,7 @@ void MonitorTab::updateAxes()
   const QDateTime now = QDateTime::currentDateTime();
   const QDateTime start = now.addSecs( -m_windowSeconds );
 
-  // Only update axes for the currently visible chart view — the invisible
+  // Only update axes for the currently visible chart view - the invisible
   // ones will be updated when they become visible again.
   const bool perGroup = ( m_chartStack->currentIndex() == 0 );
 
@@ -1882,9 +1856,7 @@ void MonitorTab::updateAxes()
   }
 }
 
-// ---------------------------------------------------------------------------
-// Group chart visibility — hide empty groups, stretch remaining
-// ---------------------------------------------------------------------------
+// Group chart visibility - hide empty groups, stretch remaining
 
 void MonitorTab::updateGroupChartVisibility()
 {

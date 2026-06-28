@@ -1,11 +1,11 @@
 /*
- * Unit tests for StateUtils – profileStateToString()
+ * Unit tests for StateUtils - profileStateToString()
  */
 
 #include <QTest>
 
 // StateUtils.hpp pulls in TccSettings.hpp (for ProfileState) and
-// PowerSupplyController.hpp.  We only test the pure enum→string helper,
+// PowerSupplyController.hpp. We only test the pure enum->string helper,
 // so the filesystem-touching code in determineState() is never called.
 #include "StateUtils.hpp"
 
@@ -15,7 +15,7 @@ class TestStateUtils : public QObject
 
 private slots:
 
-  // ---- profileStateToString() ------------------------------------------
+  // profileStateToString()
 
   void toStringAC()
   {

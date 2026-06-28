@@ -117,7 +117,7 @@ static constexpr nvmlClocksThrottleReasons_t NVML_CLOCKS_THROTTLE_REASON_DISPLAY
  */
 struct NvmlPStateClockInfo
 {
-  unsigned int pstate;     ///< P-state index (0–15)
+  unsigned int pstate;     ///< P-state index (0-15)
   unsigned int minMHz;     ///< Minimum clock in MHz
   unsigned int maxMHz;     ///< Maximum clock in MHz
   int currentOffset;       ///< Currently applied clock offset in MHz
@@ -251,9 +251,9 @@ public:
                                             nvml::nvmlClockType_t clockType,
                                             nvml::nvmlPstates_t pstate ) const;
 
-  // ---- Live monitoring getters (replace nvidia-smi subprocess calls) ----
+  // Live monitoring getters (replace nvidia-smi subprocess calls)
 
-  /** @brief GPU temperature in °C. */
+  /** @brief GPU temperature in degC. */
   [[nodiscard]] std::optional< unsigned int > getTemperatureDegC( unsigned int deviceIndex ) const noexcept;
 
   /** @brief Power draw in watts. */
@@ -280,10 +280,10 @@ public:
   /** @brief Current core voltage in mV (via NvAPI), if available. */
   [[nodiscard]] std::optional< unsigned int > getCoreVoltageMv( unsigned int deviceIndex ) const noexcept;
 
-  /** @brief GPU compute utilization in percent (0–100). */
+  /** @brief GPU compute utilization in percent (0-100). */
   [[nodiscard]] std::optional< unsigned int > getComputeUtilPct( unsigned int deviceIndex ) const noexcept;
 
-  /** @brief GPU memory-controller utilization in percent (0–100). */
+  /** @brief GPU memory-controller utilization in percent (0-100). */
   [[nodiscard]] std::optional< unsigned int > getMemoryUtilPct( unsigned int deviceIndex ) const noexcept;
 
   /** @brief Used VRAM in MiB. */
@@ -295,10 +295,10 @@ public:
   /** @brief Current dominant performance-cap / throttle reason. */
   [[nodiscard]] std::optional< std::string > getPerfLimitReason( unsigned int deviceIndex ) const noexcept;
 
-  /** @brief NVENC utilization in percent (0–100). */
+  /** @brief NVENC utilization in percent (0-100). */
   [[nodiscard]] std::optional< unsigned int > getEncoderUtilPct( unsigned int deviceIndex ) const noexcept;
 
-  /** @brief NVDEC utilization in percent (0–100). */
+  /** @brief NVDEC utilization in percent (0-100). */
   [[nodiscard]] std::optional< unsigned int > getDecoderUtilPct( unsigned int deviceIndex ) const noexcept;
 
   /** @brief Current P-state index (0 = P0 maximum, 15 = P15 minimum). */

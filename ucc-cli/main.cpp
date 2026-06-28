@@ -34,16 +34,14 @@
 #include <string>
 #include <vector>
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 static void printVersion()
 {
   std::printf( "ucc-cli %s\n", UCC_VERSION_FULL );
 }
 
-/// Pretty-print a JSON string (compact → indented).
+/// Pretty-print a JSON string (compact -> indented).
 static void printJSON( const std::string &json )
 {
   QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
@@ -146,14 +144,12 @@ static std::string profileId( const std::string &json )
   return "";
 }
 
-// ---------------------------------------------------------------------------
 // Local assignment helpers (stateMap + customProfiles cross-reference)
-// ---------------------------------------------------------------------------
 
 /// Per-profile assignment data loaded from the daemon settings.
 struct LocalAssignments {
-  QMap<QString, QStringList> profileStates;  ///< main profile id  -> power state names
-  QMap<QString, QStringList> fanStates;      ///< fan profile id   -> power state names
+  QMap<QString, QStringList> profileStates;  ///< main profile id -> power state names
+  QMap<QString, QStringList> fanStates;      ///< fan profile id -> power state names
   QMap<QString, QStringList> kbStates;       ///< keyboard profile id -> power state names
 };
 
@@ -234,9 +230,7 @@ static LocalAssignments loadLocalAssignments( ucc::UccdClient &c )
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Command implementations
-// ---------------------------------------------------------------------------
 
 static int cmdStatus( ucc::UccdClient &c )
 {
@@ -330,7 +324,7 @@ static int cmdStatus( ucc::UccdClient &c )
     }
   }
 
-  // Charging info — mirror GUI logic: only show if hardware provides data
+  // Charging info - mirror GUI logic: only show if hardware provides data
   auto chargingProfilesAvail = c.getChargingProfilesAvailable();
   bool hasChargingHW = false;
   if ( chargingProfilesAvail )
@@ -411,7 +405,7 @@ static int cmdProfileList( ucc::UccdClient &c )
     }
   }
 
-  // Custom profiles — daemon is the authoritative source
+  // Custom profiles - daemon is the authoritative source
   QList<QJsonObject> customProfiles;
   auto custJSON = c.getCustomProfilesJSON();
   if ( custJSON )
@@ -675,7 +669,7 @@ static int cmdProfileDelete( ucc::UccdClient &c, const char *id )
   return 0;
 }
 
-// --- Fan ---
+// Fan
 
 static int cmdFanList( ucc::UccdClient &c )
 {
@@ -837,7 +831,7 @@ static int cmdFanRevert( ucc::UccdClient &c )
   return 0;
 }
 
-/// Activate a fan profile by ID: fetch its curves, remap keys, and apply.
+/// Activate a fan profile by ID: fetch its curves, remap keys and apply.
 static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
 {
   // Try daemon built-in profiles first
@@ -874,7 +868,7 @@ static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
     return 1;
   }
 
-  // Remap keys: tableCPU→cpu, tableGPU→gpu, etc. (same as TrayBackend)
+  // Remap keys: tableCPU->cpu, tableGPU->gpu, etc. (same as TrayBackend)
   QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
   if ( !doc.isObject() )
   {
@@ -898,7 +892,7 @@ static int cmdFanSet( ucc::UccdClient &c, const char *fanProfileId )
   return 0;
 }
 
-// --- Dashboard / Monitor ---
+// Dashboard / Monitor
 
 static int cmdMonitor( ucc::UccdClient &c, int count, int interval )
 {
@@ -941,7 +935,7 @@ static int cmdMonitor( ucc::UccdClient &c, int count, int interval )
   return 0;
 }
 
-// --- Keyboard ---
+// Keyboard
 
 static int cmdKeyboardInfo( ucc::UccdClient &c )
 {
@@ -1167,7 +1161,7 @@ static int cmdKeyboardColor( ucc::UccdClient &c, int r, int g, int b, int bright
   return 0;
 }
 
-// --- Hardware controls ---
+// Hardware controls
 
 static int cmdBrightnessGet( ucc::UccdClient &c )
 {
@@ -1223,7 +1217,7 @@ static int cmdFnLockSet( ucc::UccdClient &c, bool enabled )
   return 0;
 }
 
-// --- Water Cooler ---
+// Water Cooler
 
 static int cmdWaterCoolerStatus( ucc::UccdClient &c )
 {
@@ -1284,9 +1278,9 @@ static int cmdWaterCoolerLedOff( ucc::UccdClient &c )
   return 0;
 }
 
-// --- Charging ---
+// Charging
 
-/// Parse a JSON array of strings and return a comma-separated list, or empty string.
+/// Parse a JSON array of strings and return a comma-separated list or empty string.
 static std::string jsonArrayToList( const std::string &json )
 {
   QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
@@ -1375,7 +1369,7 @@ static int cmdChargingSetThresholds( ucc::UccdClient &c, int start, int end )
   return 0;
 }
 
-// --- GPU ---
+// GPU
 
 static int cmdGpuInfo( ucc::UccdClient &c )
 {
@@ -1409,7 +1403,7 @@ static int cmdGpuInfo( ucc::UccdClient &c )
   return 0;
 }
 
-// --- State Map ---
+// State Map
 
 static int cmdStateMapGet( ucc::UccdClient &c )
 {
@@ -1476,7 +1470,7 @@ static int cmdStateMapSet( ucc::UccdClient &c, const char *state, const char *pr
   return 0;
 }
 
-// --- CPU Info ---
+// CPU Info
 
 static int cmdCpuInfo( ucc::UccdClient &c )
 {
@@ -1529,7 +1523,7 @@ static int cmdCpuInfo( ucc::UccdClient &c )
   return 0;
 }
 
-// --- Power Limits ---
+// Power Limits
 
 static int cmdPowerLimits( ucc::UccdClient &c )
 {
@@ -1545,9 +1539,7 @@ static int cmdPowerLimits( ucc::UccdClient &c )
   return 0;
 }
 
-// ---------------------------------------------------------------------------
 // Usage / Help
-// ---------------------------------------------------------------------------
 
 static void printUsage()
 {
@@ -1627,9 +1619,7 @@ static void printUsage()
   );
 }
 
-// ---------------------------------------------------------------------------
 // Argument parsing helpers
-// ---------------------------------------------------------------------------
 
 static bool matchArg( const char *arg, const char *name )
 {
@@ -1651,9 +1641,7 @@ static bool parseBool( const char *s, bool &out )
   return false;
 }
 
-// ---------------------------------------------------------------------------
 // Status JSON mode
-// ---------------------------------------------------------------------------
 
 static int cmdStatusJSON( ucc::UccdClient &c )
 {
@@ -1721,7 +1709,7 @@ static int cmdStatusJSON( ucc::UccdClient &c )
     root["waterCooler"] = wc;
   }
 
-  // Charging — mirror GUI logic
+  // Charging - mirror GUI logic
   auto chargingProfilesAvail = c.getChargingProfilesAvailable();
   bool hasChargingJ = false;
   if ( chargingProfilesAvail )
@@ -1760,9 +1748,7 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   return 0;
 }
 
-// ---------------------------------------------------------------------------
 // Main
-// ---------------------------------------------------------------------------
 
 int main( int argc, char *argv[] )
 {
@@ -1818,7 +1804,7 @@ int main( int argc, char *argv[] )
     return 2;
   }
 
-  // --- Dispatch commands ---
+  // Dispatch commands
 
   // status
   if ( matchArg( cmd, "status" ) )

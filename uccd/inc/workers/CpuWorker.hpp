@@ -127,7 +127,7 @@ public:
   /**
    * @brief Get available CPU governors
    *
-   * @return Vector of available governor names, or nullopt if unavailable
+   * @return Vector of available governor names or nullopt if unavailable
    */
   std::optional< std::vector< std::string > > getAvailableGovernors()
   {
@@ -140,7 +140,7 @@ public:
   /**
    * @brief Get available energy performance preferences
    *
-   * @return Vector of available EPP names, or nullopt if unavailable
+   * @return Vector of available EPP names or nullopt if unavailable
    */
   std::optional< std::vector< std::string > > getAvailableEPPs()
   {
@@ -153,7 +153,7 @@ public:
   /**
    * @brief Get total number of available logical CPU cores
    *
-   * @return Number of logical cores discovered from sysfs, or 0 if unavailable
+   * @return Number of logical cores discovered from sysfs or 0 if unavailable
    */
   int32_t getCoreCount() const
   {
@@ -316,7 +316,7 @@ private:
       {
         m_cpuCtrl.setEnergyPerformancePreference( profile.cpu.energyPerformancePreference );
 
-        // Verify EPP write actually took effect — some kernels (e.g. intel_pstate
+        // Verify EPP write actually took effect - some kernels (e.g. intel_pstate
         // on Arrow Lake with CachyOS 6.19+) reject sysfs EPP writes with EBUSY
         // even though the correct value is already set at the MSR level.
         if ( not m_cpuCtrl.cores.empty() )
@@ -384,7 +384,7 @@ private:
   {
     const UccProfile profile = m_getActiveProfile();
     {
-      // Determine acpi-cpufreq fallback flag once — mirrors setGovernorScalingMaxFrequency
+      // Determine acpi-cpufreq fallback flag once - mirrors setGovernorScalingMaxFrequency
       bool acpiFallback = false;
       if ( m_cpuCtrl.boost.isAvailable() )
       {
@@ -403,7 +403,7 @@ private:
       {
         if ( core.coreIndex == 0 or core.online.read().value_or( false ) )
         {
-          // check minimum frequency — compare against the per-core clamped+snapped value
+          // check minimum frequency - compare against the per-core clamped+snapped value
           // that setGovernorScalingMinFrequency() actually wrote, not the raw profile target
           // (which would differ for E-cores / lower-binned P-cores)
           if ( profile.cpu.scalingMinFrequency.has_value() )
@@ -420,7 +420,7 @@ private:
             }
           }
 
-          // check maximum frequency — compare against the per-core clamped+snapped value.
+          // check maximum frequency - compare against the per-core clamped+snapped value.
           // On heterogeneous CPUs (Intel Turbo Boost Max 3.0, P+E cores) every core type
           // has its own cpuinfo_max_freq ceiling; the profile stores the global requested
           // max but each core will have been written a different effective value.

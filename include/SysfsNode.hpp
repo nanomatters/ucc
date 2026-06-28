@@ -26,7 +26,7 @@
  * @brief Template class for reading/writing sysfs files with type safety
  *
  * Provides type-safe access to sysfs files with automatic parsing and formatting.
- * Supports reading and writing primitive types, strings, and vectors.
+ * Supports reading and writing primitive types, strings and vectors.
  *
  * Supported types:
  * - bool (read/write as 0/1)
@@ -57,7 +57,7 @@ public:
 
   /**
    * @brief Read value from sysfs node
-   * @return Optional containing the value, or nullopt if read failed
+   * @return Optional containing the value or nullopt if read failed
    */
   [[nodiscard]] std::optional< T > read() const noexcept
   {

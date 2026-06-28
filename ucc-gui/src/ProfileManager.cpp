@@ -24,9 +24,7 @@
 namespace ucc
 {
 
-// ---------------------------------------------------------------------------
 // Construction
-// ---------------------------------------------------------------------------
 
 ProfileManager::ProfileManager( QObject *parent )
   : QObject( parent )
@@ -40,7 +38,7 @@ ProfileManager::ProfileManager( QObject *parent )
   // Load custom keyboard profiles via D-Bus
   loadCustomKeyboardProfilesFromSettings();
 
-  // Always wire daemon signals — they won't fire while disconnected but will
+  // Always wire daemon signals - they won't fire while disconnected but will
   // start arriving as soon as uccd appears (see connectionStatusChanged below).
   connect( m_client.get(), &UccdClient::profileChanged,
            this, [this]( const QString &profileId,
@@ -87,9 +85,7 @@ ProfileManager::ProfileManager( QObject *parent )
   emit connectedChanged();
 }
 
-// ---------------------------------------------------------------------------
 // Refresh / update
-// ---------------------------------------------------------------------------
 
 void ProfileManager::refresh()
 {
@@ -149,7 +145,7 @@ void ProfileManager::updateProfiles()
 
   // Resolve the active profile for the current power state from the stateMap.
   // This is the authoritative source: if the user set a built-in profile via
-  // SetStateMap, the stateMap reflects that — whereas the daemon's
+  // SetStateMap, the stateMap reflects that - whereas the daemon's
   // GetActiveProfileJSON only reports the *running* profile which may differ.
   if ( m_activeProfileId.isEmpty() && !m_powerState.isEmpty() )
   {
@@ -186,7 +182,7 @@ void ProfileManager::updateProfiles()
   }
 
   // Query the daemon's live active profile to learn the current keyboard and
-  // fan sub-profile IDs.  These may differ from the stored profile if a remote
+  // fan sub-profile IDs. These may differ from the stored profile if a remote
   // client (e.g. the tray applet) changed them at runtime.
   try
   {
@@ -216,18 +212,14 @@ void ProfileManager::updateProfiles()
   updateActiveProfileIndex();
 }
 
-// ---------------------------------------------------------------------------
 // Active profile name (for display)
-// ---------------------------------------------------------------------------
 
 QString ProfileManager::activeProfileName() const
 {
   return profileNameById( m_activeProfileId );
 }
 
-// ---------------------------------------------------------------------------
 // ID <-> name helpers
-// ---------------------------------------------------------------------------
 
 QString ProfileManager::profileNameById( const QString &profileId ) const
 {
@@ -265,9 +257,7 @@ QString ProfileManager::profileIdByName( const QString &profileName ) const
   return QString();
 }
 
-// ---------------------------------------------------------------------------
 // Set active profile by ID
-// ---------------------------------------------------------------------------
 
 void ProfileManager::setActiveProfile( const QString &profileId )
 {
@@ -319,9 +309,7 @@ void ProfileManager::setActiveProfile( const QString &profileId )
   }
 }
 
-// ---------------------------------------------------------------------------
 // Save / delete / create profiles
-// ---------------------------------------------------------------------------
 
 void ProfileManager::saveProfile( const QString &profileJSON )
 {
@@ -406,9 +394,7 @@ QString ProfileManager::createProfileFromDefault( const QString &name )
   return profileJSON;
 }
 
-// ---------------------------------------------------------------------------
 // Profile details
-// ---------------------------------------------------------------------------
 
 QString ProfileManager::getProfileDetails( const QString &profileId )
 {
@@ -427,9 +413,7 @@ QString ProfileManager::getProfileDetails( const QString &profileId )
   return QString();
 }
 
-// ---------------------------------------------------------------------------
 // Profile changed signal (from daemon)
-// ---------------------------------------------------------------------------
 
 void ProfileManager::onProfileChanged( const std::string &profileId,
                                        const std::string &keyboardProfileId,
@@ -445,7 +429,7 @@ void ProfileManager::onProfileChanged( const std::string &profileId,
   }
 
   // Propagate keyboard / fan sub-profile changes regardless of whether the
-  // top-level profile ID changed.  Clients that only care about sub-profiles
+  // top-level profile ID changed. Clients that only care about sub-profiles
   // (e.g. keyboard editor combo) listen to these dedicated signals.
   if ( const QString kbId = QString::fromStdString( keyboardProfileId );
        !kbId.isEmpty() && kbId != m_activeKeyboardProfileId )
@@ -491,9 +475,7 @@ void ProfileManager::onPowerStateChanged( const QString &state )
   }
 }
 
-// ---------------------------------------------------------------------------
 // Profile list management
-// ---------------------------------------------------------------------------
 
 void ProfileManager::updateAllProfiles()
 {
@@ -560,9 +542,7 @@ bool ProfileManager::isCustomProfile( const QString &profileId ) const
   return false;
 }
 
-// ---------------------------------------------------------------------------
 // State map
-// ---------------------------------------------------------------------------
 
 QString ProfileManager::resolveStateMapToProfileId( const QString &state )
 {
@@ -595,9 +575,7 @@ bool ProfileManager::setBatchStateMap( const std::map< QString, QString > &entri
   return true;
 }
 
-// ---------------------------------------------------------------------------
 // Custom profiles + stateMap (daemon-managed via D-Bus)
-// ---------------------------------------------------------------------------
 
 void ProfileManager::loadCustomProfilesFromSettings()
 {
@@ -642,9 +620,7 @@ void ProfileManager::saveCustomProfilesToSettings()
   // No-op: profiles and stateMap are managed by uccd via D-Bus.
 }
 
-// ---------------------------------------------------------------------------
 // Built-in fan profiles (from daemon)
-// ---------------------------------------------------------------------------
 
 void ProfileManager::loadBuiltinFanProfiles()
 {
@@ -670,9 +646,7 @@ void ProfileManager::loadBuiltinFanProfiles()
   }
 }
 
-// ---------------------------------------------------------------------------
 // Custom fan profiles (daemon-managed via D-Bus)
-// ---------------------------------------------------------------------------
 
 void ProfileManager::loadCustomFanProfilesFromSettings()
 {
@@ -783,9 +757,7 @@ bool ProfileManager::renameFanProfile( const QString &fanProfileId, const QStrin
   return true;
 }
 
-// ---------------------------------------------------------------------------
 // Custom keyboard profiles (local storage, by ID)
-// ---------------------------------------------------------------------------
 
 void ProfileManager::loadCustomKeyboardProfilesFromSettings()
 {
@@ -840,7 +812,7 @@ QString ProfileManager::getKeyboardProfile( const QString &keyboardProfileId )
         }
         else if ( jsonVal.isObject() )
         {
-          // json field is a nested object — serialize back to compact string
+          // json field is a nested object - serialize back to compact string
           return QString::fromUtf8( QJsonDocument( jsonVal.toObject() ).toJson( QJsonDocument::Compact ) );
         }
 
@@ -894,9 +866,7 @@ bool ProfileManager::renameKeyboardProfile( const QString &keyboardProfileId, co
   return success;
 }
 
-// ---------------------------------------------------------------------------
 // Settings JSON
-// ---------------------------------------------------------------------------
 
 QString ProfileManager::getSettingsJSON()
 {

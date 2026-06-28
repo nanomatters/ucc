@@ -34,7 +34,7 @@ enum class LaptopManufacturer
 /**
  * @brief Human-readable device information
  *
- * Detected once at daemon startup from DMI, PCI, and /proc/cpuinfo data.
+ * Detected once at daemon startup from DMI, PCI and /proc/cpuinfo data.
  * Exposed to GUI/tray via a single D-Bus JSON blob.
  */
 struct SystemInfo
@@ -48,7 +48,7 @@ struct SystemInfo
 
   // Laptop
   LaptopManufacturer manufacturer = LaptopManufacturer::Unknown;
-  std::string manufacturerName;   // human-readable: "TUXEDO", "XMG", "Uniwill", …
+  std::string manufacturerName;   // human-readable: "TUXEDO", "XMG", "Uniwill", ...
   std::string laptopModel;        // human-readable: "TUXEDO Stellaris 16 Intel Gen6 (2024)"
   std::string productSKU;         // raw DMI product_sku
   std::string boardName;          // raw DMI board_name
@@ -68,10 +68,10 @@ struct SystemInfo
  * @brief Detect system hardware information
  *
  * Reads DMI data from /sys/class/dmi/id/, CPU model from /proc/cpuinfo,
- * and GPU models from the PCI sysfs tree.  Maps the detected UniwillDeviceID
+ * and GPU models from the PCI sysfs tree. Maps the detected UniwillDeviceID
  * to a human-readable laptop model name (brand + product line + year).
  *
- * @param deviceId  The already-identified UniwillDeviceID (or nullopt)
+ * @param deviceId The already-identified UniwillDeviceID (or nullopt)
  * @return Populated SystemInfo struct
  */
 SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId );

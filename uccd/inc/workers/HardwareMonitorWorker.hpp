@@ -53,17 +53,17 @@ struct DGpuInfo
   bool m_d0MetricsUsage = false;
 
   // Extended metrics (NVIDIA only, -1 / INT_MIN when unavailable)
-  int m_computeUtilPct = -1;     ///< GPU compute utilization in % (0–100), or -1
-  int m_memoryUtilPct  = -1;     ///< GPU memory-controller utilization in % (0–100), or -1
-  int m_vramUsedMiB    = -1;     ///< Used VRAM in MiB, or -1
-  int m_vramTotalMiB   = -1;     ///< Total VRAM in MiB, or -1
+  int m_computeUtilPct = -1;     ///< GPU compute utilization in % (0-100) or -1
+  int m_memoryUtilPct  = -1;     ///< GPU memory-controller utilization in % (0-100) or -1
+  int m_vramUsedMiB    = -1;     ///< Used VRAM in MiB or -1
+  int m_vramTotalMiB   = -1;     ///< Total VRAM in MiB or -1
   std::string m_perfLimitReason; ///< Current perf-cap/throttle reason, empty when unavailable
-  int m_encoderUtilPct = -1;     ///< NVENC utilization in %, or -1
-  int m_decoderUtilPct = -1;     ///< NVDEC utilization in %, or -1
-  int m_currentPstate  = -1;     ///< Current P-state index (0–15), or -1 if unknown
+  int m_encoderUtilPct = -1;     ///< NVENC utilization in % or -1
+  int m_decoderUtilPct = -1;     ///< NVDEC utilization in % or -1
+  int m_currentPstate  = -1;     ///< Current P-state index (0-15) or -1 if unknown
   int m_grClockOffsetMHz  = INT_MIN; ///< Graphics-clock offset at current P-state, INT_MIN = unavailable
   int m_memClockOffsetMHz = INT_MIN; ///< Memory-clock offset at current P-state, INT_MIN = unavailable
-  int m_coreVoltageMv = -1;      ///< Core voltage in mV, or -1
+  int m_coreVoltageMv = -1;      ///< Core voltage in mV or -1
 
   void print() const noexcept;
 };
@@ -235,22 +235,22 @@ private:
 /**
  * @brief HardwareMonitorWorker - Unified hardware monitoring
  *
- * Merges GPU information collection, CPU power monitoring, and NVIDIA Prime
+ * Merges GPU information collection, CPU power monitoring and NVIDIA Prime
  * state detection into a single worker thread.
  *
  * GPU monitoring (every cycle, 800ms):
- *   - Intel iGPU via RAPL energy counters and DRM frequency
- *   - AMD iGPU via hwmon sysfs interface
- *   - AMD dGPU via hwmon sysfs interface
- *   - NVIDIA dGPU via nvidia-smi command
+ * - Intel iGPU via RAPL energy counters and DRM frequency
+ * - AMD iGPU via hwmon sysfs interface
+ * - AMD dGPU via hwmon sysfs interface
+ * - NVIDIA dGPU via nvidia-smi command
  *
- * CPU power monitoring (every 3rd cycle ≈ 2400ms):
- *   - Intel RAPL power data for CPU package
- *   - Power constraints (PL1/PL2/PL4)
+ * CPU power monitoring (every 3rd cycle about 2400ms):
+ * - Intel RAPL power data for CPU package
+ * - Power constraints (PL1/PL2/PL4)
  *
- * Prime state monitoring (every 12th cycle ≈ 9600ms):
- *   - NVIDIA Prime GPU switching status
- *   - Requires prime-select utility (Ubuntu/TUXEDO OS)
+ * Prime state monitoring (every 12th cycle about 9600ms):
+ * - NVIDIA Prime GPU switching status
+ * - Requires prime-select utility (Ubuntu/TUXEDO OS)
  */
 class HardwareMonitorWorker : public DaemonWorker
 {
@@ -296,7 +296,7 @@ public:
   /**
    * @brief Callback function type for webcam status updates
    * @param available Whether webcam switch hardware is present
-   * @param status    Current webcam on/off state
+   * @param status Current webcam on/off state
    */
   using WebcamStatusCallback = std::function< void( bool available, bool status ) >;
 
@@ -317,7 +317,7 @@ public:
    * Must be called before start(). The reader queries hardware for the
    * webcam switch state; the callback pushes the result to DBus data.
    *
-   * @param reader   Returns (available, status) from hardware
+   * @param reader Returns (available, status) from hardware
    * @param callback Called with (available, status) on each poll
    */
   void setWebcamCallbacks( WebcamHwReader reader, WebcamStatusCallback callback ) noexcept;
@@ -344,7 +344,7 @@ protected:
   void onExit() override;
 
 private:
-  // --- GPU state ---
+  // GPU state
   GpuDeviceDetector m_gpuDetector;
   GpuDeviceCounts m_deviceCounts;
   std::shared_ptr< NvmlWrapper > m_nvml; ///< NVML API wrapper (shared, no-op if libnvidia-ml not present)
@@ -359,7 +359,7 @@ private:
   std::unique_ptr< IntelRAPLController > m_intelRAPLGpu;
   std::unique_ptr< PowerController > m_intelGpuPowerController;
 
-  // --- CPU power state ---
+  // CPU power state
   std::unique_ptr< IntelRAPLController > m_intelRAPLCpu;
   std::unique_ptr< PowerController > m_cpuPowerController;
   bool m_RAPLConstraint0Status;
@@ -368,20 +368,20 @@ private:
   CpuPowerCallback m_cpuPowerUpdateCallback;
   std::function< bool() > m_getSensorDataCollectionStatus;
 
-  // --- CPU frequency callback ---
+  // CPU frequency callback
   CpuFrequencyCallback m_cpuFrequencyCallback;
 
-  // --- Prime state ---
+  // Prime state
   std::function< void( const std::string & ) > m_setPrimeState;
   bool m_primeSupported;
   bool m_isDisplayMuxDevice;         ///< Device with NVIDIA display mux (e.g. IBM15A10)
   bool m_displayConnectedToNvidia;   ///< Whether eDP display is wired to the NVIDIA GPU
 
-  // --- Webcam state ---
+  // Webcam state
   WebcamHwReader m_webcamHwReader;
   WebcamStatusCallback m_webcamStatusCallback;
 
-  // --- Cycle counters for staggered polling ---
+  // Cycle counters for staggered polling
   uint32_t m_cycleCounter;
 
   // GPU methods

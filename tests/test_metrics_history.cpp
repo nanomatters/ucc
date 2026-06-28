@@ -1,6 +1,6 @@
 /*
- * Unit tests for MetricsHistoryStore – push, querySinceJSON,
- * horizon clamping, eviction, and metricName().
+ * Unit tests for MetricsHistoryStore - push, querySinceJSON,
+ * horizon clamping, eviction and metricName().
  */
 
 #include <QTest>
@@ -8,7 +8,7 @@
 #include <string>
 #include "MetricsHistoryStore.hpp"
 
-// C++20 helper — std::string::contains() is C++23
+// C++20 helper - std::string::contains() is C++23
 static bool strContains( const std::string &haystack, const char *needle )
 {
   return haystack.find( needle ) != std::string::npos;
@@ -20,7 +20,7 @@ class TestMetricsHistory : public QObject
 
 private slots:
 
-  // ---- metricName() ----------------------------------------------------
+  // metricName()
 
   void metricName_known()
   {
@@ -34,7 +34,7 @@ private slots:
 
   void metricName_sentinel()
   {
-    // Count is a sentinel — should return "unknown"
+    // Count is a sentinel - should return "unknown"
     QCOMPARE( std::string( metricName( MetricId::Count ) ),
               std::string( "unknown" ) );
   }
@@ -46,7 +46,7 @@ private slots:
               std::string( "unknown" ) );
   }
 
-  // ---- push + querySinceJSON() -----------------------------------------
+  // push + querySinceJSON()
 
   void pushAndQuery_basic()
   {
@@ -69,12 +69,12 @@ private slots:
     store.push( MetricId::CpuTemp, 2000, 20.0 );
     store.push( MetricId::CpuTemp, 3000, 30.0 );
 
-    // Query since ts=2000 → should include 2000 and 3000 but not 1000
+    // Query since ts=2000 -> should include 2000 and 3000 but not 1000
     std::string json = store.querySinceJSON( 2000 );
     QVERIFY( strContains( json,  "20" ) );
     QVERIFY( strContains( json,  "30" ) );
     // Value "10" is also a substring of timestamps, so check for the specific point
-    // Instead, query since 2500 — only the 3000 point should remain
+    // Instead, query since 2500 - only the 3000 point should remain
     std::string json2 = store.querySinceJSON( 2500 );
     QVERIFY( strContains( json2,  "30" ) );
     // 20.0 data point should not be present (ts 2000 < 2500)
@@ -99,7 +99,7 @@ private slots:
     QVERIFY( strContains( json,  "gpuTemp" ) );
   }
 
-  // ---- push() ignores out-of-range MetricId ----------------------------
+  // push() ignores out-of-range MetricId
 
   void push_outOfRange()
   {
@@ -110,7 +110,7 @@ private slots:
     QCOMPARE( store.querySinceJSON( 0 ), std::string( "{}" ) );
   }
 
-  // ---- querySinceBinary() basic sanity ---------------------------------
+  // querySinceBinary() basic sanity
 
   void binaryQuery_roundTrip()
   {
@@ -130,7 +130,7 @@ private slots:
     QCOMPARE( count, 1u );
   }
 
-  // ---- setHorizon() – clamping -----------------------------------------
+  // setHorizon() - clamping
 
   void horizon_default()
   {
@@ -159,7 +159,7 @@ private slots:
     QCOMPARE( store.horizonSeconds(), 600 );
   }
 
-  // ---- eviction --------------------------------------------------------
+  // eviction
 
   void eviction_oldPointsPruned()
   {
@@ -171,7 +171,7 @@ private slots:
     // Push a point at t=200000 (well beyond 60s horizon from first point)
     store.push( MetricId::CpuTemp, 200000, 50.0 );
 
-    // Query from the beginning — old point should have been evicted
+    // Query from the beginning - old point should have been evicted
     std::string json = store.querySinceJSON( 0 );
     // Only the 50.0 point should remain
     // The 40.0 point (at t=1000) is older than 200000-60000=140000 cutoff

@@ -11,9 +11,9 @@
  * Provides a visual editor for pump voltage thresholds.
  * The pump has 4 discrete levels (Off, V7, V8, V11) corresponding to
  * integer values 0-3, with 3 temperature threshold points that can be
- * positioned freely between 20°C and 100°C. Below the first threshold the
+ * positioned freely between 20 degC and 100 degC. Below the first threshold the
  * pump is Off (level 0); each threshold raises the level by one.
- * 12V (level 4) is intentionally omitted — it can be harmful to the pump.
+ * 12V (level 4) is intentionally omitted - it can be harmful to the pump.
  *
  * This edits the "tablePump" field in FanProfile.
  */
@@ -25,7 +25,7 @@ public:
     QSize sizeHint() const override { return QSize(600, 250); }
 
     struct Point {
-        double temp;   // temperature threshold in °C (20..100)
+        double temp;   // temperature threshold in degC (20..100)
         int level;     // pump level 0=Off, 1=V7, 2=V8, 3=V11
     };
 
@@ -38,7 +38,7 @@ public:
     void setTitle(const QString &title) { m_title = title; update(); }
     QString title() const { return m_title; }
 
-    /** Set the live crosshair position (temperature in °C, pump level 0–3). */
+    /** Set the live crosshair position (temperature in degC, pump level 0-3). */
     void setCrosshair( double temp, int level );
     /** Remove the crosshair from the display. */
     void clearCrosshair();

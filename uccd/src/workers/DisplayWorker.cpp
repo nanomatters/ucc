@@ -108,7 +108,7 @@ DisplayWorker::DisplayWorker(
 {
 }
 
-// ------------ Public API ------------
+// Public API
 
 bool DisplayWorker::setBrightness( int32_t brightness ) noexcept
 {
@@ -143,7 +143,7 @@ bool DisplayWorker::setRefreshRate( int refreshRate ) noexcept
   return true;
 }
 
-// ------------ DaemonWorker lifecycle ------------
+// DaemonWorker lifecycle
 
 void DisplayWorker::onStart()
 {
@@ -158,7 +158,7 @@ void DisplayWorker::onWork()
 {
   reenumerateBacklightDrivers();
 
-  // --- Refresh rate work (every 2nd cycle ≈ 6000ms, close to original 5000ms) ---
+  // Refresh rate work (every 2nd cycle about 6000ms, close to original 5000ms)
   m_refreshRateCycleCounter++;
   if ( m_refreshRateCycleCounter % 2 == 0 )
   {
@@ -304,7 +304,7 @@ void DisplayWorker::resetRefreshRateState() noexcept
 
 /**
  * @brief Validate that a string looks like a safe DISPLAY value.
- *        Must match :N or :N.N where N is a small number.
+ * Must match :N or :N.N where N is a small number.
  */
 static bool isValidDisplay( const std::string &v ) noexcept
 {
@@ -314,7 +314,7 @@ static bool isValidDisplay( const std::string &v ) noexcept
 
 /**
  * @brief Validate that a string looks like a safe XAUTHORITY path.
- *        Only allow path characters [a-zA-Z0-9/_.-].
+ * Only allow path characters [a-zA-Z0-9/_.-].
  */
 static bool isValidXAuthority( const std::string &v ) noexcept
 {
@@ -347,7 +347,7 @@ void DisplayWorker::setEnvVariables() noexcept
       if ( pidName.empty() or not std::isdigit( static_cast< unsigned char >( pidName[0] ) ) )
         continue;
 
-      // Check process owner — skip root
+      // Check process owner - skip root
       std::error_code ec;
       (void) fs::status( entry.path(), ec );  // probe accessibility
       if ( ec )
@@ -405,7 +405,7 @@ void DisplayWorker::setEnvVariables() noexcept
     for ( char &c : sessionType )
       c = static_cast< char >( std::tolower( static_cast< unsigned char >( c ) ) );
 
-    // --- INPUT VALIDATION: reject values that contain shell metacharacters ---
+    // INPUT VALIDATION: reject values that contain shell metacharacters
     if ( not display.empty() and not isValidDisplay( display ) )
     {
       syslog( LOG_WARNING, "DisplayWorker: Rejected suspicious DISPLAY value" );

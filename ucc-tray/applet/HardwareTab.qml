@@ -34,7 +34,7 @@ PC3.ScrollView {
                 margins: Kirigami.Units.largeSpacing
             }
 
-            // ── Quick Toggles ──
+            // Quick Toggles
             PlasmaExtras.Heading {
                 level: 4
                 text: i18n("Quick Controls")
@@ -75,7 +75,7 @@ PC3.ScrollView {
 
             Kirigami.Separator { Layout.fillWidth: true }
 
-            // ── Display Brightness ──
+            // Display Brightness
             PlasmaExtras.Heading {
                 level: 4
                 text: i18n("Display Brightness")

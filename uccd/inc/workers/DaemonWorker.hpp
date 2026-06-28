@@ -71,20 +71,20 @@ namespace ucc {
  * @brief Abstract base class for daemon worker threads
  *
  * Provides a framework for periodic work execution with automatic timer management.
- * Subclasses must implement onStart(), onWork(), and onExit() lifecycle methods.
+ * Subclasses must implement onStart(), onWork() and onExit() lifecycle methods.
  *
  * The worker automatically creates a background thread that:
- *   - Calls onStart() once at initialization
- *   - Calls onWork() repeatedly at the specified timeout interval
- *   - Calls onExit() during cleanup
+ * - Calls onStart() once at initialization
+ * - Calls onWork() repeatedly at the specified timeout interval
+ * - Calls onExit() during cleanup
  *
  * Uses QThread for proper Qt object threading support.
  *
  * Usage:
- *   - Create concrete subclass inheriting from DaemonWorker
- *   - Implement pure virtual methods: onStart(), onWork(), onExit()
- *   - Constructor automatically starts the timer thread
- *   - Call stop() to gracefully shutdown the worker
+ * - Create concrete subclass inheriting from DaemonWorker
+ * - Implement pure virtual methods: onStart(), onWork(), onExit()
+ * - Constructor automatically starts the timer thread
+ * - Call stop() to gracefully shutdown the worker
  */
 class DaemonWorker : public QThread
 {
@@ -96,9 +96,9 @@ public:
    *
    * Creates the worker and automatically starts the timer thread if autoStart is true.
    * The thread will:
-   *   1. Call onStart() once on startup
-   *   2. Repeatedly call onWork() at timeout intervals
-   *   3. Call onExit() when the thread stops
+   * 1. Call onStart() once on startup
+   * 2. Repeatedly call onWork() at timeout intervals
+   * 3. Call onExit() when the thread stops
    *
    * @param timeout Duration in milliseconds between work cycles
    * @param autoStart Whether to automatically start the worker thread

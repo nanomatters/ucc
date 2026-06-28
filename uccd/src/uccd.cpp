@@ -96,7 +96,7 @@ bool acquire_pid_lock()
   {
     if ( errno == EWOULDBLOCK )
     {
-      // File is locked by another instance — read its PID for error message
+      // File is locked by another instance - read its PID for error message
       char pidbuf[32] = {0};
       lseek( g_pidfile_fd, 0, SEEK_SET );
       ssize_t n = read( g_pidfile_fd, pidbuf, sizeof(pidbuf) - 1 );
@@ -458,7 +458,7 @@ int main( int argc, char* argv[] )
     {
       return 1;
     }
-    // Modern systemd-friendly behavior: do not daemonize here — run in foreground
+    // Modern systemd-friendly behavior: do not daemonize here - run in foreground
     // so systemd (Type=simple) can supervise the process directly.
     return run_daemon();
   }

@@ -212,7 +212,7 @@ static std::string profileToJSON( const UccProfile &profile,
     oss << ",\"nvidiaCTGPOffset\":" << *profile.nvidiaCTGPOffset;
   }
 
-  // Keyboard section — only store the reference, not the full state data
+  // Keyboard section - only store the reference, not the full state data
   // Full per-key states live in customKeyboardProfiles in /etc/ucc/settings.
   {
     const std::string &kbRef = !profile.keyboard.keyboardProfileId.empty()
@@ -334,7 +334,7 @@ void UccDBusInterfaceAdaptor::resetDataCollectionTimeout()
 QVariantMap
 UccDBusInterfaceAdaptor::exportFanData( const FanData &fanData )
 {
-  // Cast int64_t → qlonglong and int32_t → int so QtDBus can marshal them.
+  // Cast int64_t -> qlonglong and int32_t -> int so QtDBus can marshal them.
   // int64_t is 'long' on x86_64 Linux which QtDBus does not recognise,
   // whereas qlonglong ('long long') maps to D-Bus 'x' (INT64).
   QVariantMap speedData;
@@ -1463,7 +1463,7 @@ QString UccDBusInterfaceAdaptor::GetCustomKeyboardProfilesJSON()
   for ( const auto &[id, prof] : m_service->m_settings.customKeyboardProfiles )
   {
     if ( count++ > 0 ) json << ",";
-    // prof already contains {"id":"...","name":"...","json":{...}} — return as-is
+    // prof already contains {"id":"...","name":"...","json":{...}} - return as-is
     json << prof;
   }
   json << "]";
@@ -1936,7 +1936,7 @@ bool UccDBusInterfaceAdaptor::GetHwpDynamicBoostSupported()
   return m_data.hwpDynamicBoostSupported;
 }
 
-// --- Monitoring history D-Bus methods ---
+// Monitoring history D-Bus methods
 
 QByteArray UccDBusInterfaceAdaptor::GetMonitorDataSince( qlonglong sinceTimestampMs )
 {
@@ -1966,7 +1966,7 @@ int UccDBusInterfaceAdaptor::GetCpuFrequencyMHz()
 
 // signal emitters
 // These may be called from the DaemonWorker thread, but the adaptor lives in
-// the main thread.  Use QMetaObject::invokeMethod with a queued connection so
+// the main thread. Use QMetaObject::invokeMethod with a queued connection so
 // the actual emit happens in the object's owning thread.
 
 void UccDBusInterfaceAdaptor::emitModeReapplyPendingChanged( bool pending )
@@ -2047,13 +2047,13 @@ UccDBusService::UccDBusService()
   m_systemInfo = detectSystemInfo( m_deviceId );
   m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
 
-  // Check device whitelist — unsupported machines get a functional D-Bus
+  // Check device whitelist - unsupported machines get a functional D-Bus
   // service (so clients can query IsDeviceSupported) but no hardware control.
   m_dbusData.deviceSupported = ucc::isDeviceSupported();
   if ( !m_dbusData.deviceSupported.load() )
   {
     syslog( LOG_WARNING, "[uccd] Device not in supported whitelist — running in passive mode" );
-    return;
+    //return;
   }
 
   // detect display session type and initialize display modes
@@ -2072,12 +2072,12 @@ UccDBusService::UccDBusService()
   m_dbusData.keyboardBacklightStatesJSON = "[]";
 
   // Read all hardware capabilities directly using m_io / sysfs BEFORE any
-  // workers or profiles are created.  This populates TDP limits, NVIDIA
-  // power limits, charging profiles, and YCbCr420 availability with real
+  // workers or profiles are created. This populates TDP limits, NVIDIA
+  // power limits, charging profiles and YCbCr420 availability with real
   // hardware values so the D-Bus data is never populated with fake defaults.
   //
-  // Create the single shared NvmlWrapper instance first — it is reused by
-  // readHardwareCapabilities(), HardwareMonitorWorker, and
+  // Create the single shared NvmlWrapper instance first - it is reused by
+  // readHardwareCapabilities(), HardwareMonitorWorker and
   // ProfileSettingsWorker so that NVML is initialised exactly once.
   m_nvml = std::make_shared< NvmlWrapper >();
   readHardwareCapabilities();
@@ -2118,8 +2118,9 @@ UccDBusService::UccDBusService()
     []( const std::string &msg ) { syslog( LOG_INFO, "%s", msg.c_str() ); }
   );
 
-  // initialize profile settings worker (replaces ODMPowerLimitWorker, ODMProfileWorker, ChargingWorker, YCbCr420WorkaroundWorker)
-  // Quirk: some devices (e.g. IBP Gen10 AMD) have a non-functional ACPI platform_profile —
+  // Initialize profile settings worker. This replaces the old ODM power,
+  // ODM profile, charging and YCbCr420 worker classes.
+  // Quirk: some devices (e.g. IBP Gen10 AMD) have a non-functional ACPI platform_profile -
   // skip it and fall through to the Tuxedo IO API instead (synced from TCC f71acd86, a1b2f6b4).
   const bool skipAcpiPlatformProfile =
     m_deviceId.has_value() and
@@ -2149,7 +2150,7 @@ UccDBusService::UccDBusService()
   );
 
   // initialize hardware monitor worker (merged GPU info + CPU power + Prime)
-  // Quirk: IBM15A10 has a display mux — prime-select is only supported when
+  // Quirk: IBM15A10 has a display mux - prime-select is only supported when
   // the eDP display is NOT wired to the NVIDIA GPU (synced from TCC PrimeWorker).
   const bool isDisplayMuxDevice =
     m_deviceId.has_value() and m_deviceId.value() == UniwillDeviceID::IBM15A10;
@@ -2186,7 +2187,7 @@ UccDBusService::UccDBusService()
     }
   );
 
-  // CPU frequency monitoring via HardwareMonitorWorker (every cycle ≈ 800ms)
+  // CPU frequency monitoring via HardwareMonitorWorker (every cycle about 800ms)
   m_hardwareMonitorWorker->setCpuFrequencyCallback(
     [this]( int frequencyMHz ) {
       m_dbusData.cpuFrequencyMHz = frequencyMHz;
@@ -2278,7 +2279,7 @@ UccDBusService::UccDBusService()
             fp.tablePump = m_activeProfile.fan.tablePump;
           }
 
-          const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5°C
+          const int snappedTemp = ( ( wcTemp + 2 ) / 5 ) * 5;  // round to nearest 5 degC
           const int wcFanSpeed = fp.getWaterCoolerFanSpeedForTemp( snappedTemp );
           m_waterCoolerWorker->setFanSpeed( wcFanSpeed );
 
@@ -2310,7 +2311,7 @@ UccDBusService::UccDBusService()
 
           if ( rawIdx > m_pumpHysSpeedIdx )
           {
-            // Temperature rising – apply new level and record its table threshold.
+            // Temperature rising - apply new level and record its table threshold.
             m_pumpHysSpeedIdx = rawIdx;
             m_pumpHysThreshold = 0;
             for ( const auto &[t, s] : fp.tablePump )
@@ -2318,7 +2319,7 @@ UccDBusService::UccDBusService()
           }
           else if ( rawIdx < m_pumpHysSpeedIdx )
           {
-            // Temperature falling – only step down once we are past the dead-band.
+            // Temperature falling - only step down once we are past the dead-band.
             if ( wcTemp < m_pumpHysThreshold - PUMP_HYSTERESIS_DEG )
             {
               m_pumpHysSpeedIdx = rawIdx;
@@ -2332,7 +2333,7 @@ UccDBusService::UccDBusService()
               pumpIdxToVoltage[ std::clamp( m_pumpHysSpeedIdx, 0, 4 ) ];
           m_waterCoolerWorker->setPumpVoltage( static_cast<int>( pumpSpeedValue ) );
 
-          // std::cout << "[Auto WC] Temp: " << temp << "°C, Fan: " << wcFanSpeed
+          // std::cout << "[Auto WC] Temp: " << temp << " degC, Fan: " << wcFanSpeed
           //           << "%, Pump Voltage: " << static_cast<int>(pumpSpeedValue) << std::endl;
         }
         catch ( ... ) { /* ignore errors in water cooler auto-control */ }
@@ -2340,7 +2341,7 @@ UccDBusService::UccDBusService()
     }
   );
 
-  // Initialize keyboard backlight controller (synchronous — no worker thread)
+  // Initialize keyboard backlight controller (synchronous - no worker thread)
   {
     std::string capsJSON = m_keyboardBacklightController.init();
     m_dbusData.keyboardBacklightCapabilitiesJSON = capsJSON;
@@ -2395,8 +2396,8 @@ void UccDBusService::readHardwareCapabilities()
 {
   syslog( LOG_INFO, "[uccd] Reading hardware capabilities directly" );
 
-  // ---- ODM Power Limits (TDP) ----
-  // Read from TuxedoIOAPI — identical logic to ProfileSettingsWorker::getTDPInfo()
+  // ODM Power Limits (TDP)
+  // Read from TuxedoIOAPI - identical logic to ProfileSettingsWorker::getTDPInfo()
   {
     int nrTDPs = 0;
     if ( m_io.getNumberTDPs( nrTDPs ) and nrTDPs > 0 )
@@ -2436,7 +2437,7 @@ void UccDBusService::readHardwareCapabilities()
     }
   }
 
-  // ---- NVIDIA Power Control ----
+  // NVIDIA Power Control
   {
     static const std::string NVIDIA_CTGP_OFFSET =
       "/sys/devices/platform/tuxedo_nvidia_power_ctrl/ctgp_offset";
@@ -2474,7 +2475,7 @@ void UccDBusService::readHardwareCapabilities()
     }
   }
 
-  // ---- Charging ----
+  // Charging
   {
     static const std::string CHARGING_PROFILE_PATH =
       "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profile";
@@ -2589,7 +2590,7 @@ void UccDBusService::readHardwareCapabilities()
     }
   }
 
-  // ---- YCbCr 4:2:0 ----
+  // YCbCr 4:2:0
   {
     m_dbusData.forceYUV420OutputSwitchAvailable = false;
 
@@ -2637,7 +2638,7 @@ void UccDBusService::setupGpuDataCallback()
       m_dbusData.iGpuInfoValuesJSON = igpuInfoToJSON( iGpuInfo );
       m_dbusData.dGpuInfoValuesJSON = dgpuInfoToJSON( dGpuInfo );
 
-      // Push GPU metrics to history store (outside dataMutex — store has its own lock)
+      // Push GPU metrics to history store (outside dataMutex - store has its own lock)
       const auto now = std::chrono::duration_cast< std::chrono::milliseconds >(
         std::chrono::system_clock::now().time_since_epoch() ).count();
 
@@ -2773,7 +2774,7 @@ void UccDBusService::shutdown()
 
   // Phase 1: Signal ALL workers to stop (non-blocking).
   // This must happen before waiting, because some onWork() callbacks
-  // use BlockingQueuedConnection to the main thread.  If we stop()+wait
+  // use BlockingQueuedConnection to the main thread. If we stop()+wait
   // sequentially, a worker stuck in BlockingQueuedConnection will deadlock
   // because the main thread is blocked in QThread::wait().
   requestStop();
@@ -2783,7 +2784,7 @@ void UccDBusService::shutdown()
   if ( m_hardwareMonitorWorker ) m_hardwareMonitorWorker->requestStop();
 
   // Phase 2: Wait for all threads to finish while keeping the Qt event
-  // loop alive.  Workers may have pending BlockingQueuedConnection calls
+  // loop alive. Workers may have pending BlockingQueuedConnection calls
   // (e.g. LCTWaterCoolerWorker) that need the main thread to dispatch.
   // Pumping events here prevents deadlocks.
   auto waitPumpingEvents = []( QThread *t ) {
@@ -2972,7 +2973,7 @@ void UccDBusService::onWork()
     m_adaptor->emitModeReapplyPendingChanged( true );
 
   // Check water cooler connection state changes and switch power state.
-  // Debounce: BLE connections are inherently unstable – the water cooler
+  // Debounce: BLE connections are inherently unstable - the water cooler
   // may briefly disconnect (UART error) and reconnect within seconds.
   // We only act on a state change once it has been stable for a
   // configurable number of seconds (shorter for connect, longer for
@@ -2984,21 +2985,21 @@ void UccDBusService::onWork()
     // Raw flag differs from the last accepted state.
     if ( !m_wcDebouncePending || m_wcDebouncedTarget != wcConnected )
     {
-      // First time we see this new value (or direction changed) – start timer.
+      // First time we see this new value (or direction changed) - start timer.
       m_wcDebouncePending  = true;
       m_wcDebouncedTarget  = wcConnected;
       m_wcDebounceStart    = std::chrono::steady_clock::now();
     }
     else
     {
-      // Still waiting for the same direction – check elapsed time.
+      // Still waiting for the same direction - check elapsed time.
       const int requiredSeconds = wcConnected ? WC_CONNECT_DEBOUNCE_S
                                               : WC_DISCONNECT_DEBOUNCE_S;
       auto elapsed = std::chrono::steady_clock::now() - m_wcDebounceStart;
       if ( std::chrono::duration_cast< std::chrono::seconds >( elapsed ).count()
            >= requiredSeconds )
       {
-        // Stable long enough – accept the change.
+        // Stable long enough - accept the change.
         m_wcDebouncePending = false;
         m_previousWaterCoolerConnected = wcConnected;
 
@@ -3037,7 +3038,7 @@ void UccDBusService::onWork()
   }
   else
   {
-    // Raw flag matches accepted state – cancel any pending debounce.
+    // Raw flag matches accepted state - cancel any pending debounce.
     m_wcDebouncePending = false;
   }
 }
@@ -3073,7 +3074,7 @@ void UccDBusService::setWaterCoolerScanningEnabled( bool enable )
 
 void UccDBusService::onExit()
 {
-  // Only do thread-safe work here — this runs on the DaemonWorker thread.
+  // Only do thread-safe work here - this runs on the DaemonWorker thread.
   // DBus cleanup happens in shutdown() on the main thread.
   saveAutosave();
 }
@@ -3886,8 +3887,8 @@ void UccDBusService::seedDefaultKeyboardProfileIfEmpty()
   if ( !m_settings.customKeyboardProfiles.empty() )
     return;
 
-  // Built-in template — a 126-key per-key colour layout the user can use
-  // as a starting point.  Persisted as an ordinary custom keyboard profile
+  // Built-in template - a 126-key per-key colour layout the user can use
+  // as a starting point. Persisted as an ordinary custom keyboard profile
   // so the user can rename, copy, modify or delete it freely.
   static constexpr const char *kDefaultKeyboardJSON = R"JSON({"brightness":36,"states":[{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":82,"brightness":36,"green":79,"mode":0,"red":255},{"blue":82,"brightness":36,"green":79,"mode":0,"red":255},{"blue":82,"brightness":36,"green":79,"mode":0,"red":255},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":82,"brightness":36,"green":79,"mode":0,"red":255},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":255,"brightness":36,"green":96,"mode":0,"red":181},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":205,"brightness":36,"green":77,"mode":0,"red":55},{"blue":56,"brightness":36,"green":255,"mode":0,"red":179}]})JSON";
 
@@ -3921,7 +3922,7 @@ void UccDBusService::loadSettings()
   }
   else
   {
-    // Fresh install — create default settings with sensible stateMap.
+    // Fresh install - create default settings with sensible stateMap.
     // Pick the default profile with the highest total TDP so the GUI
     // immediately shows meaningful power-limit values instead of 0 W.
     m_settings = TccSettings();
@@ -3979,7 +3980,7 @@ void UccDBusService::loadSettings()
   // Only modify it when profiles are explicitly added/edited via API.
 
   // Seed a default keyboard profile if none exist, so the user always has
-  // something to start from in the GUI keyboard editor.  The user is free
+  // something to start from in the GUI keyboard editor. The user is free
   // to rename, modify, copy or delete it.
   seedDefaultKeyboardProfileIfEmpty();
 
@@ -3989,7 +3990,7 @@ void UccDBusService::loadSettings()
 
   for ( const auto &stateKey : { "power_ac", "power_bat", "power_wc" } )
   {
-    // check if state key exists in map – if not, leave it unassigned
+    // check if state key exists in map - if not, leave it unassigned
     if ( m_settings.stateMap.find( stateKey ) == m_settings.stateMap.end() )
     {
       std::cout << "[Settings] No profile assigned to state '"
@@ -4067,7 +4068,7 @@ void UccDBusService::loadSettings()
 
 void UccDBusService::initializeStartupProfile()
 {
-  // Skip on unsupported devices — no workers are running
+  // Skip on unsupported devices - no workers are running
   if ( !m_dbusData.deviceSupported.load() )
     return;
 

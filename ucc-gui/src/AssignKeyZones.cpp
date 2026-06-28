@@ -855,8 +855,8 @@ QMap<int, QString> assignKeyZones(const QString &layout)
     mappings[50] = "J";
     mappings[51] = "K";
     mappings[52] = "L";
-    mappings[53] = ";"; // Instead of Ö
-    mappings[54] = "'"; // Instead of Ä
+    mappings[53] = ";"; // Instead of O umlaut
+    mappings[54] = "'"; // Instead of A umlaut
     mappings[55] = "#";
     mappings[56] = "Unused/Unknown";
     mappings[57] = "4";
@@ -877,7 +877,7 @@ QMap<int, QString> assignKeyZones(const QString &layout)
     mappings[72] = "I";
     mappings[73] = "O";
     mappings[74] = "P";
-    mappings[75] = "["; // Instead of Ü
+    mappings[75] = "["; // Instead of U umlaut
     mappings[76] = "]"; // Instead of +
     mappings[77] = "↵";
     mappings[78] = "7";
@@ -897,7 +897,7 @@ QMap<int, QString> assignKeyZones(const QString &layout)
     mappings[92] = "8";
     mappings[93] = "9";
     mappings[94] = "0";
-    mappings[95] = "-"; // Instead of ß
+    mappings[95] = "-"; // Instead of ss
     mappings[96] = "="; // Instead of '
     mappings[97] = "Unused/Unknown";
     mappings[98] = "⌫";

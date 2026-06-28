@@ -23,7 +23,7 @@
 #include <iostream>
 #include <syslog.h>
 
-// ── Constants ───────────────────────────────────────────────────────
+// Constants
 static constexpr int TICK_INTERVAL_MS = 1000;
 static constexpr int FAST_RECONNECT_TIMEOUT_SECONDS = 8;
 static constexpr int DISCOVERY_RETRY_SECONDS = 3;
@@ -38,7 +38,7 @@ static constexpr int GATT_CACHE_PURGE_FAILURE_THRESHOLD = 3; // Purge BlueZ GATT
 static constexpr int KEEPALIVE_INTERVAL_SECONDS = 10;        // Send keepalive probe every N seconds while connected
 static constexpr int KEEPALIVE_MISS_THRESHOLD = 3;           // Declare dead after N missed keepalives
 
-// ── Static UUID constants ───────────────────────────────────────────
+// Static UUID constants
 const QString LCTWaterCoolerWorker::NORDIC_UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const QString LCTWaterCoolerWorker::NORDIC_UART_CHAR_TX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const QString LCTWaterCoolerWorker::NORDIC_UART_CHAR_RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
@@ -47,7 +47,7 @@ const QBluetoothUuid LCTWaterCoolerWorker::NORDIC_UART_SERVICE_UUID_OBJ = QBluet
 const QBluetoothUuid LCTWaterCoolerWorker::NORDIC_UART_CHAR_TX_OBJ = QBluetoothUuid( NORDIC_UART_CHAR_TX );
 const QBluetoothUuid LCTWaterCoolerWorker::NORDIC_UART_CHAR_RX_OBJ = QBluetoothUuid( NORDIC_UART_CHAR_RX );
 
-// ── Construction / Destruction ──────────────────────────────────────
+// Construction / Destruction
 
 LCTWaterCoolerWorker::LCTWaterCoolerWorker( UccDBusData& dbusData, StatusCallback statusCallback, QObject* parent )
     : QObject( parent ), m_dbusData( dbusData ), m_lastDiscoveryStart( std::chrono::steady_clock::now() ),
@@ -55,7 +55,7 @@ LCTWaterCoolerWorker::LCTWaterCoolerWorker( UccDBusData& dbusData, StatusCallbac
 {
   std::cout << "[LCTWaterCoolerWorker] Constructed worker" << std::endl;
 
-  // Timer for periodic tick — fires on the main thread event loop
+  // Timer for periodic tick - fires on the main thread event loop
   m_tickTimer = new QTimer( this );
   m_tickTimer->setInterval( TICK_INTERVAL_MS );
   connect( m_tickTimer, &QTimer::timeout, this, &LCTWaterCoolerWorker::onTick );
@@ -99,7 +99,7 @@ LCTWaterCoolerWorker::~LCTWaterCoolerWorker()
   stopDiscoveryInternal();
 }
 
-// ── Start / Stop ────────────────────────────────────────────────────
+// Start / Stop
 
 void LCTWaterCoolerWorker::start()
 {
@@ -121,7 +121,7 @@ void LCTWaterCoolerWorker::stop()
   }
 }
 
-// ── Periodic tick (runs on the main thread) ─────────────────────────
+// Periodic tick (runs on the main thread)
 
 void LCTWaterCoolerWorker::onTick()
 {
@@ -181,7 +181,7 @@ void LCTWaterCoolerWorker::onTick()
   }
 }
 
-// ── State handlers (all direct calls — same thread, no dispatch) ────
+// State handlers (all direct calls - same thread, no dispatch)
 
 void LCTWaterCoolerWorker::handleDisconnected()
 {
@@ -191,7 +191,7 @@ void LCTWaterCoolerWorker::handleDisconnected()
   if ( m_hasKnownDevice )
   {
     // If fast reconnect has failed too many times, the cached device info is likely stale
-    // (e.g. device changed its BLE address).  Force fresh discovery.
+    // (e.g. device changed its BLE address). Force fresh discovery.
     if ( m_fastReconnectFailures >= FAST_RECONNECT_MAX_FAILURES )
     {
       syslog( LOG_WARNING, "LCTWaterCoolerWorker: fast reconnect failed %d times, clearing known device",
@@ -217,7 +217,7 @@ void LCTWaterCoolerWorker::handleDisconnected()
     }
   }
 
-  // No known device — throttle discovery retries
+  // No known device - throttle discovery retries
   const auto elapsed = secondsSinceLastDiscovery();
   if ( elapsed > DISCOVERY_RETRY_SECONDS )
   {
@@ -232,7 +232,7 @@ void LCTWaterCoolerWorker::handleDiscovering()
 
   if ( not active )
   {
-    // Discovery finished — check for found devices
+    // Discovery finished - check for found devices
     syslog( LOG_INFO, "LCTWaterCoolerWorker: discovery finished, checking for devices" );
 
     if ( not m_discoveredDevices.isEmpty() )
@@ -252,7 +252,7 @@ void LCTWaterCoolerWorker::handleDiscovering()
     return;
   }
 
-  // Still discovering — enforce a hard timeout
+  // Still discovering - enforce a hard timeout
   if ( secondsSinceLastDiscovery() > DISCOVERY_TIMEOUT_SECONDS )
   {
     syslog( LOG_WARNING, "LCTWaterCoolerWorker: discovery timeout, stopping" );
@@ -369,7 +369,7 @@ void LCTWaterCoolerWorker::handleError()
   }
 }
 
-// ── Connection ready (called from onServiceStateChanged) ────────────
+// Connection ready (called from onServiceStateChanged)
 
 void LCTWaterCoolerWorker::onConnectionReady()
 {
@@ -384,18 +384,18 @@ void LCTWaterCoolerWorker::onConnectionReady()
   m_missedKeepalives = 0;
   m_lastKeepalive = std::chrono::steady_clock::now();
 
-  // Do NOT send initial pump/fan commands here.  The hardware powers up at its
+  // Do NOT send initial pump/fan commands here. The hardware powers up at its
   // own default voltage (typically V11) and may silently ignore BLE writes
-  // issued immediately after service discovery.  Sending "Off" here would
+  // issued immediately after service discovery. Sending "Off" here would
   // update m_lastPumpVoltage to Off while the hardware stays at V11, causing
   // the auto-control loop to skip redundant writes and leaving the pump stuck
-  // at the wrong level.  Instead, leave m_lastPumpVoltage at -1 (set on
+  // at the wrong level. Instead, leave m_lastPumpVoltage at -1 (set on
   // disconnect) so the auto-control loop's first cycle always writes through.
   // If auto-control is disabled the user sets the pump manually.
   setFanSpeed( INITIAL_FAN_SPEED_PERCENT );
   syslog( LOG_INFO, "LCTWaterCoolerWorker: sent initial fan setup command" );
 
-  // Reapply last known LED settings — hardware starts with LED off after BLE connect.
+  // Reapply last known LED settings - hardware starts with LED off after BLE connect.
   // Exchange the cached values with -1 so the next setLEDColor won't skip as "same".
   const int savedR    = m_lastLedR.exchange( -1 );
   const int savedG    = m_lastLedG.exchange( -1 );
@@ -408,7 +408,7 @@ void LCTWaterCoolerWorker::onConnectionReady()
   }
 }
 
-// ── BLE signal handlers ─────────────────────────────────────────────
+// BLE signal handlers
 
 void LCTWaterCoolerWorker::onDeviceDiscovered( const QBluetoothDeviceInfo& device )
 {
@@ -589,7 +589,7 @@ void LCTWaterCoolerWorker::onBleError( QLowEnergyController::Error error )
   }
 }
 
-// ── Thread-safe public API ──────────────────────────────────────────
+// Thread-safe public API
 
 bool LCTWaterCoolerWorker::isConnected() const
 {
@@ -783,7 +783,7 @@ void LCTWaterCoolerWorker::disconnectFromDevice()
   m_dbusData.waterCoolerConnected = false;
 }
 
-// ── Invokable implementations (BLE writes, always run on main thread)
+// Invokable implementations (BLE writes, always run on main thread)
 
 bool LCTWaterCoolerWorker::setFanSpeedImpl( int dutyCyclePercent )
 {
@@ -860,7 +860,7 @@ bool LCTWaterCoolerWorker::writeCommandImpl( const QByteArray& data, bool withRe
   return true;
 }
 
-// ── Discovery ───────────────────────────────────────────────────────
+// Discovery
 
 bool LCTWaterCoolerWorker::startDiscoveryInternal()
 {
@@ -893,7 +893,7 @@ void LCTWaterCoolerWorker::stopDiscoveryInternal()
   m_isDiscovering = false;
 }
 
-// ── Connection management ───────────────────────────────────────────
+// Connection management
 
 bool LCTWaterCoolerWorker::connectToDevice( const QString& deviceUuid )
 {
@@ -1002,7 +1002,7 @@ void LCTWaterCoolerWorker::disconnectFromDeviceInternal()
   }
 }
 
-// ── BLE helpers ─────────────────────────────────────────────────────
+// BLE helpers
 
 bool LCTWaterCoolerWorker::setupBleController( const QBluetoothDeviceInfo& deviceInfo )
 {
@@ -1051,8 +1051,8 @@ void LCTWaterCoolerWorker::cleanupBleController()
     }
     else
     {
-      // Controller is still closing or connected — request disconnect and use deferred
-      // deletion to let BlueZ finish processing asynchronously.  This avoids the
+      // Controller is still closing or connected - request disconnect and use deferred
+      // deletion to let BlueZ finish processing asynchronously. This avoids the
       // "Low Energy Controller is not Unconnected when deleted" warning.
       std::cout << "[WC-BLE] Controller still in state "
                 << static_cast< int >( m_bleController->state() )
@@ -1112,7 +1112,7 @@ bool LCTWaterCoolerWorker::resetBluetoothAdapter()
   //  - Cause ALL paired Bluetooth devices to become temporarily unavailable
   //  - Block all Bluetooth operations during reset (1.5+ seconds)
   // This is a heavy-handed recovery mechanism and should only be used after
-  // persistent connection failures.  Callers should document this side effect.
+  // persistent connection failures. Callers should document this side effect.
   syslog( LOG_WARNING, "LCTWaterCoolerWorker: resetting Bluetooth adapter via bluetoothctl (WARNING: disconnects all BT devices)" );
 
   cleanupBleController();
@@ -1168,7 +1168,7 @@ bool LCTWaterCoolerWorker::purgeBlueZDeviceCache( const QString& macAddress )
     return false;
   }
 
-  // exit code 1 is okay — means device was already unknown to BlueZ
+  // exit code 1 is okay - means device was already unknown to BlueZ
   if ( proc.exitCode() != 0 )
     syslog( LOG_INFO, "LCTWaterCoolerWorker: bluetoothctl remove returned %d (device may not be paired)",
             proc.exitCode() );
@@ -1178,12 +1178,12 @@ bool LCTWaterCoolerWorker::purgeBlueZDeviceCache( const QString& macAddress )
   return true;
 }
 
-// ── Suspend / Resume ────────────────────────────────────────────────
+// Suspend / Resume
 
 void LCTWaterCoolerWorker::setupSuspendResumeHandling()
 {
   // Connect to logind's PrepareForSleep signal so we can cleanly tear down BLE
-  // before the system suspends, and reinitialize after it wakes up.
+  // before the system suspends and reinitialize after it wakes up.
   // This prevents the stale HCI state that causes reconnection failures after resume.
   auto systemBus = QDBusConnection::systemBus();
   if ( not systemBus.isConnected() )
@@ -1213,7 +1213,7 @@ void LCTWaterCoolerWorker::onPrepareForSleep( bool suspending )
     m_suspending = true;
 
     // Cleanly disconnect and destroy BLE objects before the kernel suspends
-    // the USB bus.  This prevents dangling HCI handles on resume.
+    // the USB bus. This prevents dangling HCI handles on resume.
     stopDiscoveryInternal();
     cleanupBleController();
     m_state = WaterCoolerState::Disconnected;
@@ -1240,14 +1240,14 @@ void LCTWaterCoolerWorker::onPrepareForSleep( bool suspending )
   }
 }
 
-// ── BLE Keepalive ───────────────────────────────────────────────────
+// BLE Keepalive
 
 void LCTWaterCoolerWorker::sendKeepaliveProbe()
 {
   if ( not m_isConnected.load() or not m_bleController )
     return;
 
-  // Check the controller state — if BlueZ already knows the link is gone,
+  // Check the controller state - if BlueZ already knows the link is gone,
   // we can detect it here even if the disconnect signal hasn't fired yet.
   if ( m_bleController->state() == QLowEnergyController::UnconnectedState )
   {
@@ -1276,7 +1276,7 @@ void LCTWaterCoolerWorker::sendKeepaliveProbe()
   }
 }
 
-// ── State machine helpers ───────────────────────────────────────────
+// State machine helpers
 
 void LCTWaterCoolerWorker::requestStartDiscovery()
 {
@@ -1328,7 +1328,7 @@ ucc::LCTDeviceModel LCTWaterCoolerWorker::deviceModelFromName( const QString& na
   if ( lower.contains( "21001" ) )
     return ucc::LCTDeviceModel::LCT21001;
 
-  // Generic LCT device — treat as LCT21001
+  // Generic LCT device - treat as LCT21001
   syslog( LOG_INFO, "LCTWaterCoolerWorker: unknown LCT model '%s', treating as LCT21001", name.toStdString().c_str() );
   return ucc::LCTDeviceModel::LCT21001;
 }

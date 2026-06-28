@@ -81,16 +81,16 @@ private:
  * into a single worker thread.
  *
  * Backlight features:
- *   - Detects backlight hardware via sysfs (/sys/class/backlight)
- *   - Applies brightness from active profile on start
- *   - Periodically persists brightness to autosave
- *   - Works with Intel, AMD, and amdgpu_bl backlight drivers
+ * - Detects backlight hardware via sysfs (/sys/class/backlight)
+ * - Applies brightness from active profile on start
+ * - Periodically persists brightness to autosave
+ * - Works with Intel, AMD and amdgpu_bl backlight drivers
  *
  * Refresh rate features (X11 only):
- *   - Detects available display modes and refresh rates via xrandr
- *   - Applies refresh rate from active profile
- *   - Only active on X11 sessions (disabled on Wayland)
- *   - Monitors user login/logout to reset state
+ * - Detects available display modes and refresh rates via xrandr
+ * - Applies refresh rate from active profile
+ * - Only active on X11 sessions (disabled on Wayland)
+ * - Monitors user login/logout to reset state
  */
 class DisplayWorker : public DaemonWorker
 {
@@ -139,10 +139,10 @@ protected:
   void onExit() override;
 
 private:
-  // --- Shared state ---
+  // Shared state
   std::function< UccProfile() > m_getActiveProfile;
 
-  // --- Backlight state ---
+  // Backlight state
   std::string m_autosavePath;
   std::function< int32_t() > m_getAutosaveBrightness;
   std::function< void( int32_t ) > m_setAutosaveBrightness;
@@ -152,7 +152,7 @@ private:
   void applyBacklightFromProfile();
   void reenumerateBacklightDrivers();
 
-  // --- Refresh rate state ---
+  // Refresh rate state
   std::function< bool() > m_getIsX11;
   std::function< void( const std::string & ) > m_setDisplayModes;
   std::function< void( bool ) > m_setIsX11;

@@ -146,7 +146,7 @@ MainWindow::MainWindow( QWidget *parent )
   onUccdConnectionChanged( m_UccdClient->isConnected() );
   statusBar()->showMessage( "Ready" );
 
-  // Load initial data — refresh() emits signals that populate the UI.
+  // Load initial data - refresh() emits signals that populate the UI.
   // Block the profile combo to avoid cascading loadProfileDetails calls.
   m_profileCombo->blockSignals( true );
   m_profileManager->refresh();
@@ -159,7 +159,7 @@ MainWindow::MainWindow( QWidget *parent )
   m_currentFanProfile = ( m_fanControlTab && m_fanControlTab->fanProfileCombo() && m_fanControlTab->fanProfileCombo()->count() > 0 )
     ? m_fanControlTab->fanProfileCombo()->currentData().toString() : QString();
 
-  // Startup complete — allow hardware interaction from now on
+  // Startup complete - allow hardware interaction from now on
   m_initializing = false;
 
   // Start monitoring since dashboard is the first tab
@@ -249,10 +249,10 @@ void MainWindow::connectFanControlTab()
            this, &MainWindow::onCopyFanProfileClicked );
 
   // Bidirectional water-cooler enable checkbox sync
-  // FanControlTab toggle → D-Bus + sync dashboard checkbox
+  // FanControlTab toggle -> D-Bus + sync dashboard checkbox
   connect( m_fanControlTab, &FanControlTab::waterCoolerEnableChanged,
            m_dashboardTab, &DashboardTab::setWaterCoolerEnabled );
-  // DashboardTab toggle → D-Bus call + sync fan tab checkbox
+  // DashboardTab toggle -> D-Bus call + sync fan tab checkbox
   connect( m_dashboardTab, &DashboardTab::waterCoolerEnableChanged,
            this, [this]( bool enabled ) {
              m_fanControlTab->setWaterCoolerEnabled( enabled );
@@ -977,7 +977,7 @@ void MainWindow::connectSignals()
            this, [this](int index) {
              markChanged();
              // Keep the keyboard tab combo in sync so it reflects the selection,
-             // but do NOT apply to hardware — that happens when the profile is saved/applied.
+             // but do NOT apply to hardware - that happens when the profile is saved/applied.
              m_keyboardProfileCombo->blockSignals(true);
              m_keyboardProfileCombo->setCurrentIndex(index);
              m_keyboardProfileCombo->blockSignals(false);
@@ -1041,7 +1041,7 @@ void MainWindow::connectSignals()
   // Populate EPP combo
   populateEppCombo();
 
-  // ── Live crosshair tracking on fan curve editors ──
+  // Live crosshair tracking on fan curve editors
   connect( m_systemMonitor.get(), &SystemMonitor::cpuTempChanged,              this, &MainWindow::updateFanCrosshairs );
   connect( m_systemMonitor.get(), &SystemMonitor::fanSpeedChanged,             this, &MainWindow::updateFanCrosshairs );
   connect( m_systemMonitor.get(), &SystemMonitor::gpuTempChanged,              this, &MainWindow::updateFanCrosshairs );
@@ -1347,7 +1347,7 @@ void MainWindow::onAllProfilesChanged()
 
   // Override stored keyboard/fan profile with the daemon's live state.
   // A remote client (e.g. tray applet) may have changed the sub-profile
-  // while the GUI was not running, or the ProfileChanged signal may have
+  // while the GUI was not running or the ProfileChanged signal may have
   // arrived with updated sub-profile IDs.
   {
     QString liveKbId = m_profileManager->activeKeyboardProfileId();
@@ -1412,9 +1412,7 @@ void MainWindow::onCpuCoresChanged( int value )
   m_cpuCoresValue->setText( QString::number( value ) );
 }
 
-// ---------------------------------------------------------------------------
 // Sub-profile sync helpers: update combo + editor without writing to hardware
-// ---------------------------------------------------------------------------
 
 void MainWindow::updateKeyboardEditorFromProfile( const QString &keyboardProfileId )
 {
@@ -1972,7 +1970,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     onFanProfileChanged( loadedFanProfile );
   }
 
-  // Load keyboard profile for display only — must NOT write to hardware.
+  // Load keyboard profile for display only - must NOT write to hardware.
   // onKeyboardProfileChanged() pushes states to the daemon, which would revert
   // live changes made by the tray applet while the GUI was not running.
   // Use updateKeyboardEditorFromProfile() which only updates the UI widgets.
@@ -2106,7 +2104,7 @@ QString MainWindow::buildProfileJSON() const
     displayObj["brightness"] = m_brightnessSlider->value();
   profileObj["display"] = displayObj;
 
-  // Fan — embed complete fan profile tables
+  // Fan - embed complete fan profile tables
   QJsonObject fanObj;
   QString fanProfileId  = m_profileFanProfileCombo->currentData().toString();
   QString fanProfileJSON = m_profileManager->getFanProfile( fanProfileId );
@@ -2148,7 +2146,7 @@ QString MainWindow::buildProfileJSON() const
   odmObj["tdpValues"] = tdpArray;
   profileObj["odmPowerLimits"] = odmObj;
 
-  // GPU Power (cTGP) — embed cTGP offset directly in the profile
+  // GPU Power (cTGP) - embed cTGP offset directly in the profile
   if ( m_ctgpSlider && m_cTGPAdjustmentSupported )
   {
     int sliderValue = m_ctgpSlider->value();
@@ -2157,7 +2155,7 @@ QString MainWindow::buildProfileJSON() const
     profileObj["nvidiaCTGPOffset"] = ctgpOffset;
   }
 
-  // Keyboard — only store the profile reference, not the full state data
+  // Keyboard - only store the profile reference, not the full state data
   // Full per-key states live in customKeyboardProfiles managed by uccd.
   QString keyboardProfileId  = m_profileKeyboardProfileCombo->currentData().toString();
   QJsonObject keyboardObj;
@@ -2696,7 +2694,7 @@ void MainWindow::onWaterCoolerFanPointsChanged(const QVector<FanCurveEditorWidge
 
 void MainWindow::onPumpPointsChanged(const QVector<PumpCurveEditorWidget::Point>& /*points*/)
 {
-  // Pump points changed – mark the fan profile as modified so it can be saved
+  // Pump points changed - mark the fan profile as modified so it can be saved
   if ( m_fanControlTab )
   {
     m_fanControlTab->saveButton()->setEnabled( true );

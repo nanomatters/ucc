@@ -34,13 +34,11 @@ extern char **environ;
 namespace ucc
 {
 
-// ---------------------------------------------------------------------------
 // Device support whitelist
 //
-// Only devices listed here have been tested with uccd.  The daemon will still
+// Only devices listed here have been tested with uccd. The daemon will still
 // run on unlisted hardware (so clients can query the status) but it will NOT
 // touch any hardware registers or start worker threads.
-// ---------------------------------------------------------------------------
 
 /// DMI product_sku strings of tested / supported laptops.
 inline constexpr std::array kSupportedDeviceSKUs = {
@@ -48,6 +46,7 @@ inline constexpr std::array kSupportedDeviceSKUs = {
   "STELLARIS16I07",
   "XNE16E25",
   "XNE16A25",
+  "X6FR559Y",
   "IBP14A10MK1 / IBP15A10MK1",
 };
 
@@ -55,7 +54,7 @@ inline constexpr std::array kSupportedDeviceSKUs = {
  * @brief Check whether the current machine is a supported (whitelisted) device.
  *
  * Reads /sys/class/dmi/id/product_sku and compares it against the
- * built-in whitelist.  Returns true if the SKU matches.
+ * built-in whitelist. Returns true if the SKU matches.
  */
 inline bool isDeviceSupported()
 {
@@ -72,14 +71,14 @@ inline bool isDeviceSupported()
  * @brief Execute a process safely with an argument vector (no shell).
  *
  * This replaces the old popen()-based executeCommand() to prevent
- * shell injection attacks.  The executable is looked up via PATH
+ * shell injection attacks. The executable is looked up via PATH
  * by posix_spawnp().
  *
  * @param executable Path or name of the executable
- * @param args       Argument vector (argv[0] is set to executable automatically)
+ * @param args Argument vector (argv[0] is set to executable automatically)
  * @param envOverrides Optional environment variable overrides ("KEY=VALUE").
- *                     When non-empty, they are prepended to the inherited environ.
- * @return stdout of the child process, or "" on error
+ * When non-empty, they are prepended to the inherited environ.
+ * @return stdout of the child process or "" on error
  */
 [[nodiscard]] inline std::string executeProcess(
     const std::string &executable,
@@ -138,11 +137,11 @@ inline bool isDeviceSupported()
     if ( pipe( pipeFds ) != 0 )
       return "";
 
-    // Set up posix_spawn file actions: child stdout → write end of pipe
+    // Set up posix_spawn file actions: child stdout -> write end of pipe
     posix_spawn_file_actions_t fileActions;
     posix_spawn_file_actions_init( &fileActions );
     posix_spawn_file_actions_addclose( &fileActions, pipeFds[0] );                // close read end in child
-    posix_spawn_file_actions_adddup2( &fileActions, pipeFds[1], STDOUT_FILENO );  // stdout → pipe write
+    posix_spawn_file_actions_adddup2( &fileActions, pipeFds[1], STDOUT_FILENO );  // stdout -> pipe write
     posix_spawn_file_actions_addclose( &fileActions, pipeFds[1] );                // close original write fd
     // Redirect stderr to /dev/null
     posix_spawn_file_actions_addopen( &fileActions, STDERR_FILENO, "/dev/null", O_WRONLY, 0 );
@@ -201,9 +200,9 @@ inline bool isDeviceSupported()
  * @brief Execute a shell command and capture output.
  *
  * @deprecated Use executeProcess() with explicit argument vectors instead.
- *             This wrapper exists only for commands that genuinely need
- *             shell features (glob expansion, pipes). All new code should
- *             use executeProcess().
+ * This wrapper exists only for commands that genuinely need
+ * shell features (glob expansion, pipes). All new code should
+ * use executeProcess().
  *
  * @param command Shell command string
  * @return Command output or empty string on error

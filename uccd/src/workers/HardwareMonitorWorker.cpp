@@ -335,7 +335,7 @@ bool HardwareMonitorWorker::isPrimeSupported() const noexcept
   return m_primeSupported;
 }
 
-// ------------ Lifecycle ------------
+// Lifecycle
 
 void HardwareMonitorWorker::onStart()
 {
@@ -351,7 +351,7 @@ void HardwareMonitorWorker::onWork()
 {
   m_cycleCounter++;
 
-  // --- GPU info: every cycle (800ms) ---
+  // GPU info: every cycle (800ms)
   // retry AMD iGPU path discovery if not found yet
   if ( m_deviceCounts.amdIGpuCount == 1 and not m_amdIGpuHwmonPath.has_value() and m_hwmonIGpuRetryCount > 0 )
     ( void ) checkAmdIGpuHwmonPath();
@@ -365,18 +365,18 @@ void HardwareMonitorWorker::onWork()
   }
   catch ( ... ) { /* ignore callback exceptions */ }
 
-  // --- CPU frequency: every cycle (≈ 800ms) ---
+  // CPU frequency: every cycle (about 800ms)
   updateCpuFrequency();
 
-  // --- CPU power: every 3rd cycle (≈ 2400ms, close to original 2000ms) ---
+  // CPU power: every 3rd cycle (about 2400ms, close to original 2000ms)
   if ( m_cycleCounter % 3 == 0 )
     updateCpuPower();
 
-  // --- Webcam: every 3rd cycle, offset by 1 (≈ 2400ms) ---
+  // Webcam: every 3rd cycle, offset by 1 (about 2400ms)
   if ( m_cycleCounter % 3 == 1 )
     updateWebcamStatus();
 
-  // --- Prime state: every 12th cycle (≈ 9600ms, close to original 10000ms) ---
+  // Prime state: every 12th cycle (about 9600ms, close to original 10000ms)
   if ( m_cycleCounter % 12 == 0 )
     updatePrimeStatus();
 }
@@ -551,7 +551,7 @@ IGpuInfo HardwareMonitorWorker::getIntelIGpuValues( const IGpuInfo &base ) const
   values.m_vendor = "intel";
   const std::string &drmPath = m_intelIGpuDrmPath.value();
 
-  // Current GPU frequency (MHz) — directly readable from DRM sysfs
+  // Current GPU frequency (MHz) - directly readable from DRM sysfs
   if ( auto curFreq = SysfsNode< int64_t >( drmPath + "/gt_act_freq_mhz" ).read(); curFreq and *curFreq > 0 )
     values.m_coreFrequency = static_cast< double >( *curFreq );
 

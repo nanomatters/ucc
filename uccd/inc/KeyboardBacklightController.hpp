@@ -54,7 +54,7 @@ struct KeyboardBacklightState
  * @brief Synchronous controller for keyboard backlight hardware.
  *
  * Replaces the former KeyboardBacklightListener polling thread with a
- * direct, non-threaded implementation.  All public methods are meant to
+ * direct, non-threaded implementation. All public methods are meant to
  * be called from the main / D-Bus thread.
  *
  * Supports:
@@ -75,7 +75,7 @@ public:
   /**
    * @brief Detect keyboard backlight hardware and publish initial state.
    *
-   * Call once during daemon startup.  Returns the capabilities JSON string
+   * Call once during daemon startup. Returns the capabilities JSON string
    * (or "null" when no backlight is found).
    */
   std::string init()
@@ -117,7 +117,7 @@ public:
 
   /**
    * @brief Apply a flat JSON states array directly to hardware.
-   * @param statesJSON  A JSON array of state objects, e.g. "[{\"brightness\":128,\"red\":255,...}, ...]"
+   * @param statesJSON A JSON array of state objects, e.g. "[{\"brightness\":128,\"red\":255,...}, ...]"
    * @return true on success
    *
    * This is the main entry point called from SetKeyboardBacklightStatesJSON
@@ -170,7 +170,7 @@ public:
 
   /**
    * @brief Apply keyboard backlight states from a profile's keyboard data.
-   * @param keyboardDataJSON  JSON object string: {"brightness":N,"states":[...]}
+   * @param keyboardDataJSON JSON object string: {"brightness":N,"states":[...]}
    * @return true on success
    */
   bool applyProfileKeyboardStates( const std::string &keyboardDataJSON )
@@ -212,7 +212,7 @@ private:
   static constexpr const char *LEDS_WHITE_ONLY_NB05 = "/sys/bus/platform/devices/tuxedo_nb05_kbd_backlight/leds/white:kbd_backlight";
   static constexpr const char *LEDS_RGB_BASE = "/sys/devices/platform/tuxedo_keyboard/leds/rgb:kbd_backlight";
 
-  // ---- hardware detection ----
+  // hardware detection
 
   void detectKeyboardBacklight()
   {
@@ -357,7 +357,7 @@ private:
     }
   }
 
-  // ---- JSON serialisation helpers ----
+  // JSON serialisation helpers
 
   std::string capabilitiesToJSON() const
   {
@@ -401,8 +401,8 @@ private:
 
   /**
    * @brief Extract the "states" array from a JSON object string.
-   * @param json  JSON object: {"states":[...], ...}
-   * @return The serialised [...] array, or empty string.
+   * @param json JSON object: {"states":[...], ...}
+   * @return The serialised [...] array or empty string.
    */
   std::string extractStatesArray( const std::string &json ) const
   {
@@ -452,7 +452,7 @@ private:
     catch ( ... ) { return 0; }
   }
 
-  // ---- hardware sysfs writes ----
+  // hardware sysfs writes
 
   void applyStates( const std::vector< KeyboardBacklightState > &states )
   {

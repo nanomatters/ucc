@@ -183,7 +183,7 @@ public:
     }
   }
 
-  // public wrapper for parsing settings JSON (used by --new_settings)
+  // Public wrapper for parsing settings JSON used by the new settings path.
   [[nodiscard]] std::optional< TccSettings > parseSettingsJSON( const std::string &json ) const noexcept
   {
     return parseSettingsJSONInternal( json );

@@ -41,7 +41,7 @@ namespace ucc
  *
  * Contains the fan profile selection bar, two sub-tabs
  * ("System CPU/GPU" and "Water Cooler"), all fan curve editors,
- * the pump voltage curve editor, and the hardware water-cooler
+ * the pump voltage curve editor and the hardware water-cooler
  * controls (enable, pump manual, LED, colour).
  */
 class FanControlTab : public QWidget
@@ -55,7 +55,7 @@ public:
                           QWidget *parent = nullptr );
   ~FanControlTab() override = default;
 
-  // ── Accessors used by MainWindow ──
+  // Accessors used by MainWindow
   QComboBox *fanProfileCombo() const { return m_fanProfileCombo; }
   const QStringList &builtinFanProfiles() const { return m_builtinFanProfiles; }
 
