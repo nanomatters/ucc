@@ -246,6 +246,28 @@ private slots:
               static_cast< int32_t >( 3 ) );
   }
 
+  void readsAndWritesUsbCPowerPriority()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path devicePath = root / "bus/platform/devices/INOU0000:00";
+
+    writeFile( devicePath / "usb_c_power_priority", "charging\n" );
+
+    const auto priority = ucc::uniwill::readUsbCPowerPriority( root.string() );
+
+    QVERIFY( priority.isAvailable() );
+    QCOMPARE( priority.current, std::string( "charging" ) );
+    QCOMPARE( priority.choices.size(), static_cast< size_t >( 2 ) );
+    QVERIFY( ucc::uniwill::contains( priority.choices, "performance" ) );
+
+    QVERIFY( ucc::uniwill::writeUsbCPowerPriority( priority, "performance" ) );
+    QCOMPARE( ucc::uniwill::readFirstLine( devicePath / "usb_c_power_priority" ).value_or( "" ),
+              std::string( "performance" ) );
+    QVERIFY( !ucc::uniwill::writeUsbCPowerPriority( priority, "invalid" ) );
+  }
+
   void sysfsWriteDetailedReportsErrno()
   {
     QTemporaryDir dir;

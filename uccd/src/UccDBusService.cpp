@@ -2486,63 +2486,30 @@ void UccDBusService::readHardwareCapabilities()
 
   // Charging
   {
-    static const std::string CHARGING_PROFILE_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profile";
-    static const std::string CHARGING_PROFILES_AVAILABLE_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profiles_available";
-    static const std::string CHARGING_PRIORITY_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prio";
-    static const std::string CHARGING_PRIORITIES_AVAILABLE_PATH =
-      "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prios_available";
+    m_dbusData.chargingProfilesAvailable = "[]";
+    m_dbusData.currentChargingProfile = "";
 
-    // Charging profiles
-    if ( SysfsNode< std::string >( CHARGING_PROFILE_PATH ).isAvailable() and
-         SysfsNode< std::string >( CHARGING_PROFILES_AVAILABLE_PATH ).isAvailable() )
+    // USB-C power priority
+    const auto priority = ucc::uniwill::readUsbCPowerPriority();
+    if ( priority.isAvailable() )
     {
-      auto profiles = SysfsNode< std::vector< std::string > >( CHARGING_PROFILES_AVAILABLE_PATH, " " ).read();
-      if ( profiles.has_value() and not profiles->empty() )
+      std::ostringstream oss;
+      oss << "[";
+      for ( size_t i = 0; i < priority.choices.size(); ++i )
       {
-        std::ostringstream oss;
-        oss << "[";
-        for ( size_t i = 0; i < profiles->size(); ++i )
-        {
-          if ( i > 0 ) oss << ",";
-          oss << "\"" << ( *profiles )[ i ] << "\"";
-        }
-        oss << "]";
-        m_dbusData.chargingProfilesAvailable = oss.str();
-
-        auto current = SysfsNode< std::string >( CHARGING_PROFILE_PATH ).read();
-        if ( current.has_value() )
-          m_dbusData.currentChargingProfile = *current;
-
-        syslog( LOG_INFO, "[uccd] Charging profiles: %s, current: %s",
-                m_dbusData.chargingProfilesAvailable.c_str(),
-                m_dbusData.currentChargingProfile.c_str() );
+        if ( i > 0 )
+          oss << ",";
+        oss << "\"" << priority.choices[ i ] << "\"";
       }
+      oss << "]";
+
+      m_dbusData.chargingPrioritiesAvailable = oss.str();
+      m_dbusData.currentChargingPriority = priority.current;
     }
-
-    // Charging priorities
-    if ( SysfsNode< std::string >( CHARGING_PRIORITY_PATH ).isAvailable() and
-         SysfsNode< std::string >( CHARGING_PRIORITIES_AVAILABLE_PATH ).isAvailable() )
+    else
     {
-      auto prios = SysfsNode< std::vector< std::string > >( CHARGING_PRIORITIES_AVAILABLE_PATH, " " ).read();
-      if ( prios.has_value() and not prios->empty() )
-      {
-        std::ostringstream oss;
-        oss << "[";
-        for ( size_t i = 0; i < prios->size(); ++i )
-        {
-          if ( i > 0 ) oss << ",";
-          oss << "\"" << ( *prios )[ i ] << "\"";
-        }
-        oss << "]";
-        m_dbusData.chargingPrioritiesAvailable = oss.str();
-
-        auto current = SysfsNode< std::string >( CHARGING_PRIORITY_PATH ).read();
-        if ( current.has_value() )
-          m_dbusData.currentChargingPriority = *current;
-      }
+      m_dbusData.chargingPrioritiesAvailable = "[]";
+      m_dbusData.currentChargingPriority = "";
     }
 
     // Charge thresholds

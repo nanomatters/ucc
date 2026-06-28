@@ -127,6 +127,18 @@ struct FanReading
   int32_t rpm = -1;
 };
 
+struct UsbCPowerPriority
+{
+  std::string path;
+  std::string current;
+  std::vector< std::string > choices;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not path.empty();
+  }
+};
+
 [[nodiscard]] inline fs::path sysfsPath( const std::string &sysfsRoot, const fs::path &relative )
 {
   const fs::path root = sysfsRoot.empty() ? fs::path( "/sys" ) : fs::path( sysfsRoot );
@@ -476,6 +488,36 @@ inline bool writeFanCurve( const FanChannel &channel, const std::vector< FanCurv
   }
 
   return true;
+}
+
+[[nodiscard]] inline UsbCPowerPriority readUsbCPowerPriority(
+  const std::string &sysfsRoot = "/sys" )
+{
+  UsbCPowerPriority priority;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return priority;
+
+  const fs::path path = *platformDevice / "usb_c_power_priority";
+  if ( not fs::exists( path ) )
+    return priority;
+
+  priority.path = path.string();
+  priority.current = readFirstLine( path ).value_or( "" );
+  priority.choices = { "charging", "performance" };
+
+  return priority;
+}
+
+inline bool writeUsbCPowerPriority(
+  const UsbCPowerPriority &priority,
+  const std::string &value )
+{
+  if ( not priority.isAvailable() or not contains( priority.choices, value ) )
+    return false;
+
+  return SysfsNode< std::string >( priority.path ).write( value );
 }
 
 [[nodiscard]] inline std::vector< CpuPowerLimit > readCpuPowerLimits(

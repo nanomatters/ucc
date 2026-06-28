@@ -156,18 +156,6 @@ private:
   std::string m_sysfsRoot;
   ucc::uniwill::PlatformProfileSink m_platformProfile;
 
-  // Sysfs path constants
-
-  static inline const std::string CHARGING_PROFILE =
-    "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profile";
-  static inline const std::string CHARGING_PROFILES_AVAILABLE =
-    "/sys/devices/platform/tuxedo_keyboard/charging_profile/charging_profiles_available";
-
-  static inline const std::string CHARGING_PRIORITY =
-    "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prio";
-  static inline const std::string CHARGING_PRIORITIES_AVAILABLE =
-    "/sys/devices/platform/tuxedo_keyboard/charging_priority/charging_prios_available";
-
   void detectODMProfileType();
   std::vector< std::string > readPlatformProfileChoices( const std::string &path );
 
@@ -194,38 +182,26 @@ private:
 
   // Charging internals
 
-  std::string m_currentChargingProfile;
   std::string m_currentChargingPriority;
 
   bool hasChargingProfile() const noexcept
   {
-    return SysfsNode< std::string >( CHARGING_PROFILE ).isAvailable() and
-           SysfsNode< std::string >( CHARGING_PROFILES_AVAILABLE ).isAvailable();
+    return false;
   }
 
   bool hasChargingPriority() const noexcept
   {
-    return SysfsNode< std::string >( CHARGING_PRIORITY ).isAvailable() and
-           SysfsNode< std::string >( CHARGING_PRIORITIES_AVAILABLE ).isAvailable();
+    return ucc::uniwill::readUsbCPowerPriority( m_sysfsRoot ).isAvailable();
   }
 
   std::vector< std::string > getChargingProfilesAvailable() const noexcept
   {
-    if ( not hasChargingProfile() )
-      return {};
-
-    auto profiles =
-      SysfsNode< std::vector< std::string > >( CHARGING_PROFILES_AVAILABLE, " " ).read();
-    return profiles.value_or( std::vector< std::string >{} );
+    return {};
   }
 
   std::vector< std::string > getChargingPrioritiesAvailable() const noexcept
   {
-    if ( not hasChargingPriority() )
-      return {};
-
-    auto prios = SysfsNode< std::vector< std::string > >( CHARGING_PRIORITIES_AVAILABLE, " " ).read();
-    return prios.value_or( std::vector< std::string >{} );
+    return ucc::uniwill::readUsbCPowerPriority( m_sysfsRoot ).choices;
   }
 
   void initializeChargingSettings() noexcept;

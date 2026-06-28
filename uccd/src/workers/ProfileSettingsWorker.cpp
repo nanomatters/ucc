@@ -94,34 +94,7 @@ ProfileSettingsWorker::TDPWriteStatus ProfileSettingsWorker::setTDPValues(
 
 bool ProfileSettingsWorker::applyChargingProfile( const std::string &profileDescriptor ) noexcept
 {
-  if ( not hasChargingProfile() )
-    return false;
-
-  if ( not profileDescriptor.empty() )
-    m_currentChargingProfile = profileDescriptor;
-
-  try
-  {
-    const std::string profileToSet = m_currentChargingProfile;
-    const std::string currentProfile =
-      SysfsNode< std::string >( CHARGING_PROFILE ).read().value_or( "" );
-    const auto profilesAvailable = getChargingProfilesAvailable();
-
-    if ( auto it = std::ranges::find( profilesAvailable, profileToSet );
-         not profileToSet.empty() and profileToSet != currentProfile and it != profilesAvailable.end() )
-    {
-      if ( SysfsNode< std::string >( CHARGING_PROFILE ).write( profileToSet ) )
-      {
-        syslog( LOG_INFO, "Applied charging profile '%s'", profileToSet.c_str() );
-        return true;
-      }
-    }
-  }
-  catch ( ... )
-  {
-    syslog( LOG_WARNING, "Failed applying charging profile" );
-  }
-
+  (void) profileDescriptor;
   return false;
 }
 
@@ -136,13 +109,13 @@ bool ProfileSettingsWorker::applyChargingPriority( const std::string &priorityDe
   try
   {
     const std::string prioToSet = m_currentChargingPriority;
-    const std::string currentPrio = SysfsNode< std::string >( CHARGING_PRIORITY ).read().value_or( "" );
-    const auto priosAvailable = getChargingPrioritiesAvailable();
+    const auto priority = ucc::uniwill::readUsbCPowerPriority( m_sysfsRoot );
+    const auto priosAvailable = priority.choices;
 
     if ( auto it = std::ranges::find( priosAvailable, prioToSet );
-         not prioToSet.empty() and prioToSet != currentPrio and it != priosAvailable.end() )
+         not prioToSet.empty() and prioToSet != priority.current and it != priosAvailable.end() )
     {
-      if ( SysfsNode< std::string >( CHARGING_PRIORITY ).write( prioToSet ) )
+      if ( ucc::uniwill::writeUsbCPowerPriority( priority, prioToSet ) )
       {
         syslog( LOG_INFO, "Applied charging priority '%s'", prioToSet.c_str() );
         return true;
@@ -446,24 +419,11 @@ void ProfileSettingsWorker::applyODMPowerLimits()
 
 void ProfileSettingsWorker::initializeChargingSettings() noexcept
 {
-  if ( hasChargingProfile() )
+  if ( const auto priority = ucc::uniwill::readUsbCPowerPriority( m_sysfsRoot );
+       priority.isAvailable() and not priority.current.empty() )
   {
-    if ( auto currentProfile = SysfsNode< std::string >( CHARGING_PROFILE ).read().value_or( "" );
-         not currentProfile.empty() )
-    {
-      m_currentChargingProfile = currentProfile;
-      syslog( LOG_INFO, "Initialized charging profile: %s", m_currentChargingProfile.c_str() );
-    }
-  }
-
-  if ( hasChargingPriority() )
-  {
-    if ( auto currentPrio = SysfsNode< std::string >( CHARGING_PRIORITY ).read().value_or( "" );
-         not currentPrio.empty() )
-    {
-      m_currentChargingPriority = currentPrio;
-      syslog( LOG_INFO, "Initialized charging priority: %s", m_currentChargingPriority.c_str() );
-    }
+    m_currentChargingPriority = priority.current;
+    syslog( LOG_INFO, "Initialized USB-C power priority: %s", m_currentChargingPriority.c_str() );
   }
 }
 
