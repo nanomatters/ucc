@@ -2198,9 +2198,15 @@ UccDBusService::UccDBusService()
 
   // initialize fan control worker
   m_fanControlWorker = std::make_unique< FanControlWorker >(
-    m_io,
     [this]() { return m_activeProfile; },
     [this]() { return m_settings.fanControlEnabled; },
+    [this]( bool available, int minSpeed, bool fansOffAvailable )
+    {
+      std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
+      m_dbusData.fanHwmonAvailable = available;
+      m_dbusData.fansMinSpeed = minSpeed;
+      m_dbusData.fansOffAvailable = fansOffAvailable;
+    },
     [this]( size_t fanIndex, int64_t timestamp, int speed )
     {
       {
@@ -2670,53 +2676,25 @@ void UccDBusService::setupGpuDataCallback()
 
 void UccDBusService::updateFanData()
 {
-  int numberFans = 0;
-  bool fansAvailable = m_io.getNumberFans( numberFans ) && numberFans > 0;
-
-  // If getNumberFans fails, try to detect fans by reading temperature from fan 0
-  if ( !fansAvailable )
-  {
-    int temp = -1;
-    if ( m_io.getFanTemperature( 0, temp ) && temp >= 0 )
-    {
-      // We can read from at least fan 0, assume fans are available
-      fansAvailable = true;
-      numberFans = 2; // Assume CPU and GPU fans
-      syslog( LOG_INFO, "UccDBusService: Detected fans by temperature reading (getNumberFans failed)" );
-    }
-  }
-
-  int minSpeed = 0;
-  bool fansOffAvailable = false;
-  ( void ) m_io.getFansMinSpeed( minSpeed );
-  ( void ) m_io.getFansOffAvailable( fansOffAvailable );
+  const auto fanInfo = ucc::uniwill::readFanInfo();
 
   const auto now = std::chrono::duration_cast< std::chrono::milliseconds >(
     std::chrono::system_clock::now().time_since_epoch() ).count();
 
   std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-  m_dbusData.fanHwmonAvailable = fansAvailable;
-  m_dbusData.fansMinSpeed = minSpeed;
-  m_dbusData.fansOffAvailable = fansOffAvailable;
+  m_dbusData.fanHwmonAvailable = fanInfo.isAvailable();
+  m_dbusData.fansMinSpeed = ucc::uniwill::FAN_MIN_SPEED_PERCENT;
+  m_dbusData.fansOffAvailable = fanInfo.isAvailable();
 
-  if ( not fansAvailable )
+  if ( not fanInfo.isAvailable() )
     return;
 
-  const int maxFans = std::min( numberFans, static_cast< int >( m_dbusData.fans.size() ) );
-  for ( int fanIndex = 0; fanIndex < maxFans; ++fanIndex )
+  const size_t maxFans = std::min( fanInfo.channels.size(), m_dbusData.fans.size() );
+  for ( size_t fanIndex = 0; fanIndex < maxFans; ++fanIndex )
   {
-    int speedPercent = -1;
-    int tempCelsius = -1;
-
-    if ( m_io.getFanSpeedPercent( fanIndex, speedPercent ) )
-    {
-      m_dbusData.fans[ static_cast< size_t >( fanIndex ) ].speed.set( static_cast< int64_t >( now ), speedPercent );
-    }
-
-    if ( m_io.getFanTemperature( fanIndex, tempCelsius ) )
-    {
-      m_dbusData.fans[ static_cast< size_t >( fanIndex ) ].temp.set( static_cast< int64_t >( now ), tempCelsius );
-    }
+    const auto reading = ucc::uniwill::readFanReading( fanInfo.channels[ fanIndex ] );
+    m_dbusData.fans[ fanIndex ].speed.set( static_cast< int64_t >( now ), reading.speedPercent );
+    m_dbusData.fans[ fanIndex ].temp.set( static_cast< int64_t >( now ), reading.temperatureCelsius );
   }
 }
 

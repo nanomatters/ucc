@@ -33,6 +33,19 @@ private:
     return fs::path( dir.path().toStdString() );
   }
 
+  static void createFanAutoPointFiles( const fs::path &hwmonPath, int fanNumber )
+  {
+    for ( int point = 1; point <= ucc::uniwill::FAN_AUTO_POINT_COUNT; ++point )
+    {
+      const std::string prefix =
+        "pwm" + std::to_string( fanNumber ) + "_auto_point" + std::to_string( point );
+
+      writeFile( hwmonPath / ( prefix + "_pwm" ), "0\n" );
+      writeFile( hwmonPath / ( prefix + "_temp" ), "0\n" );
+      writeFile( hwmonPath / ( prefix + "_temp_hyst" ), "0\n" );
+    }
+  }
+
 private slots:
 
   void discoveryFindsUniwillRoots()
@@ -151,6 +164,86 @@ private slots:
     QCOMPARE( info.currentOffset, static_cast< int32_t >( 15 ) );
     QCOMPARE( info.maxOffset, static_cast< int32_t >( 25 ) );
     QCOMPARE( info.tgpBase, static_cast< int32_t >( 80 ) );
+  }
+
+  void readsFanInfoFromUniwillHwmon()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path hwmonPath = root / "class/hwmon/hwmon0";
+
+    writeFile( hwmonPath / "name", "uniwill\n" );
+    writeFile( hwmonPath / "fan1_input", "2400\n" );
+    writeFile( hwmonPath / "fan1_label", "Main\n" );
+    writeFile( hwmonPath / "temp1_input", "55000\n" );
+    writeFile( hwmonPath / "pwm1", "128\n" );
+    writeFile( hwmonPath / "pwm1_enable", "2\n" );
+    createFanAutoPointFiles( hwmonPath, 1 );
+
+    const auto info = ucc::uniwill::readFanInfo( root.string() );
+
+    QVERIFY( info.isAvailable() );
+    QCOMPARE( info.hwmonPath, hwmonPath.string() );
+    QCOMPARE( info.channels.size(), static_cast< size_t >( 1 ) );
+    QCOMPARE( info.channels[ 0 ].label, std::string( "Main" ) );
+    QVERIFY( info.channels[ 0 ].supportsCustomAuto );
+  }
+
+  void readsFanTelemetryWithHwmonUnits()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path hwmonPath = root / "class/hwmon/hwmon0";
+
+    writeFile( hwmonPath / "name", "uniwill\n" );
+    writeFile( hwmonPath / "fan1_input", "2400\n" );
+    writeFile( hwmonPath / "temp1_input", "55500\n" );
+    writeFile( hwmonPath / "pwm1", "128\n" );
+
+    const auto info = ucc::uniwill::readFanInfo( root.string() );
+    QVERIFY( info.isAvailable() );
+
+    const auto reading = ucc::uniwill::readFanReading( info.channels[ 0 ] );
+
+    QCOMPARE( reading.temperatureCelsius, static_cast< int32_t >( 56 ) );
+    QCOMPARE( reading.speedPercent, static_cast< int32_t >( 50 ) );
+    QCOMPARE( reading.rpm, static_cast< int32_t >( 2400 ) );
+  }
+
+  void writesFanCurveAndMode()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path hwmonPath = root / "class/hwmon/hwmon0";
+
+    writeFile( hwmonPath / "name", "uniwill\n" );
+    writeFile( hwmonPath / "fan1_input", "2400\n" );
+    writeFile( hwmonPath / "temp1_input", "55000\n" );
+    writeFile( hwmonPath / "pwm1", "0\n" );
+    writeFile( hwmonPath / "pwm1_enable", "2\n" );
+    createFanAutoPointFiles( hwmonPath, 1 );
+
+    const auto info = ucc::uniwill::readFanInfo( root.string() );
+    QVERIFY( info.isAvailable() );
+
+    std::vector< ucc::uniwill::FanCurvePoint > points;
+    for ( const int32_t temp : ucc::uniwill::FAN_AUTO_POINT_TEMPERATURES_C )
+      points.push_back( { temp, temp - 20 } );
+
+    QVERIFY( ucc::uniwill::writeFanCurve( info.channels[ 0 ], points ) );
+    QVERIFY( ucc::uniwill::writeFanMode( info, 3 ) );
+
+    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_auto_point1_temp" ).value_or( -1 ),
+              static_cast< int32_t >( 25000 ) );
+    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_auto_point1_temp_hyst" ).value_or( -1 ),
+              static_cast< int32_t >( 22000 ) );
+    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_auto_point16_pwm" ).value_or( -1 ),
+              static_cast< int32_t >( 204 ) );
+    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_enable" ).value_or( -1 ),
+              static_cast< int32_t >( 3 ) );
   }
 
   void sysfsWriteDetailedReportsErrno()

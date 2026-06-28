@@ -18,272 +18,33 @@
 #include "DaemonWorker.hpp"
 #include "../profiles/UccProfile.hpp"
 #include "../profiles/FanProfile.hpp"
-#include "tuxedo_io_lib/tuxedo_io_api.hh"
+#include "../UniwillSysfs.hpp"
+#include <atomic>
 #include <vector>
 #include <algorithm>
-#include <cmath>
-#include <numeric>
 #include <functional>
+#include <mutex>
+#include <sstream>
+#include <string>
 #include <syslog.h>
-
-enum class FanLogicType { CPU, GPU };
-
-/**
- * @brief Temperature filter using Exponentially Weighted Moving Average (EWMA)
- *
- * Replaces the old trimmed-mean buffer. EWMA reacts faster to genuine
- * temperature changes while still rejecting single-sample noise.
- * Two different smoothing factors are used:
- * - alphaRising (0.5) - when new reading is above current estimate,
- * respond quickly to heating.
- * - alphaFalling (0.15) - when new reading is below current estimate,
- * cool-down is smoothed more aggressively to
- * prevent premature fan-speed drops.
- */
-class TemperatureFilter
-{
-public:
-  TemperatureFilter()
-    : m_value( -1.0 )
-    , m_alphaRising( 0.5 )
-    , m_alphaFalling( 0.15 )
-  {}
-
-  void addValue( int raw )
-  {
-    if ( m_value < 0.0 )
-    {
-      // First sample - initialise immediately
-      m_value = static_cast< double >( raw );
-      return;
-    }
-
-    const double alpha = ( raw > m_value ) ? m_alphaRising : m_alphaFalling;
-    m_value = m_value + alpha * ( static_cast< double >( raw ) - m_value );
-  }
-
-  int getFilteredValue() const
-  {
-    return ( m_value < 0.0 ) ? 0 : static_cast< int >( std::round( m_value ) );
-  }
-
-private:
-  double m_value;
-  double m_alphaRising;   // weight for rising temperatures (fast response)
-  double m_alphaFalling;  // weight for falling temperatures (slow decay)
-};
-
-/**
- * @brief Fan speed controller with interpolation, hysteresis and EWMA smoothing
- *
- * Improvements over the original algorithm:
- *
- * 1. **Linear interpolation** - Uses FanProfile::getSpeedForTemp() instead of
- * step-wise table lookup. Eliminates discrete jumps between curve points.
- *
- * 2. **Hysteresis** - The temperature used for curve lookup is biased:
- * when the filtered temperature is falling and near a curve inflection
- * point, the effective temperature is held slightly higher (by HYSTERESIS_DEG)
- * to prevent the fan from dropping prematurely. This avoids the classic
- * heat->fan-up->cool->fan-down->heat cycle.
- *
- * 3. **EWMA speed smoothing** - The raw curve speed is fed through an
- * exponentially weighted moving average with asymmetric weights:
- * - Rising (alphaUp = 0.4): fans spin up within 2-3 seconds
- * - Falling (alphaDown = 0.08): fans spin down over ~12 seconds
- * This replaces both the old trimmed-mean temperature filter and the
- * hard -2%/sec rate limiter, giving much smoother transitions.
- *
- * 4. **Critical temperature override** is preserved unchanged.
- */
-class FanControlLogic
-{
-public:
-  FanControlLogic( const FanProfile &fanProfile, FanLogicType type )
-    : m_fanProfile( fanProfile )
-    , m_type( type )
-    , m_latestSpeedPercent( 0 )
-    , m_smoothedSpeed( -1.0 )
-    , m_lastEffectiveTemp( -1 )
-    , m_fansMinSpeedHWLimit( 0 )
-    , m_fansOffAvailable( true )
-  {
-  }
-
-  void setFansMinSpeedHWLimit( int speed )
-  { m_fansMinSpeedHWLimit = std::clamp( speed, 0, 100 ); }
-
-  void setFansOffAvailable( bool available )
-  { m_fansOffAvailable = available; }
-
-  void updateFanProfile( const FanProfile &fanProfile )
-  { m_fanProfile = fanProfile; }
-
-  void reportTemperature( int temperatureValue )
-  {
-    m_tempFilter.addValue( temperatureValue );
-    m_latestSpeedPercent = calculateSpeedPercent();
-  }
-
-  int getSpeedPercent() const
-  { return m_latestSpeedPercent; }
-
-  const FanProfile &getFanProfile() const
-  { return m_fanProfile; }
-
-private:
-  /**
-   * @brief Apply hysteresis to prevent oscillation at curve boundaries.
-   *
-   * When temperature is falling, the effective temperature is held up to
-   * HYSTERESIS_DEG above the filtered reading. It tracks
-   * min(lastEffective, filteredTemp + HYSTERESIS_DEG), so large drops
-   * are damped but it still converges.
-   * When temperature is rising, the effective temperature follows immediately.
-   */
-  int applyHysteresis( int filteredTemp )
-  {
-    static constexpr int HYSTERESIS_DEG = 3;
-
-    if ( m_lastEffectiveTemp < 0 )
-    {
-      // First call - no history
-      m_lastEffectiveTemp = filteredTemp;
-      return filteredTemp;
-    }
-
-    if ( filteredTemp >= m_lastEffectiveTemp )
-    {
-      // Temperature rising or stable - follow immediately
-      m_lastEffectiveTemp = filteredTemp;
-    }
-    else
-    {
-      // Temperature falling - hold the effective temp higher by up to HYSTERESIS_DEG
-      int floor = filteredTemp + HYSTERESIS_DEG;
-      int newEffective = std::min( m_lastEffectiveTemp, floor );
-      // Never go below the actual filtered temperature
-      newEffective = std::max( newEffective, filteredTemp );
-      m_lastEffectiveTemp = newEffective;
-    }
-
-    return m_lastEffectiveTemp;
-  }
-
-  int applyHwFanLimitations( int speed ) const
-  {
-    const int minSpeed = m_fansMinSpeedHWLimit;
-    const int halfMinSpeed = minSpeed / 2;
-
-    if ( speed < minSpeed )
-    {
-      if ( m_fansOffAvailable && speed < halfMinSpeed )
-      {
-        return 0;
-      }
-      else if ( m_fansOffAvailable || speed >= halfMinSpeed )
-      {
-        return minSpeed;
-      }
-    }
-
-    return speed;
-  }
-
-  /**
-   * @brief EWMA smoothing on the speed output.
-   *
-   * Uses asymmetric alpha:
-   * - alphaUp = 0.4 -> fans reach target in ~3 cycles (3 sec)
-   * - alphaDown = 0.08 -> fans take ~12 cycles to settle
-   *
-   * This replaces both the old trimmed-mean filter and the hard rate limiter.
-   */
-  int smoothSpeed( int targetSpeed )
-  {
-    static constexpr double ALPHA_UP   = 0.4;
-    static constexpr double ALPHA_DOWN = 0.08;
-
-    if ( m_smoothedSpeed < 0.0 )
-    {
-      m_smoothedSpeed = static_cast< double >( targetSpeed );
-      return targetSpeed;
-    }
-
-    const double alpha = ( targetSpeed > m_smoothedSpeed ) ? ALPHA_UP : ALPHA_DOWN;
-    m_smoothedSpeed = m_smoothedSpeed + alpha * ( static_cast< double >( targetSpeed ) - m_smoothedSpeed );
-
-    return static_cast< int >( std::round( m_smoothedSpeed ) );
-  }
-
-  int manageCriticalTemperature( int temp, int speed ) const
-  {
-    constexpr int CRITICAL_TEMPERATURE = 85;
-    constexpr int OVERHEAT_TEMPERATURE = 90;
-
-    if ( temp >= OVERHEAT_TEMPERATURE )
-    {
-      return 100;
-    }
-    else if ( temp >= CRITICAL_TEMPERATURE )
-    {
-      return std::max( speed, 80 );
-    }
-
-    return speed;
-  }
-
-  int calculateSpeedPercent()
-  {
-    const int filteredTemp = m_tempFilter.getFilteredValue();
-
-    // Apply hysteresis - effective temp may lag behind during cool-down
-    const int effectiveTemp = applyHysteresis( filteredTemp );
-
-    // Linear interpolation on the fan curve (instead of step-wise lookup)
-    const bool isCPU = ( m_type == FanLogicType::CPU );
-    int curveSpeed = m_fanProfile.getSpeedForTemp( effectiveTemp, isCPU );
-    if ( curveSpeed < 0 ) curveSpeed = 0;
-
-    curveSpeed = std::clamp( curveSpeed, 0, 100 );
-
-    // Apply hardware limitations
-    curveSpeed = applyHwFanLimitations( curveSpeed );
-
-    // EWMA smoothing (replaces old rate limiter)
-    int speed = smoothSpeed( curveSpeed );
-
-    // Critical temperature override (uses raw filtered temp, not hysteresis-adjusted)
-    speed = manageCriticalTemperature( filteredTemp, speed );
-
-    return speed;
-  }
-
-  FanProfile m_fanProfile;
-  FanLogicType m_type;
-  TemperatureFilter m_tempFilter;
-  int m_latestSpeedPercent;
-  double m_smoothedSpeed;       // EWMA state for speed output
-  int m_lastEffectiveTemp;      // hysteresis state
-
-  int m_fansMinSpeedHWLimit;
-  bool m_fansOffAvailable;
-};
+#include <utility>
 
 class FanControlWorker : public DaemonWorker
 {
 public:
   FanControlWorker(
-    TuxedoIOAPI &io,
     std::function< UccProfile() > getActiveProfile,
     std::function< bool() > getFanControlEnabled,
+    std::function< void( bool, int, bool ) > updateFanHardwareInfo,
     std::function< void( size_t, int64_t, int ) > updateFanSpeed,
-    std::function< void( size_t, int64_t, int ) > updateFanTemp
+    std::function< void( size_t, int64_t, int ) > updateFanTemp,
+    std::string sysfsRoot = "/sys"
   )
     : DaemonWorker( std::chrono::milliseconds( 1000 ) )
-    , m_io( io )
+    , m_sysfsRoot( std::move( sysfsRoot ) )
     , m_getActiveProfile( getActiveProfile )
     , m_getFanControlEnabled( getFanControlEnabled )
+    , m_updateFanHardwareInfo( updateFanHardwareInfo )
     , m_updateFanSpeed( updateFanSpeed )
     , m_updateFanTemp( updateFanTemp )
     , m_modeSameSpeed( true )
@@ -298,122 +59,87 @@ public:
   void setSameSpeed( bool same )
   {
     m_modeSameSpeed = same;
-    syslog( LOG_INFO, "FanControlWorker: setSameSpeed = %d", m_modeSameSpeed ? 1 : 0 );
+    markCurveDirty();
+    syslog( LOG_INFO, "FanControlWorker: setSameSpeed = %d", m_modeSameSpeed.load() ? 1 : 0 );
   }
 
-  [[nodiscard]] bool getSameSpeed() const noexcept { return m_modeSameSpeed; }
+  [[nodiscard]] bool getSameSpeed() const noexcept { return m_modeSameSpeed.load(); }
 
   /**
    * @brief Clear temporary fan curves and revert to profile curves
    */
   void clearTemporaryCurves()
   {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
     m_hasTemporaryCurves = false;
     m_tempCpuTable.clear();
     m_tempGpuTable.clear();
     m_tempWaterCoolerFanTable.clear();
     m_tempPumpTable.clear();
+    m_curveDirty = true;
   }
 
-  [[nodiscard]] bool hasTemporaryCurves() const noexcept { return m_hasTemporaryCurves; }
-  [[nodiscard]] const std::vector< FanTableEntry > &tempWaterCoolerFanTable() const noexcept { return m_tempWaterCoolerFanTable; }
-  [[nodiscard]] const std::vector< FanTableEntry > &tempPumpTable() const noexcept { return m_tempPumpTable; }
+  [[nodiscard]] bool hasTemporaryCurves() const
+  {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+    return m_hasTemporaryCurves;
+  }
+
+  [[nodiscard]] std::vector< FanTableEntry > tempWaterCoolerFanTable() const
+  {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+    return m_tempWaterCoolerFanTable;
+  }
+
+  [[nodiscard]] std::vector< FanTableEntry > tempPumpTable() const
+  {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+    return m_tempPumpTable;
+  }
 
   void applyTemporaryFanCurves( const std::vector< FanTableEntry > &cpuTable,
                                 const std::vector< FanTableEntry > &gpuTable,
                                 const std::vector< FanTableEntry > &waterCoolerFanTable = {},
                                 const std::vector< FanTableEntry > &pumpTable = {} )
   {
-    // Store the temporary curves
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+
     m_tempCpuTable = cpuTable;
     m_tempGpuTable = gpuTable;
     m_tempWaterCoolerFanTable = waterCoolerFanTable;
     m_tempPumpTable = pumpTable;
     m_hasTemporaryCurves = true;
-
-    for ( size_t i = 0; i < m_fanLogics.size(); ++i )
-    {
-      FanProfile tempProfile = m_fanLogics[i].getFanProfile(); // Copy current profile
-
-      if ( i == 0 && !cpuTable.empty() ) // CPU fan (index 0)
-      {
-        tempProfile.tableCPU = cpuTable;
-      }
-      else if ( i > 0 && !gpuTable.empty() ) // GPU fans (index > 0)
-      {
-        tempProfile.tableGPU = gpuTable;
-      }
-
-      if ( !waterCoolerFanTable.empty() )
-        tempProfile.tableWaterCoolerFan = waterCoolerFanTable;
-      if ( !pumpTable.empty() )
-        tempProfile.tablePump = pumpTable;
-
-      m_fanLogics[i].updateFanProfile( tempProfile );
-    }
+    m_curveDirty = true;
   }
 
 protected:
   void onStart() override
   {
-    int numberFans = 0;
-    bool fansDetected = m_io.getNumberFans( numberFans ) && numberFans > 0;
+    m_fanInfo = ucc::uniwill::readFanInfo( m_sysfsRoot );
 
-    // If getNumberFans fails, try to detect fans by reading temperature from fan 0
-    if ( !fansDetected )
+    if ( m_updateFanHardwareInfo )
     {
-      int temp = -1;
-      if ( m_io.getFanTemperature( 0, temp ) && temp >= 0 )
-      {
-        // We can read from at least fan 0, assume we have CPU and GPU fans
-        numberFans = 2;
-        fansDetected = true;
-        syslog( LOG_INFO, "FanControlWorker: Detected fans by temperature reading (getNumberFans failed)" );
-      }
+      const bool available = m_fanInfo.isAvailable();
+      m_updateFanHardwareInfo(
+        available,
+        ucc::uniwill::FAN_MIN_SPEED_PERCENT,
+        available );
     }
 
-    if ( fansDetected && numberFans > 0 )
+    if ( m_fanInfo.isAvailable() )
     {
-      // Initialize fan logic for each fan
-      for ( int i = 0; i < numberFans; ++i )
-      {
-        auto profile = m_getActiveProfile();
-
-        // Fan 0 is CPU, others are GPU
-        FanLogicType type = ( i == 0 ) ? FanLogicType::CPU : FanLogicType::GPU;
-        // Resolve the named fan profile preset
-        FanProfile fp = getDefaultFanProfile( profile.fan.fanProfile );
-        m_fanLogics.emplace_back( fp, type );
-      }
-
-      // Get hardware fan limits
-      int minSpeed = 0;
-      bool fansOffAvailable = true;
-
-      if ( m_io.getFansMinSpeed( minSpeed ) )
-        m_fansMinSpeedHWLimit = minSpeed;
-
-      if ( m_io.getFansOffAvailable( fansOffAvailable ) )
-        m_fansOffAvailable = fansOffAvailable;
-
-      // Apply hardware limits to all fan logics
-      for ( auto &logic : m_fanLogics )
-      {
-        logic.setFansMinSpeedHWLimit( m_fansMinSpeedHWLimit );
-        logic.setFansOffAvailable( m_fansOffAvailable );
-      }
-
-      syslog( LOG_INFO, "FanControlWorker started with %d fans", numberFans );
+      syslog( LOG_INFO, "FanControlWorker: using uniwill hwmon at %s with %zu fan channels",
+              m_fanInfo.hwmonPath.c_str(), m_fanInfo.channels.size() );
     }
     else
     {
-      syslog( LOG_INFO, "FanControlWorker: No fans detected" );
+      syslog( LOG_INFO, "FanControlWorker: No uniwill hwmon fans detected" );
     }
   }
 
   void onWork() override
   {
-    if ( m_fanLogics.empty() )
+    if ( !m_fanInfo.isAvailable() )
     {
       if ( !m_controlAvailableMessageShown )
       {
@@ -429,170 +155,231 @@ protected:
       m_controlAvailableMessageShown = false;
     }
 
-    // Get current profile and update fan logics if profile changed
-    auto profile = m_getActiveProfile();
-    if ( !profile.id.empty() )
-    {
-      updateFanLogicsFromProfile( profile );
-    }
-
+    const UccProfile profile = m_getActiveProfile();
     const bool useFanControl = m_getFanControlEnabled();
-    const int64_t timestamp = std::chrono::duration_cast< std::chrono::milliseconds >(
-      std::chrono::system_clock::now().time_since_epoch() ).count();
+    m_modeSameSpeed = profile.fan.sameSpeed;
 
-    std::vector< int > fanTemps;
-    std::vector< int > fanSpeedsSet;
-    std::vector< bool > tempSensorAvailable;
-
-    // Read temperatures and calculate fan speeds
-    for ( size_t fanIndex = 0; fanIndex < m_fanLogics.size(); ++fanIndex )
-    {
-      int tempCelsius = -1;
-      bool tempReadSuccess = m_io.getFanTemperature( static_cast< int >( fanIndex ), tempCelsius );
-
-      tempSensorAvailable.push_back( tempReadSuccess );
-
-      if ( tempReadSuccess )
-      {
-        fanTemps.push_back( tempCelsius );
-
-        // Report temperature to logic and get calculated speed
-        m_fanLogics[fanIndex].reportTemperature( tempCelsius );
-        int calculatedSpeed = m_fanLogics[fanIndex].getSpeedPercent();
-        fanSpeedsSet.push_back( calculatedSpeed );
-      }
-      else
-      {
-        fanTemps.push_back( -1 );
-        fanSpeedsSet.push_back( 0 );
-      }
-    }
-
-    // Write fan speeds if fan control is enabled
     if ( useFanControl )
     {
-      // Find highest speed for "same speed" mode
-      int highestSpeed = 0;
-      for ( int speed : fanSpeedsSet )
+      const std::string signature = makeCurveSignature( profile );
+      if ( takeCurveDirtyFlag() or signature != m_lastAppliedCurveSignature )
       {
-        if ( speed > highestSpeed )
-          highestSpeed = speed;
-      }
-
-      // Set fan speeds
-      for ( size_t fanIndex = 0; fanIndex < m_fanLogics.size(); ++fanIndex )
-      {
-        int speedToSet = fanSpeedsSet[fanIndex];
-
-        // Use highest speed if in "same speed" mode or no sensor available
-        if ( m_modeSameSpeed || !tempSensorAvailable[fanIndex] )
-        {
-          speedToSet = highestSpeed;
-          fanSpeedsSet[fanIndex] = highestSpeed;
-        }
-
-        // Log the temperature and speed we are about to set for debugging
-        //syslog( LOG_DEBUG, "FanControlWorker: fan %d temp=%d calculated=%d set=%d sameSpeed=%d",
-        //        static_cast< int >( fanIndex ), fanTemps[fanIndex],
-        //        fanSpeedsSet[fanIndex], speedToSet, m_modeSameSpeed ? 1 : 0 );
-
-        m_io.setFanSpeedPercent( static_cast< int >( fanIndex ), speedToSet );
+        if ( applyDriverFanCurves( profile ) )
+          m_lastAppliedCurveSignature = signature;
       }
     }
-
-    // Publish data via callbacks
-    for ( size_t fanIndex = 0; fanIndex < m_fanLogics.size(); ++fanIndex )
+    else if ( !m_controlModeInitialized or m_lastControlEnabled )
     {
-      int currentSpeed;
-
-      if ( fanTemps[fanIndex] == -1 )
-      {
-        currentSpeed = -1;
-      }
-      else if ( useFanControl )
-      {
-        // Report calculated/set speed when control is active
-        currentSpeed = fanSpeedsSet[fanIndex];
-      }
-      else
-      {
-        // Report hardware speed when control is disabled
-        int hwSpeed = -1;
-        m_io.getFanSpeedPercent( static_cast< int >( fanIndex ), hwSpeed );
-        currentSpeed = hwSpeed;
-      }
-
-      m_updateFanTemp( fanIndex, timestamp, fanTemps[fanIndex] );
-      m_updateFanSpeed( fanIndex, timestamp, currentSpeed );
+      if ( ucc::uniwill::writeFanMode( m_fanInfo, 2 ) )
+        syslog( LOG_INFO, "FanControlWorker: returned fans to firmware automatic mode" );
+      m_lastAppliedCurveSignature.clear();
     }
+
+    m_controlModeInitialized = true;
+    m_lastControlEnabled = useFanControl;
+
+    publishFanReadings();
   }
 
   void onExit() override
   {
-    // Nothing special to do on exit
+    if ( m_fanInfo.isAvailable() )
+      ucc::uniwill::writeFanMode( m_fanInfo, 2 );
   }
 
 private:
-  void updateFanLogicsFromProfile( const UccProfile &profile )
+  struct TemporaryCurveSnapshot
   {
-    // Respect profile setting for same-speed mode
-    bool prevSameSpeed = m_modeSameSpeed;
-    m_modeSameSpeed = profile.fan.sameSpeed;
-    if ( m_modeSameSpeed != prevSameSpeed )
+    bool active = false;
+    bool dirty = false;
+    std::vector< FanTableEntry > cpu;
+    std::vector< FanTableEntry > gpu;
+    std::vector< FanTableEntry > waterCoolerFan;
+    std::vector< FanTableEntry > pump;
+  };
+
+  void markCurveDirty()
+  {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+    m_curveDirty = true;
+  }
+
+  [[nodiscard]] bool takeCurveDirtyFlag()
+  {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+    const bool dirty = m_curveDirty;
+    m_curveDirty = false;
+    return dirty;
+  }
+
+  [[nodiscard]] TemporaryCurveSnapshot temporaryCurves() const
+  {
+    std::lock_guard< std::mutex > lock( m_curveMutex );
+    return TemporaryCurveSnapshot{
+      m_hasTemporaryCurves,
+      m_curveDirty,
+      m_tempCpuTable,
+      m_tempGpuTable,
+      m_tempWaterCoolerFanTable,
+      m_tempPumpTable
+    };
+  }
+
+  [[nodiscard]] FanProfile resolveFanProfile( const UccProfile &profile ) const
+  {
+    FanProfile fanProfile = getDefaultFanProfile( profile.fan.fanProfile );
+
+    if ( profile.fan.hasEmbeddedTables() )
     {
-      syslog( LOG_INFO, "FanControlWorker: sameSpeed mode changed to %d", m_modeSameSpeed ? 1 : 0 );
+      fanProfile.tableCPU = profile.fan.tableCPU;
+      fanProfile.tableGPU = profile.fan.tableGPU;
     }
 
-    for ( size_t i = 0; i < m_fanLogics.size(); ++i )
+    const auto temporary = temporaryCurves();
+    if ( temporary.active )
     {
-      // Resolve fan profile by ID or name (built-in)
-      FanProfile fanProfile;
-      for ( const auto &p : defaultFanProfiles )
-      {
-        if ( p.id == profile.fan.fanProfile || p.name == profile.fan.fanProfile ) { fanProfile = p; break; }
-      }
-      // Fallbacks
-      if ( !fanProfile.isValid() )
-      {
-        for ( const auto &p : defaultFanProfiles ) { if ( p.name == "Balanced" ) { fanProfile = p; break; } }
-      }
-      if ( !fanProfile.isValid() && !defaultFanProfiles.empty() ) fanProfile = defaultFanProfiles[0];
+      if ( !temporary.cpu.empty() )
+        fanProfile.tableCPU = temporary.cpu;
+      if ( !temporary.gpu.empty() )
+        fanProfile.tableGPU = temporary.gpu;
+      if ( !temporary.waterCoolerFan.empty() )
+        fanProfile.tableWaterCoolerFan = temporary.waterCoolerFan;
+      if ( !temporary.pump.empty() )
+        fanProfile.tablePump = temporary.pump;
+    }
 
-      // If temporary curves are active, use them instead of profile curves
-      if ( m_hasTemporaryCurves )
+    return fanProfile;
+  }
+
+  [[nodiscard]] std::vector< ucc::uniwill::FanCurvePoint > buildCurvePoints(
+    const FanProfile &fanProfile,
+    bool useCpuCurve,
+    bool sameSpeed ) const
+  {
+    std::vector< ucc::uniwill::FanCurvePoint > points;
+    points.reserve( static_cast< size_t >( ucc::uniwill::FAN_AUTO_POINT_COUNT ) );
+
+    for ( const int32_t temp : ucc::uniwill::FAN_AUTO_POINT_TEMPERATURES_C )
+    {
+      int32_t speed = -1;
+      if ( sameSpeed )
       {
-        if ( i == 0 && !m_tempCpuTable.empty() ) // CPU fan (index 0)
-        {
-          fanProfile.tableCPU = m_tempCpuTable;
-        }
-        else if ( i > 0 && !m_tempGpuTable.empty() ) // GPU fans (index > 0)
-        {
-          fanProfile.tableGPU = m_tempGpuTable;
-        }
-        if ( !m_tempWaterCoolerFanTable.empty() )
-          fanProfile.tableWaterCoolerFan = m_tempWaterCoolerFanTable;
-        if ( !m_tempPumpTable.empty() )
-          fanProfile.tablePump = m_tempPumpTable;
+        const int32_t cpuSpeed = fanProfile.getSpeedForTemp( temp, true );
+        const int32_t gpuSpeed = fanProfile.getSpeedForTemp( temp, false );
+        speed = std::max( cpuSpeed, gpuSpeed );
+      }
+      else
+      {
+        speed = fanProfile.getSpeedForTemp( temp, useCpuCurve );
       }
 
-      m_fanLogics[i].updateFanProfile( fanProfile );
+      if ( speed < 0 )
+        speed = fanProfile.getSpeedForTemp( temp, true );
+      if ( speed < 0 )
+        speed = 0;
+
+      points.push_back( {
+        temp,
+        std::clamp< int32_t >( speed, 0, 100 )
+      } );
+    }
+
+    return points;
+  }
+
+  [[nodiscard]] std::string makeCurveSignature( const UccProfile &profile ) const
+  {
+    const auto temporary = temporaryCurves();
+    std::ostringstream signature;
+
+    auto appendTable = [ &signature ]( const std::vector< FanTableEntry > &table ) {
+      signature << table.size() << ':';
+      for ( const auto &[ temp, speed ] : table )
+        signature << temp << ',' << speed << ';';
+    };
+
+    signature << profile.id << '|'
+              << profile.fan.fanProfile << '|'
+              << ( profile.fan.sameSpeed ? 1 : 0 ) << '|';
+
+    appendTable( profile.fan.tableCPU );
+    appendTable( profile.fan.tableGPU );
+    appendTable( temporary.cpu );
+    appendTable( temporary.gpu );
+
+    return signature.str();
+  }
+
+  bool applyDriverFanCurves( const UccProfile &profile )
+  {
+    const FanProfile fanProfile = resolveFanProfile( profile );
+    const bool sameSpeed = profile.fan.sameSpeed;
+    bool wroteAnyCurve = false;
+
+    for ( const auto &channel : m_fanInfo.channels )
+    {
+      if ( !channel.supportsCustomAuto )
+        continue;
+
+      const bool useCpuCurve = channel.index == 0;
+      const auto points = buildCurvePoints( fanProfile, useCpuCurve, sameSpeed );
+      if ( !ucc::uniwill::writeFanCurve( channel, points ) )
+      {
+        syslog( LOG_WARNING, "FanControlWorker: failed writing fan curve for channel %zu",
+                channel.index );
+        continue;
+      }
+
+      wroteAnyCurve = true;
+    }
+
+    if ( !wroteAnyCurve )
+    {
+      syslog( LOG_WARNING, "FanControlWorker: no writable custom-auto fan curve channels" );
+      return false;
+    }
+
+    if ( !ucc::uniwill::writeFanMode( m_fanInfo, 3 ) )
+    {
+      syslog( LOG_WARNING, "FanControlWorker: failed enabling custom-auto fan mode" );
+      return false;
+    }
+
+    syslog( LOG_INFO, "FanControlWorker: applied uniwill custom-auto fan curves" );
+    return true;
+  }
+
+  void publishFanReadings()
+  {
+    const int64_t timestamp = std::chrono::duration_cast< std::chrono::milliseconds >(
+      std::chrono::system_clock::now().time_since_epoch() ).count();
+
+    for ( size_t fanIndex = 0; fanIndex < m_fanInfo.channels.size(); ++fanIndex )
+    {
+      const auto reading = ucc::uniwill::readFanReading( m_fanInfo.channels[ fanIndex ] );
+      m_updateFanTemp( fanIndex, timestamp, reading.temperatureCelsius );
+      m_updateFanSpeed( fanIndex, timestamp, reading.speedPercent );
     }
   }
 
-  TuxedoIOAPI &m_io;
+  std::string m_sysfsRoot;
+  ucc::uniwill::FanInfo m_fanInfo;
   std::function< UccProfile() > m_getActiveProfile;
   std::function< bool() > m_getFanControlEnabled;
+  std::function< void( bool, int, bool ) > m_updateFanHardwareInfo;
   std::function< void( size_t, int64_t, int ) > m_updateFanSpeed;
   std::function< void( size_t, int64_t, int ) > m_updateFanTemp;
 
-  std::vector< FanControlLogic > m_fanLogics;
-  bool m_modeSameSpeed;
+  std::atomic< bool > m_modeSameSpeed;
   bool m_controlAvailableMessageShown;
-  int m_fansMinSpeedHWLimit;
-  bool m_fansOffAvailable;
+  bool m_controlModeInitialized = false;
+  bool m_lastControlEnabled = false;
+  std::string m_lastAppliedCurveSignature;
 
   // Temporary fan curve tracking
+  mutable std::mutex m_curveMutex;
   bool m_hasTemporaryCurves;
+  bool m_curveDirty = true;
   std::vector< FanTableEntry > m_tempCpuTable;
   std::vector< FanTableEntry > m_tempGpuTable;
   std::vector< FanTableEntry > m_tempWaterCoolerFanTable;
