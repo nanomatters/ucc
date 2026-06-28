@@ -35,6 +35,13 @@ USE AT YOUR OWN RISK
 - KDE Plasma (for widgets)
 - uniwill-laptop-driver (kernel driver required for hardware control)
 
+### Driver Options
+
+Battery charge-limit writes require the `uniwill-laptop` kernel module to be
+loaded with `allow_charge_limit=1`. Without that option, UCC can read the
+current charge threshold but the kernel exposes the end-threshold node as
+read-only, so charge-limit controls are hidden and writes are rejected.
+
 ## Building
 
 ### Standard CMake Build

@@ -579,6 +579,7 @@ private:
   int readCurrentCTGPOffset() const;
   void readHardwareCapabilities();
   void updateFanData();
+  void syncWaterCoolerBridgeEnable( bool enable );
   void loadProfiles();
   void loadSettings();
   void seedDefaultKeyboardProfileIfEmpty();

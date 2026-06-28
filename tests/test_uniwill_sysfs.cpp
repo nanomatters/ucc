@@ -7,6 +7,7 @@
 
 #include "SysfsNode.hpp"
 #include "UniwillSysfs.hpp"
+#include "PowerSupplyController.hpp"
 
 #include <cerrno>
 #include <filesystem>
@@ -315,6 +316,58 @@ private slots:
     QCOMPARE( ucc::uniwill::readFirstLine( devicePath / "usb_c_power_priority" ).value_or( "" ),
               std::string( "charging" ) );
     QVERIFY( !ucc::uniwill::writeUsbCPowerPriority( priority, "invalid" ) );
+  }
+
+  void readsAndWritesWaterCoolerBridgeEnable()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path devicePath = root / "bus/platform/devices/INOU0000:00";
+
+    writeFile( devicePath / "wc/enable", "0\n" );
+
+    auto bridge = ucc::uniwill::readWaterCoolerBridge( root.string() );
+
+    QVERIFY( bridge.isAvailable() );
+    QCOMPARE( bridge.enablePath, ( devicePath / "wc/enable" ).string() );
+    QVERIFY( !bridge.enabled );
+
+    QVERIFY( ucc::uniwill::writeWaterCoolerBridgeEnable( bridge, true ) );
+    bridge = ucc::uniwill::readWaterCoolerBridge( root.string() );
+    QVERIFY( bridge.enabled );
+
+    QVERIFY( ucc::uniwill::writeWaterCoolerBridgeEnable( false, root.string() ) );
+    bridge = ucc::uniwill::readWaterCoolerBridge( root.string() );
+    QVERIFY( !bridge.enabled );
+  }
+
+  void chargeEndThresholdAvailabilityRequiresWritableNode()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path batteryPath = rootPath( dir ) / "BAT0";
+
+    writeFile( batteryPath / "charge_control_end_threshold", "80\n" );
+    fs::permissions(
+      batteryPath / "charge_control_end_threshold",
+      fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read,
+      fs::perm_options::replace );
+
+    PowerSupplyController battery( batteryPath.string() );
+    QVERIFY( battery.hasChargeControlEndThreshold() );
+    QVERIFY( !battery.isChargeControlEndThresholdWritable() );
+    QVERIFY( battery.getChargeControlEndAvailableThresholds().empty() );
+
+    fs::permissions(
+      batteryPath / "charge_control_end_threshold",
+      fs::perms::owner_read | fs::perms::owner_write,
+      fs::perm_options::replace );
+
+    const auto thresholds = battery.getChargeControlEndAvailableThresholds();
+    QCOMPARE( thresholds.size(), static_cast< size_t >( 100 ) );
+    QCOMPARE( thresholds.front(), 1 );
+    QCOMPARE( thresholds.back(), 100 );
   }
 
   void sysfsWriteDetailedReportsErrno()

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -175,6 +176,17 @@ struct UsbCPowerPriority
   [[nodiscard]] bool isAvailable() const noexcept
   {
     return not path.empty();
+  }
+};
+
+struct WaterCoolerBridge
+{
+  std::string enablePath;
+  bool enabled = false;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not enablePath.empty();
   }
 };
 
@@ -627,6 +639,42 @@ inline bool writeUsbCPowerPriority(
     return false;
 
   return SysfsNode< std::string >( priority.path ).write( translatedValue );
+}
+
+[[nodiscard]] inline WaterCoolerBridge readWaterCoolerBridge(
+  const std::string &sysfsRoot = "/sys" )
+{
+  WaterCoolerBridge bridge;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return bridge;
+
+  const fs::path enablePath = *platformDevice / "wc" / "enable";
+  if ( not fs::exists( enablePath ) )
+    return bridge;
+
+  bridge.enablePath = enablePath.string();
+  bridge.enabled = SysfsNode< bool >( bridge.enablePath ).read().value_or( false );
+
+  return bridge;
+}
+
+inline SysfsWriteResult writeWaterCoolerBridgeEnable(
+  const WaterCoolerBridge &bridge,
+  bool enable )
+{
+  if ( not bridge.isAvailable() )
+    return { false, ENOENT, 0 };
+
+  return SysfsNode< bool >( bridge.enablePath ).writeDetailed( enable );
+}
+
+inline SysfsWriteResult writeWaterCoolerBridgeEnable(
+  bool enable,
+  const std::string &sysfsRoot = "/sys" )
+{
+  return writeWaterCoolerBridgeEnable( readWaterCoolerBridge( sysfsRoot ), enable );
 }
 
 [[nodiscard]] inline std::vector< CpuPowerLimit > readCpuPowerLimits(

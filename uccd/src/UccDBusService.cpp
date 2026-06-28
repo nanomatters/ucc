@@ -29,6 +29,7 @@
 #include <thread>
 #include <cmath>
 #include <climits>
+#include <cstring>
 #include <fstream>
 #include <filesystem>
 #include <syslog.h>
@@ -2377,6 +2378,8 @@ void UccDBusService::readHardwareCapabilities()
   {
     m_dbusData.chargingProfilesAvailable = "[]";
     m_dbusData.currentChargingProfile = "";
+    m_dbusData.chargeStartAvailableThresholds = "[]";
+    m_dbusData.chargeEndAvailableThresholds = "[]";
 
     // USB-C power priority
     const auto priority = ucc::uniwill::readUsbCPowerPriority();
@@ -2426,6 +2429,19 @@ void UccDBusService::readHardwareCapabilities()
       // Threshold ranges
       auto startThresholds = battery->getChargeControlStartAvailableThresholds();
       auto endThresholds = battery->getChargeControlEndAvailableThresholds();
+
+      if ( battery->hasChargeControlEndThreshold() &&
+           !battery->isChargeControlEndThresholdWritable() )
+      {
+        static bool loggedReadOnlyChargeLimit = false;
+        if ( !loggedReadOnlyChargeLimit )
+        {
+          syslog( LOG_WARNING,
+                  "[uccd] Battery charge limit is read-only; load uniwill-laptop with allow_charge_limit=1 to enable charge-control writes" );
+          loggedReadOnlyChargeLimit = true;
+        }
+        endThresholds.clear();
+      }
 
       if ( !startThresholds.empty() )
       {
@@ -2552,6 +2568,30 @@ void UccDBusService::updateFanData()
     m_dbusData.fans[ fanIndex ].speed.set( static_cast< int64_t >( now ), reading.speedPercent );
     m_dbusData.fans[ fanIndex ].temp.set( static_cast< int64_t >( now ), reading.temperatureCelsius );
   }
+}
+
+void UccDBusService::syncWaterCoolerBridgeEnable( bool enable )
+{
+  const auto bridge = ucc::uniwill::readWaterCoolerBridge();
+  if ( !bridge.isAvailable() )
+    return;
+
+  if ( bridge.enabled == enable )
+    return;
+
+  const SysfsWriteResult result = ucc::uniwill::writeWaterCoolerBridgeEnable( bridge, enable );
+  if ( result )
+  {
+    syslog( LOG_INFO, "Water cooler bridge %s via %s",
+            enable ? "enabled" : "disabled",
+            bridge.enablePath.c_str() );
+    return;
+  }
+
+  syslog( LOG_WARNING, "Failed to %s water cooler bridge %s: %s",
+          enable ? "enable" : "disable",
+          bridge.enablePath.c_str(),
+          std::strerror( result.error ) );
 }
 
 bool UccDBusService::initDBus()
@@ -2860,6 +2900,8 @@ void UccDBusService::onWork()
           m_adaptor->emitPowerStateChanged( stateKey );
         }
 
+        syncWaterCoolerBridgeEnable( wcConnected );
+
         // Reset pump hysteresis so the auto-control loop picks up the correct
         // level for the new profile from a clean state.
         m_pumpHysSpeedIdx = 0;
@@ -2886,6 +2928,7 @@ void UccDBusService::setWaterCoolerScanningEnabled( bool enable )
   {
     m_dbusData.waterCoolerAvailable = false;
     m_dbusData.waterCoolerConnected = false;
+    syncWaterCoolerBridgeEnable( false );
   }
 
   if ( not m_waterCoolerWorker )
@@ -2910,6 +2953,7 @@ void UccDBusService::onExit()
 {
   // Only do thread-safe work here - this runs on the DaemonWorker thread.
   // DBus cleanup happens in shutdown() on the main thread.
+  syncWaterCoolerBridgeEnable( false );
   saveAutosave();
 }
 

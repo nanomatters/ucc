@@ -16,6 +16,7 @@
 #pragma once
 
 #include "SysfsNode.hpp"
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <optional>
@@ -128,7 +129,13 @@ public:
    */
   [[nodiscard]] bool setChargeControlStartThreshold( int threshold ) const noexcept
   {
-    return SysfsNode< int64_t >( m_basePath + "/charge_control_start_threshold" ).write( threshold );
+    return static_cast< bool >( setChargeControlStartThresholdDetailed( threshold ) );
+  }
+
+  [[nodiscard]] SysfsWriteResult setChargeControlStartThresholdDetailed( int threshold ) const noexcept
+  {
+    return SysfsNode< int64_t >( m_basePath + "/charge_control_start_threshold" )
+      .writeDetailed( threshold );
   }
 
   /**
@@ -147,7 +154,23 @@ public:
    */
   [[nodiscard]] bool setChargeControlEndThreshold( int threshold ) const noexcept
   {
-    return SysfsNode< int64_t >( m_basePath + "/charge_control_end_threshold" ).write( threshold );
+    return static_cast< bool >( setChargeControlEndThresholdDetailed( threshold ) );
+  }
+
+  [[nodiscard]] SysfsWriteResult setChargeControlEndThresholdDetailed( int threshold ) const noexcept
+  {
+    return SysfsNode< int64_t >( m_basePath + "/charge_control_end_threshold" )
+      .writeDetailed( threshold );
+  }
+
+  [[nodiscard]] bool hasChargeControlEndThreshold() const noexcept
+  {
+    return SysfsNode< int64_t >( m_basePath + "/charge_control_end_threshold" ).isAvailable();
+  }
+
+  [[nodiscard]] bool isChargeControlEndThresholdWritable() const noexcept
+  {
+    return hasAnyWriteBit( m_basePath + "/charge_control_end_threshold" );
   }
 
   /**
@@ -213,7 +236,12 @@ public:
   {
     auto values = SysfsNode< std::vector< int32_t > >( m_basePath + "/charge_control_end_available_thresholds", " " ).read();
     if ( not values )
+    {
+      if ( isChargeControlEndThresholdWritable() )
+        return makeRange( 1, 100 );
+
       return {};
+    }
 
     // Convert int32_t to int
     std::vector< int > result;
@@ -286,5 +314,28 @@ public:
   }
 
 private:
+  [[nodiscard]] static bool hasAnyWriteBit( const std::string &path ) noexcept
+  {
+    std::error_code ec;
+    const auto permissions = std::filesystem::status( path, ec ).permissions();
+    if ( ec )
+      return false;
+
+    using std::filesystem::perms;
+    return ( permissions & ( perms::owner_write | perms::group_write | perms::others_write ) )
+           != perms::none;
+  }
+
+  [[nodiscard]] static std::vector< int > makeRange( int first, int last )
+  {
+    std::vector< int > values;
+    values.reserve( static_cast< size_t >( std::max( 0, last - first + 1 ) ) );
+
+    for ( int value = first; value <= last; ++value )
+      values.push_back( value );
+
+    return values;
+  }
+
   std::string m_basePath;
 };

@@ -17,6 +17,7 @@
 #include "PowerSupplyController.hpp"
 
 #include <cerrno>
+#include <cstring>
 
 // =====================================================================
 //  Public methods
@@ -139,13 +140,16 @@ bool ProfileSettingsWorker::setChargeStartThreshold( int value ) noexcept
   if ( not battery )
     return false;
 
-  if ( battery->setChargeControlStartThreshold( value ) )
+  const SysfsWriteResult result = battery->setChargeControlStartThresholdDetailed( value );
+  if ( result )
   {
     syslog( LOG_INFO, "Set charge start threshold to %d", value );
     return true;
   }
 
-  syslog( LOG_WARNING, "Failed writing start threshold" );
+  syslog( LOG_WARNING, "Failed writing start threshold to %s: %s",
+          battery->getBasePath().c_str(),
+          std::strerror( result.error ) );
   return false;
 }
 
@@ -155,13 +159,26 @@ bool ProfileSettingsWorker::setChargeEndThreshold( int value ) noexcept
   if ( not battery )
     return false;
 
-  if ( battery->setChargeControlEndThreshold( value ) )
+  const SysfsWriteResult result = battery->setChargeControlEndThresholdDetailed( value );
+  if ( result )
   {
     syslog( LOG_INFO, "Set charge end threshold to %d", value );
     return true;
   }
 
-  syslog( LOG_WARNING, "Failed writing end threshold" );
+  if ( battery->hasChargeControlEndThreshold() && !battery->isChargeControlEndThresholdWritable() )
+  {
+    syslog( LOG_WARNING,
+            "Charge end threshold is read-only at %s; load uniwill-laptop with allow_charge_limit=1",
+            battery->getBasePath().c_str() );
+  }
+  else
+  {
+    syslog( LOG_WARNING, "Failed writing end threshold to %s: %s",
+            battery->getBasePath().c_str(),
+            std::strerror( result.error ) );
+  }
+
   return false;
 }
 
