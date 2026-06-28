@@ -56,6 +56,8 @@ std::string dgpuInfoToJSON( const DGpuInfo &info )
       << "\"powerDraw\":" << info.m_powerDraw << ","
       << "\"maxPowerLimit\":" << info.m_maxPowerLimit << ","
       << "\"enforcedPowerLimit\":" << info.m_enforcedPowerLimit << ","
+      << "\"powerAllocation\":" << info.m_powerAllocation << ","
+      << "\"thermalBudget\":" << info.m_thermalBudget << ","
       << "\"computeUtilPct\":" << info.m_computeUtilPct << ","
       << "\"memoryUtilPct\":" << info.m_memoryUtilPct << ","
       << "\"vramUsedMiB\":" << info.m_vramUsedMiB << ","
@@ -1955,6 +1957,7 @@ UccDBusService::UccDBusService()
 
   // detect system hardware info (CPU, GPU, laptop model)
   m_systemInfo = detectSystemInfo( m_deviceId );
+  m_systemInfo.ecFirmwareVersion = ucc::uniwill::readDriverInfo().ecFirmwareVersion;
   m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
 
   // Check device whitelist - unsupported machines get a functional D-Bus
@@ -1975,7 +1978,7 @@ UccDBusService::UccDBusService()
 
   // set default system JSON values (sentinels for GPU/CPU monitoring data)
   m_dbusData.primeState = "-1";
-  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"coreFrequency\":-1,\"vramFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999,\"coreVoltageMv\":-1}";
+  m_dbusData.dGpuInfoValuesJSON = "{\"temp\":-1,\"powerDraw\":-1,\"maxPowerLimit\":-1,\"enforcedPowerLimit\":-1,\"powerAllocation\":-1,\"thermalBudget\":-1,\"coreFrequency\":-1,\"vramFrequency\":-1,\"maxCoreFrequency\":-1,\"computeUtilPct\":-1,\"memoryUtilPct\":-1,\"vramUsedMiB\":-1,\"vramTotalMiB\":-1,\"perfLimitReason\":\"\",\"encoderUtilPct\":-1,\"decoderUtilPct\":-1,\"currentPstate\":-1,\"grClockOffsetMHz\":-999,\"memClockOffsetMHz\":-999,\"coreVoltageMv\":-1}";
   m_dbusData.iGpuInfoValuesJSON = "{\"vendor\":\"unknown\",\"temp\":-1,\"coreFrequency\":-1,\"maxCoreFrequency\":-1,\"powerDraw\":-1}";
 
   // Keyboard control is deliberately disabled during the uniwill-only port.

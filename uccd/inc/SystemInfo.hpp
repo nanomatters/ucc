@@ -54,6 +54,7 @@ struct SystemInfo
   std::string boardName;          // raw DMI board_name
   std::string boardVendor;        // raw DMI board_vendor
   std::string sysVendor;          // raw DMI sys_vendor
+  std::string ecFirmwareVersion;  // uniwill EC firmware version, when exposed by the driver
 
   // Internal device ID (if matched)
   std::optional< UniwillDeviceID > deviceId;

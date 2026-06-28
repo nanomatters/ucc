@@ -65,13 +65,16 @@ struct DriverInfo
   std::string projectIdPath;
   std::string moduleIdPath;
   std::string romIdPath;
+  std::string ecFirmwareVersionPath;
   std::optional< int32_t > projectId;
   std::string moduleId;
   std::string romId;
+  std::string ecFirmwareVersion;
 
   [[nodiscard]] bool isAvailable() const noexcept
   {
-    return projectId.has_value() or not moduleId.empty() or not romId.empty();
+    return projectId.has_value() or not moduleId.empty() or not romId.empty()
+           or not ecFirmwareVersion.empty();
   }
 };
 
@@ -190,6 +193,24 @@ struct WaterCoolerBridge
   }
 };
 
+struct HwmonTelemetry
+{
+  std::string hwmonPath;
+  std::optional< int32_t > cpuTemperatureCelsius;
+  std::optional< int32_t > gpuTemperatureCelsius;
+  std::optional< int32_t > batteryTemperatureCelsius;
+  std::optional< int32_t > ssdTemperatureCelsius;
+  std::optional< double > systemPowerWatts;
+  std::optional< double > gpuPowerAllocationWatts;
+  std::optional< double > thermalBudgetWatts;
+  std::optional< double > adapterCurrentAmps;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not hwmonPath.empty();
+  }
+};
+
 [[nodiscard]] inline fs::path sysfsPath( const std::string &sysfsRoot, const fs::path &relative )
 {
   const fs::path root = sysfsRoot.empty() ? fs::path( "/sys" ) : fs::path( sysfsRoot );
@@ -216,6 +237,22 @@ struct WaterCoolerBridge
     try
     {
       return static_cast< uint32_t >( std::stoul( *line ) );
+    }
+    catch ( ... )
+    {
+    }
+  }
+
+  return std::nullopt;
+}
+
+[[nodiscard]] inline std::optional< int64_t > readInt64( const fs::path &path )
+{
+  if ( auto line = readFirstLine( path ) )
+  {
+    try
+    {
+      return static_cast< int64_t >( std::stoll( *line ) );
     }
     catch ( ... )
     {
@@ -277,6 +314,30 @@ struct WaterCoolerBridge
 [[nodiscard]] inline int32_t millidegreesToCelsius( int32_t millidegrees )
 {
   return static_cast< int32_t >( std::lround( static_cast< double >( millidegrees ) / 1000.0 ) );
+}
+
+[[nodiscard]] inline std::optional< int32_t > readTemperatureCelsius( const fs::path &path )
+{
+  if ( const auto millidegrees = readInt32( path ) )
+    return millidegreesToCelsius( *millidegrees );
+
+  return std::nullopt;
+}
+
+[[nodiscard]] inline std::optional< double > readMicrounitsAsUnits( const fs::path &path )
+{
+  if ( const auto microunits = readInt64( path ) )
+    return static_cast< double >( *microunits ) / 1000000.0;
+
+  return std::nullopt;
+}
+
+[[nodiscard]] inline std::optional< double > readMilliunitsAsUnits( const fs::path &path )
+{
+  if ( const auto milliunits = readInt64( path ) )
+    return static_cast< double >( *milliunits ) / 1000.0;
+
+  return std::nullopt;
 }
 
 [[nodiscard]] inline std::vector< std::string > splitWords( const std::string &line )
@@ -472,7 +533,35 @@ struct WaterCoolerBridge
     info.romId = readFirstLine( romIdPath ).value_or( "" );
   }
 
+  const fs::path ecFirmwareVersionPath = infoPath / "ec_firmware_version";
+  if ( fs::exists( ecFirmwareVersionPath ) )
+  {
+    info.ecFirmwareVersionPath = ecFirmwareVersionPath.string();
+    info.ecFirmwareVersion = readFirstLine( ecFirmwareVersionPath ).value_or( "" );
+  }
+
   return info;
+}
+
+[[nodiscard]] inline HwmonTelemetry readHwmonTelemetry( const std::string &sysfsRoot = "/sys" )
+{
+  HwmonTelemetry telemetry;
+  const auto hwmon = findHwmonDevice( sysfsRoot );
+
+  if ( not hwmon )
+    return telemetry;
+
+  telemetry.hwmonPath = hwmon->string();
+  telemetry.cpuTemperatureCelsius = readTemperatureCelsius( *hwmon / "temp1_input" );
+  telemetry.gpuTemperatureCelsius = readTemperatureCelsius( *hwmon / "temp2_input" );
+  telemetry.batteryTemperatureCelsius = readTemperatureCelsius( *hwmon / "temp3_input" );
+  telemetry.ssdTemperatureCelsius = readTemperatureCelsius( *hwmon / "temp4_input" );
+  telemetry.systemPowerWatts = readMicrounitsAsUnits( *hwmon / "power1_input" );
+  telemetry.gpuPowerAllocationWatts = readMicrounitsAsUnits( *hwmon / "power2_input" );
+  telemetry.thermalBudgetWatts = readMicrounitsAsUnits( *hwmon / "power3_input" );
+  telemetry.adapterCurrentAmps = readMilliunitsAsUnits( *hwmon / "curr1_input" );
+
+  return telemetry;
 }
 
 [[nodiscard]] inline bool hasFanAutoPointFiles( const fs::path &hwmonPath, size_t channelIndex )

@@ -955,7 +955,10 @@ std::optional< std::string > readJsonString( QDBusInterface *iface, const QStrin
 // System Monitoring implementations
 std::optional< int > UccdClient::getCpuTemperature()
 {
-  return readFanDataValue( m_interface.get(), "GetFanDataCPU", "temp" );
+  if ( auto temp = readFanDataValue( m_interface.get(), "GetFanDataCPU", "temp" ) )
+    return temp;
+
+  return readJsonInt( m_interface.get(), "GetCpuPowerValuesJSON", "cpuTemp" );
 }
 
 std::optional< int > UccdClient::getGpuTemperature()
@@ -1008,6 +1011,36 @@ std::optional< double > UccdClient::getGpuPower()
 std::optional< double > UccdClient::getIGpuPower()
 {
   return readJsonDouble( m_interface.get(), "GetIGpuInfoValuesJSON", "powerDraw" );
+}
+
+std::optional< double > UccdClient::getSystemPower()
+{
+  return readJsonDouble( m_interface.get(), "GetCpuPowerValuesJSON", "systemPower" );
+}
+
+std::optional< double > UccdClient::getAdapterCurrent()
+{
+  return readJsonDouble( m_interface.get(), "GetCpuPowerValuesJSON", "adapterCurrent" );
+}
+
+std::optional< int > UccdClient::getBatteryTemperature()
+{
+  return readJsonInt( m_interface.get(), "GetCpuPowerValuesJSON", "batteryTemp" );
+}
+
+std::optional< int > UccdClient::getSsdTemperature()
+{
+  return readJsonInt( m_interface.get(), "GetCpuPowerValuesJSON", "ssdTemp" );
+}
+
+std::optional< double > UccdClient::getDGpuPowerAllocation()
+{
+  return readJsonDouble( m_interface.get(), "GetDGpuInfoValuesJSON", "powerAllocation" );
+}
+
+std::optional< double > UccdClient::getDGpuThermalBudget()
+{
+  return readJsonDouble( m_interface.get(), "GetDGpuInfoValuesJSON", "thermalBudget" );
 }
 
 // Extended discrete GPU metrics

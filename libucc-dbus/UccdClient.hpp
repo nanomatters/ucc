@@ -175,6 +175,12 @@ public:
   std::optional< double > getCpuPower();
   std::optional< double > getGpuPower();
   std::optional< double > getIGpuPower();
+  std::optional< double > getSystemPower();
+  std::optional< double > getAdapterCurrent();
+  std::optional< int > getBatteryTemperature();
+  std::optional< int > getSsdTemperature();
+  std::optional< double > getDGpuPowerAllocation();
+  std::optional< double > getDGpuThermalBudget();
   // Extended discrete GPU metrics (NVIDIA, -1 when unavailable)
   std::optional< int > getDGpuComputeUtilPct();       ///< Compute utilization 0-100 %
   std::optional< int > getDGpuMemoryUtilPct();        ///< Memory-controller utilization 0-100 %

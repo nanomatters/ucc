@@ -243,10 +243,13 @@ static int cmdStatus( ucc::UccdClient &c )
       const auto cpuModel    = obj.value( "cpuModel" ).toString().toStdString();
       const auto dGpuModel   = obj.value( "dGpuModel" ).toString().toStdString();
       const auto iGpuModel   = obj.value( "iGpuModel" ).toString().toStdString();
+      const auto ecFirmware  = obj.value( "ecFirmwareVersion" ).toString().toStdString();
 
       std::puts( "--- System ---" );
       if ( !laptopModel.empty() )
         std::printf( "  %-24s %s\n", "Laptop model:", laptopModel.c_str() );
+      if ( !ecFirmware.empty() )
+        std::printf( "  %-24s %s\n", "EC firmware:", ecFirmware.c_str() );
       if ( !cpuModel.empty() )
         std::printf( "  %-24s %s\n", "CPU:", cpuModel.c_str() );
       if ( !dGpuModel.empty() )
@@ -286,6 +289,8 @@ static int cmdStatus( ucc::UccdClient &c )
   printVal( "Temperature:",   c.getGpuTemperature(), "°C" );
   printVal( "Frequency:",     c.getGpuFrequency(),   "MHz" );
   printVal( "Power:",         c.getGpuPower(),        "W" );
+  printVal( "Power allocation:", c.getDGpuPowerAllocation(), "W" );
+  printVal( "Thermal budget:", c.getDGpuThermalBudget(), "W" );
   printVal( "Fan speed:",     c.getGpuFanSpeedPercent(), "%" );
   printVal( "Fan RPM:",       c.getGpuFanSpeedRPM(),     "RPM" );
 
@@ -298,6 +303,10 @@ static int cmdStatus( ucc::UccdClient &c )
   std::puts( "" );
   std::puts( "--- Hardware ---" );
   printVal( "Display brightness:", c.getDisplayBrightness(), "%" );
+  printVal( "System power:", c.getSystemPower(), "W" );
+  printVal( "Adapter current:", c.getAdapterCurrent(), "A" );
+  printVal( "Battery temp:", c.getBatteryTemperature(), "°C" );
+  printVal( "SSD temp:", c.getSsdTemperature(), "°C" );
 
   auto wcSupported = c.getWaterCoolerSupported();
   if ( wcSupported && *wcSupported )
@@ -1048,6 +1057,8 @@ static int cmdGpuInfo( ucc::UccdClient &c )
   printVal( "Temperature:",         c.getGpuTemperature(), "°C" );
   printVal( "Frequency:",           c.getGpuFrequency(), "MHz" );
   printVal( "Power:",               c.getGpuPower(), "W" );
+  printVal( "Power allocation:",    c.getDGpuPowerAllocation(), "W" );
+  printVal( "Thermal budget:",      c.getDGpuThermalBudget(), "W" );
   printVal( "Fan speed:",           c.getGpuFanSpeedPercent(), "%" );
   printVal( "Fan RPM:",             c.getGpuFanSpeedRPM(), "RPM" );
 
@@ -1144,6 +1155,10 @@ static int cmdCpuInfo( ucc::UccdClient &c )
   printVal( "Temperature:",         c.getCpuTemperature(), "°C" );
   printVal( "Frequency:",           c.getCpuFrequency(), "MHz" );
   printVal( "Power:",               c.getCpuPower(), "W" );
+  printVal( "System power:",        c.getSystemPower(), "W" );
+  printVal( "Adapter current:",     c.getAdapterCurrent(), "A" );
+  printVal( "Battery temp:",        c.getBatteryTemperature(), "°C" );
+  printVal( "SSD temp:",            c.getSsdTemperature(), "°C" );
 
   if ( govs && !govs->empty() )
   {
@@ -1280,6 +1295,13 @@ static int cmdStatusJSON( ucc::UccdClient &c )
 
   root["connected"] = c.isConnected();
 
+  if ( auto sysInfo = c.getSystemInfoJSON() )
+  {
+    QJsonDocument sysDoc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfo ) );
+    if ( sysDoc.isObject() )
+      root["system"] = sysDoc.object();
+  }
+
   auto ps = c.getPowerState();
   if ( ps ) root["powerState"] = QString::fromStdString( *ps );
 
@@ -1307,6 +1329,8 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   auto g3 = c.getGpuPower();            if ( g3 ) gpu["power"]       = *g3;
   auto g4 = c.getGpuFanSpeedPercent();  if ( g4 ) gpu["fanPercent"]  = *g4;
   auto g5 = c.getGpuFanSpeedRPM();      if ( g5 ) gpu["fanRPM"]      = *g5;
+  auto g6 = c.getDGpuPowerAllocation(); if ( g6 ) gpu["powerAllocation"] = *g6;
+  auto g7 = c.getDGpuThermalBudget();   if ( g7 ) gpu["thermalBudget"] = *g7;
   root["gpu"] = gpu;
 
   // iGPU
@@ -1319,6 +1343,10 @@ static int cmdStatusJSON( ucc::UccdClient &c )
   // Hardware
   QJsonObject hw;
   auto b = c.getDisplayBrightness(); if ( b ) hw["displayBrightness"] = *b;
+  auto sp = c.getSystemPower();      if ( sp ) hw["systemPower"] = *sp;
+  auto ac = c.getAdapterCurrent();   if ( ac ) hw["adapterCurrent"] = *ac;
+  auto bt = c.getBatteryTemperature(); if ( bt ) hw["batteryTemperature"] = *bt;
+  auto st = c.getSsdTemperature();   if ( st ) hw["ssdTemperature"] = *st;
   root["hardware"] = hw;
 
   // Water cooler

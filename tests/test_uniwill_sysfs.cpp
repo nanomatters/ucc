@@ -115,6 +115,7 @@ private slots:
     writeFile( infoPath / "project_id", "0x13\n" );
     writeFile( infoPath / "module_id", "PH4TUX1\n" );
     writeFile( infoPath / "rom_id", "1.07\n" );
+    writeFile( infoPath / "ec_firmware_version", "1.09\n" );
 
     const auto info = ucc::uniwill::readDriverInfo( root.string() );
 
@@ -123,6 +124,7 @@ private slots:
     QCOMPARE( info.projectId.value_or( -1 ), static_cast< int32_t >( 0x13 ) );
     QCOMPARE( info.moduleId, std::string( "PH4TUX1" ) );
     QCOMPARE( info.romId, std::string( "1.07" ) );
+    QCOMPARE( info.ecFirmwareVersion, std::string( "1.09" ) );
   }
 
   void profileTranslationKeepsUccProfilesCompatible()
@@ -257,6 +259,37 @@ private slots:
     QCOMPARE( reading.temperatureCelsius, static_cast< int32_t >( 56 ) );
     QCOMPARE( reading.speedPercent, static_cast< int32_t >( 50 ) );
     QCOMPARE( reading.rpm, static_cast< int32_t >( 2400 ) );
+  }
+
+  void readsReadOnlyHwmonTelemetryWithConvertedUnits()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path hwmonPath = root / "class/hwmon/hwmon0";
+
+    writeFile( hwmonPath / "name", "uniwill\n" );
+    writeFile( hwmonPath / "temp1_input", "55500\n" );
+    writeFile( hwmonPath / "temp2_input", "62000\n" );
+    writeFile( hwmonPath / "temp3_input", "30150\n" );
+    writeFile( hwmonPath / "temp4_input", "41000\n" );
+    writeFile( hwmonPath / "power1_input", "155000000\n" );
+    writeFile( hwmonPath / "power2_input", "80000000\n" );
+    writeFile( hwmonPath / "power3_input", "24000000\n" );
+    writeFile( hwmonPath / "curr1_input", "12500\n" );
+
+    const auto telemetry = ucc::uniwill::readHwmonTelemetry( root.string() );
+
+    QVERIFY( telemetry.isAvailable() );
+    QCOMPARE( telemetry.hwmonPath, hwmonPath.string() );
+    QCOMPARE( telemetry.cpuTemperatureCelsius.value_or( -1 ), static_cast< int32_t >( 56 ) );
+    QCOMPARE( telemetry.gpuTemperatureCelsius.value_or( -1 ), static_cast< int32_t >( 62 ) );
+    QCOMPARE( telemetry.batteryTemperatureCelsius.value_or( -1 ), static_cast< int32_t >( 30 ) );
+    QCOMPARE( telemetry.ssdTemperatureCelsius.value_or( -1 ), static_cast< int32_t >( 41 ) );
+    QCOMPARE( telemetry.systemPowerWatts.value_or( -1.0 ), 155.0 );
+    QCOMPARE( telemetry.gpuPowerAllocationWatts.value_or( -1.0 ), 80.0 );
+    QCOMPARE( telemetry.thermalBudgetWatts.value_or( -1.0 ), 24.0 );
+    QCOMPARE( telemetry.adapterCurrentAmps.value_or( -1.0 ), 12.5 );
   }
 
   void writesFanCurveAndMode()

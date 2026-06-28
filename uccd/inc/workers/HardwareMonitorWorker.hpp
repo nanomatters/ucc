@@ -50,6 +50,8 @@ struct DGpuInfo
   double m_powerDraw = -1.0;
   double m_maxPowerLimit = -1.0;
   double m_enforcedPowerLimit = -1.0;
+  double m_powerAllocation = -1.0;
+  double m_thermalBudget = -1.0;
   bool m_d0MetricsUsage = false;
 
   // Extended metrics (NVIDIA only, -1 / INT_MIN when unavailable)
@@ -397,6 +399,7 @@ private:
   [[nodiscard]] DGpuInfo getDGpuValues() noexcept;
   [[nodiscard]] DGpuInfo getNvidiaDGpuValues() const noexcept;
   [[nodiscard]] DGpuInfo getAmdDGpuValues( const DGpuInfo &base ) const noexcept;
+  [[nodiscard]] DGpuInfo applyUniwillDGpuTelemetry( const DGpuInfo &base ) const noexcept;
   [[nodiscard]] double parseMaxAmdFreq( const std::string &frequencyString ) const noexcept;
 
   // CPU power methods

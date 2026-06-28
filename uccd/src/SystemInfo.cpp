@@ -529,7 +529,8 @@ std::string SystemInfo::toJSON() const
       << "\"productSKU\":\"" << jsonEscapeValue( productSKU ) << "\","
       << "\"boardName\":\"" << jsonEscapeValue( boardName ) << "\","
       << "\"boardVendor\":\"" << jsonEscapeValue( boardVendor ) << "\","
-      << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\""
+      << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\","
+      << "\"ecFirmwareVersion\":\"" << jsonEscapeValue( ecFirmwareVersion ) << "\""
       << "}";
   return oss.str();
 }

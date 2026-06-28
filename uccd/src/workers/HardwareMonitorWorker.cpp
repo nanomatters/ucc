@@ -15,6 +15,7 @@
 
 #include "workers/HardwareMonitorWorker.hpp"
 #include "SysfsNode.hpp"
+#include "UniwillSysfs.hpp"
 #include "Utils.hpp"
 #include <iostream>
 #include <fstream>
@@ -38,6 +39,8 @@ void DGpuInfo::print() const noexcept
      << "  Power Draw: " << m_powerDraw << " W\n"
      << "  Max Power Limit: " << m_maxPowerLimit << " W\n"
      << "  Enforced Power Limit: " << m_enforcedPowerLimit << " W\n"
+     << "  EC Power Allocation: " << m_powerAllocation << " W\n"
+     << "  EC Thermal Budget: " << m_thermalBudget << " W\n"
      << "  D0 Metrics Usage: " << ( m_d0MetricsUsage ? "Yes" : "No" ) << "\n";
 }
 
@@ -49,6 +52,16 @@ void IGpuInfo::print() const noexcept
      << "  Core Frequency: " << m_coreFrequency << " MHz\n"
      << "  Max Core Frequency: " << m_maxCoreFrequency << " MHz\n"
      << "  Power Draw: " << m_powerDraw << " W\n";
+}
+
+namespace
+{
+template< typename T >
+void appendJsonOptional( std::ostringstream &stream, const char *key, const std::optional< T > &value )
+{
+  if ( value )
+    stream << ",\"" << key << "\":" << *value;
+}
 }
 
 // ============================================================================
@@ -607,7 +620,7 @@ DGpuInfo HardwareMonitorWorker::getDGpuValues() noexcept
   }
 
   values.m_d0MetricsUsage = metricsUsage;
-  return values;
+  return applyUniwillDGpuTelemetry( values );
 }
 
 DGpuInfo HardwareMonitorWorker::getNvidiaDGpuValues() const noexcept
@@ -702,6 +715,26 @@ DGpuInfo HardwareMonitorWorker::getAmdDGpuValues( const DGpuInfo &base ) const n
   return values;
 }
 
+DGpuInfo HardwareMonitorWorker::applyUniwillDGpuTelemetry( const DGpuInfo &base ) const noexcept
+{
+  DGpuInfo values = base;
+  const auto telemetry = ucc::uniwill::readHwmonTelemetry();
+
+  if ( not telemetry.isAvailable() )
+    return values;
+
+  if ( values.m_temp < 0 and telemetry.gpuTemperatureCelsius )
+    values.m_temp = static_cast< double >( *telemetry.gpuTemperatureCelsius );
+
+  if ( telemetry.gpuPowerAllocationWatts )
+    values.m_powerAllocation = *telemetry.gpuPowerAllocationWatts;
+
+  if ( telemetry.thermalBudgetWatts )
+    values.m_thermalBudget = *telemetry.thermalBudgetWatts;
+
+  return values;
+}
+
 double HardwareMonitorWorker::parseMaxAmdFreq( const std::string &frequencyString ) const noexcept
 {
   std::regex mhzRegex( R"(\d+Mhz)" );
@@ -752,12 +785,19 @@ void HardwareMonitorWorker::updateCpuPower()
 
   if ( m_getSensorDataCollectionStatus() )
   {
+    const auto telemetry = ucc::uniwill::readHwmonTelemetry();
     rawPower = getCpuCurrentPower();
     jsonStream << "\"powerDraw\":" << rawPower;
 
     double maxPowerLimit = getCpuMaxPowerLimit();
     if ( maxPowerLimit > 0 )
       jsonStream << ",\"maxPowerLimit\":" << maxPowerLimit;
+
+    appendJsonOptional( jsonStream, "cpuTemp", telemetry.cpuTemperatureCelsius );
+    appendJsonOptional( jsonStream, "systemPower", telemetry.systemPowerWatts );
+    appendJsonOptional( jsonStream, "batteryTemp", telemetry.batteryTemperatureCelsius );
+    appendJsonOptional( jsonStream, "ssdTemp", telemetry.ssdTemperatureCelsius );
+    appendJsonOptional( jsonStream, "adapterCurrent", telemetry.adapterCurrentAmps );
   }
   else
   {
