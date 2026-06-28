@@ -1,5 +1,6 @@
 build
 build-test
+build-tests
 build-verify
 dist
 Testing

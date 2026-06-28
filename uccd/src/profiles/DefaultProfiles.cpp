@@ -268,6 +268,7 @@ const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceProfiles =
 
   { UniwillDeviceID::XNE16E25, { silent, office, highPerformance } },
   { UniwillDeviceID::XNE16A25, { maxEnergySave, silent, office, highPerformance } },
+  { UniwillDeviceID::PCS_X6FR559Y, { maxEnergySave, silent, office, highPerformance } },
 
   { UniwillDeviceID::STELLARIS16I07, { silent, office, highPerformance } },
   { UniwillDeviceID::STELLARIS16A07, { maxEnergySave, silent, office, highPerformance } },

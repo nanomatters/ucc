@@ -461,6 +461,13 @@ bool UccDBusInterfaceAdaptor::SetDisplayRefreshRate( const QString &display, int
   return false;
 }
 
+bool UccDBusInterfaceAdaptor::GetKeyboardBacklightControlSupported()
+{
+  if ( m_service )
+    return m_service->m_keyboardBacklightController.isAvailable();
+  return false;
+}
+
 int UccDBusInterfaceAdaptor::GetDisplayBrightness()
 {
   if ( m_service )
@@ -3725,6 +3732,8 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
   // read dmi information from sysfs
   const std::string dmiBasePath = "/sys/class/dmi/id";
   const std::string productSKU = SysfsNode< std::string >( dmiBasePath + "/product_sku" ).read().value_or( "" );
+  const std::string productName = SysfsNode< std::string >( dmiBasePath + "/product_name" )
+                                    .read().value_or( "" );
   const std::string boardName = SysfsNode< std::string >( dmiBasePath + "/board_name" ).read().value_or( "" );
 
   // get module info from tuxedo_io
@@ -3777,6 +3786,15 @@ std::optional< UniwillDeviceID > UccDBusService::identifyDevice()
     return skuIt->second;
   }
 
+  std::map< std::string, UniwillDeviceID > dmiProductNameDeviceMap;
+  dmiProductNameDeviceMap[ "X6FR559Y" ] = UniwillDeviceID::PCS_X6FR559Y;
+
+  if ( auto productNameIt = dmiProductNameDeviceMap.find( productName );
+       productNameIt != dmiProductNameDeviceMap.end() )
+  {
+    return productNameIt->second;
+  }
+
   // check uwid (univ wmi interface) device mapping
   std::map< int, UniwillDeviceID > uwidDeviceMap;
   uwidDeviceMap[ 0x13 ] = UniwillDeviceID::IBP14G6_TUX;
@@ -3814,6 +3832,7 @@ void UccDBusService::computeDeviceCapabilities()
     UniwillDeviceID::STELLARIS16I06,
     UniwillDeviceID::STELLARIS17I06,
     UniwillDeviceID::STELLARIS16A07,
+    UniwillDeviceID::PCS_X6FR559Y,
     UniwillDeviceID::XNE16A25,
     UniwillDeviceID::XNE16E25,
     UniwillDeviceID::STELLARIS16I07,

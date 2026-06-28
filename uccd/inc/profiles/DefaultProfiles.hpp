@@ -67,6 +67,9 @@ enum class UniwillDeviceID
   // XMG models (via SchenkerTechnologiesGmbH vendor string)
   XNE16E25,                   // XMG NEO 16" Intel (Gen7, 2025)
   XNE16A25,                   // XMG NEO 16" AMD (Gen7, 2025)
+
+  // PCSpecialist models
+  PCS_X6FR559Y,               // PCSpecialist X6FR559Y
 };
 
 // pre-defined profiles
@@ -85,4 +88,3 @@ extern const UccProfile defaultCustomProfile25WcTGP;
 // device-specific profile mappings
 extern const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceProfiles;
 extern const std::map< UniwillDeviceID, std::vector< UccProfile > > deviceCustomProfiles;
-

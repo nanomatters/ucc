@@ -278,6 +278,7 @@ public slots:
   bool GetWebcamSWStatus();
   bool GetForceYUV420OutputSwitchAvailable();
   int GetDisplayBrightness();
+  bool GetKeyboardBacklightControlSupported();
   bool SetDisplayBrightness( int brightness );
   bool SetDisplayRefreshRate( const QString &display, int refreshRate );
 

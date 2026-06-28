@@ -368,6 +368,9 @@ LaptopManufacturer classifyManufacturer( const std::string &sysVendor,
        containsCI( sysVendor, "XMG" ) || containsCI( boardVendor, "XMG" ) )
     return LaptopManufacturer::XMG;
 
+  if ( containsCI( sysVendor, "PCSpecialist" ) || containsCI( boardVendor, "PCSpecialist" ) )
+    return LaptopManufacturer::PCSpecialist;
+
   if ( containsCI( sysVendor, "Uniwill" ) || containsCI( boardVendor, "Uniwill" ) ||
        containsCI( sysVendor, "UNIWILL" ) || containsCI( boardVendor, "UNIWILL" ) )
     return LaptopManufacturer::Uniwill;
@@ -379,10 +382,11 @@ std::string manufacturerToString( LaptopManufacturer m )
 {
   switch ( m )
   {
-    case LaptopManufacturer::TUXEDO:  return "TUXEDO";
-    case LaptopManufacturer::XMG:     return "XMG";
-    case LaptopManufacturer::Uniwill: return "Uniwill";
-    default:                          return "Unknown";
+    case LaptopManufacturer::TUXEDO:       return "TUXEDO";
+    case LaptopManufacturer::XMG:          return "XMG";
+    case LaptopManufacturer::PCSpecialist: return "PCSpecialist";
+    case LaptopManufacturer::Uniwill:      return "Uniwill";
+    default:                               return "Unknown";
   }
 }
 
@@ -451,6 +455,9 @@ static const std::map< UniwillDeviceID, DeviceInfo > deviceInfoMap =
   // XMG models
   { UniwillDeviceID::XNE16E25,         { "NEO 16 Intel E25",                     "2025", LaptopManufacturer::XMG } },
   { UniwillDeviceID::XNE16A25,         { "NEO 16 AMD A25",                       "2025", LaptopManufacturer::XMG } },
+
+  // PCSpecialist models
+  { UniwillDeviceID::PCS_X6FR559Y,     { "X6FR559Y",                             "2025", LaptopManufacturer::PCSpecialist } },
 };
 // clang-format on
 
