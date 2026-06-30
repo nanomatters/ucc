@@ -292,6 +292,39 @@ private slots:
     QCOMPARE( telemetry.adapterCurrentAmps.value_or( -1.0 ), 12.5 );
   }
 
+  void readsDramTemperaturesFromSpdSensors()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+
+    // Two DDR5 spd5118 sensors (out of slot order on disk) + a non-DRAM hwmon to ignore.
+    const fs::path hwA = root / "class/hwmon/hwmon8"; // slot 1
+    const fs::path hwB = root / "class/hwmon/hwmon7"; // slot 0
+    const fs::path other = root / "class/hwmon/hwmon9";
+    writeFile( hwA / "name", "spd5118\n" );
+    writeFile( hwA / "temp1_input", "52500\n" );   // -> 53 C (lround 52.5)
+    writeFile( hwB / "name", "spd5118\n" );
+    writeFile( hwB / "temp1_input", "53750\n" );   // -> 54 C
+    writeFile( other / "name", "uniwill\n" );
+    writeFile( other / "temp1_input", "60000\n" );
+
+    // device symlinks carry the i2c address that yields the slot index
+    fs::create_directories( root / "devices/i2c/11-0050" );
+    fs::create_directories( root / "devices/i2c/11-0051" );
+    fs::create_directory_symlink( root / "devices/i2c/11-0051", hwA / "device" );
+    fs::create_directory_symlink( root / "devices/i2c/11-0050", hwB / "device" );
+
+    const auto temps = ucc::uniwill::readDramTemperatures( root.string() );
+
+    QCOMPARE( temps.size(), static_cast< size_t >( 2 ) );
+    // Sorted by slot derived from the SPD i2c address (0x50 -> 0, 0x51 -> 1)
+    QCOMPARE( temps[ 0 ].slot, 0 );
+    QCOMPARE( temps[ 0 ].temperatureCelsius, 54 );
+    QCOMPARE( temps[ 1 ].slot, 1 );
+    QCOMPARE( temps[ 1 ].temperatureCelsius, 53 );
+  }
+
   void writesFanCurveAndMode()
   {
     QTemporaryDir dir;

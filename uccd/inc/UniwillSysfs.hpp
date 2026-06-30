@@ -212,6 +212,15 @@ struct HwmonTelemetry
   }
 };
 
+// On-DIMM thermal sensor reading. Standard DDR SPD sensors (DDR5 spd5118 hub,
+// DDR4 jc42), one hwmon device per populated slot, exposed as temp1_input.
+struct DramTemperature
+{
+  int slot = 0;                 // slot index, derived from the SPD i2c address (0x50->0)
+  int temperatureCelsius = 0;
+  std::string inputPath;
+};
+
 [[nodiscard]] inline fs::path sysfsPath( const std::string &sysfsRoot, const fs::path &relative )
 {
   const fs::path root = sysfsRoot.empty() ? fs::path( "/sys" ) : fs::path( sysfsRoot );
@@ -584,6 +593,77 @@ struct HwmonTelemetry
   telemetry.adapterCurrentAmps = readMilliunitsAsUnits( *hwmon / "curr1_input" );
 
   return telemetry;
+}
+
+// Derive the DIMM slot index from an SPD i2c device name like "11-0050" -> 0,
+// "11-0051" -> 1. SPD/thermal sensors live at 0x50..0x57. Returns -1 if unknown.
+[[nodiscard]] inline int dramSlotFromI2cName( const std::string &deviceName )
+{
+  const auto dash = deviceName.find_last_of( '-' );
+  if ( dash == std::string::npos )
+    return -1;
+  try
+  {
+    const long addr = std::stol( deviceName.substr( dash + 1 ), nullptr, 16 );
+    if ( addr >= 0x50 and addr <= 0x57 )
+      return static_cast< int >( addr - 0x50 );
+  }
+  catch ( ... )
+  {
+  }
+  return -1;
+}
+
+// Read on-DIMM temperatures from the standard DDR SPD thermal sensors
+// (DDR5 "spd5118" / DDR4 "jc42" hwmon devices), one per populated slot.
+[[nodiscard]] inline std::vector< DramTemperature > readDramTemperatures(
+  const std::string &sysfsRoot = "/sys" )
+{
+  std::vector< DramTemperature > temps;
+  const fs::path root = sysfsPath( sysfsRoot, "class/hwmon" );
+
+  try
+  {
+    if ( not fs::exists( root ) )
+      return temps;
+
+    for ( const auto &entry : fs::directory_iterator( root ) )
+    {
+      const auto name = readFirstLine( entry.path() / "name" );
+      if ( not name or ( *name != "spd5118" and *name != "jc42" ) )
+        continue;
+
+      const fs::path inputPath = entry.path() / "temp1_input";
+      const auto millidegrees = readInt32( inputPath );
+      if ( not millidegrees )
+        continue;
+
+      // The hwmon's "device" symlink basename carries the i2c address (e.g. 11-0050).
+      int slot = static_cast< int >( temps.size() );
+      std::error_code ec;
+      const fs::path devLink = fs::read_symlink( entry.path() / "device", ec );
+      if ( not ec )
+      {
+        const int parsed = dramSlotFromI2cName( devLink.filename().string() );
+        if ( parsed >= 0 )
+          slot = parsed;
+      }
+
+      temps.push_back( DramTemperature{
+        slot,
+        millidegreesToCelsius( *millidegrees ),
+        inputPath.string()
+      } );
+    }
+  }
+  catch ( ... )
+  {
+  }
+
+  std::sort( temps.begin(), temps.end(),
+             []( const DramTemperature &a, const DramTemperature &b ) { return a.slot < b.slot; } );
+
+  return temps;
 }
 
 [[nodiscard]] inline bool hasFanAutoPointFiles( const fs::path &hwmonPath, size_t channelIndex )

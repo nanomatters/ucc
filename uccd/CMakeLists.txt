@@ -23,6 +23,7 @@ add_executable(uccd
   src/uccd.cpp
   src/UccDBusService.cpp
   src/SystemInfo.cpp
+  src/SmbiosMemoryDecoder.cpp
   src/NvmlWrapper.cpp
   src/workers/ProfileSettingsWorker.cpp
   src/workers/LCTWaterCoolerWorker.cpp

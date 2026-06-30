@@ -15,6 +15,7 @@
 
 #include "SystemInfo.hpp"
 #include "SysfsNode.hpp"
+#include "SmbiosMemoryDecoder.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -513,6 +514,51 @@ std::string jsonEscapeValue( const std::string &s )
   return oss.str();
 }
 
+// Parse the first integer found in a string (e.g. a /proc/meminfo line).
+long long parseFirstInt( const std::string &line )
+{
+  long long value = 0;
+  bool found = false;
+  for ( const char c : line )
+  {
+    if ( c >= '0' and c <= '9' )
+    {
+      value = value * 10 + ( c - '0' );
+      found = true;
+    }
+    else if ( found )
+    {
+      break;
+    }
+  }
+  return found ? value : 0;
+}
+
+// DRAM total from /proc/meminfo (value in MiB). Used only as a fallback when
+// SMBIOS module inventory is unavailable.
+int detectMemoryTotalMiB()
+{
+  std::ifstream meminfo( "/proc/meminfo" );
+  if ( not meminfo.is_open() )
+    return 0;
+
+  long long totalKiB = 0;
+  std::string line;
+  while ( std::getline( meminfo, line ) )
+  {
+    if ( line.rfind( "MemTotal:", 0 ) == 0 )
+    {
+      totalKiB = parseFirstInt( line );
+      break;
+    }
+  }
+
+  if ( totalKiB <= 0 )
+    return 0;
+
+  return static_cast< int >( totalKiB / 1024 );
+}
+
 } // anonymous namespace
 
 //  Public API
@@ -530,7 +576,28 @@ std::string SystemInfo::toJSON() const
       << "\"boardName\":\"" << jsonEscapeValue( boardName ) << "\","
       << "\"boardVendor\":\"" << jsonEscapeValue( boardVendor ) << "\","
       << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\","
-      << "\"ecFirmwareVersion\":\"" << jsonEscapeValue( ecFirmwareVersion ) << "\""
+      << "\"ecFirmwareVersion\":\"" << jsonEscapeValue( ecFirmwareVersion ) << "\","
+      << "\"ramTotalMiB\":" << ramTotalMiB << ","
+      << "\"ramModules\":[";
+  for ( size_t i = 0; i < ramModules.size(); ++i )
+  {
+    const auto &mod = ramModules[ i ];
+    if ( i > 0 )
+      oss << ",";
+    oss << "{"
+        << "\"locator\":\"" << jsonEscapeValue( mod.locator ) << "\","
+        << "\"bankLocator\":\"" << jsonEscapeValue( mod.bankLocator ) << "\","
+        << "\"type\":\"" << jsonEscapeValue( mod.type ) << "\","
+        << "\"manufacturer\":\"" << jsonEscapeValue( mod.manufacturer ) << "\","
+        << "\"partNumber\":\"" << jsonEscapeValue( mod.partNumber ) << "\","
+        << "\"serialNumber\":\"" << jsonEscapeValue( mod.serialNumber ) << "\","
+        << "\"sizeMiB\":" << mod.sizeMiB << ","
+        << "\"configuredSpeedMTs\":" << mod.configuredSpeedMTs << ","
+        << "\"maxSpeedMTs\":" << mod.maxSpeedMTs << ","
+        << "\"configuredVoltageMv\":" << mod.configuredVoltageMv
+        << "}";
+  }
+  oss << "]"
       << "}";
   return oss.str();
 }
@@ -569,6 +636,12 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
 
   syslog( LOG_INFO, "[SystemInfo] Laptop: %s (manufacturer: %s)",
           info.laptopModel.c_str(), info.manufacturerName.c_str() );
+
+  // DRAM: static module inventory from SMBIOS + /proc/meminfo capacity fallback.
+  info.ramTotalMiB = detectMemoryTotalMiB();
+  info.ramModules = detectMemoryModulesFromSmbios();
+  syslog( LOG_INFO, "[SystemInfo] RAM: total=%d MiB modules=%zu",
+          info.ramTotalMiB, info.ramModules.size() );
 
   return info;
 }

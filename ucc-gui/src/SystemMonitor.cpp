@@ -101,6 +101,20 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get DRAM stick temperature(s) as structured per-slot data.
+  {
+    QString dramTempsJson = "[]";
+
+    if ( auto temps = m_client->getDramTemperaturesJSON(); temps && !temps->empty() )
+      dramTempsJson = QString::fromStdString( *temps );
+
+    if ( m_dramTemperaturesJSON != dramTempsJson )
+    {
+      m_dramTemperaturesJSON = dramTempsJson;
+      emit dramTemperaturesChanged();
+    }
+  }
+
   // Get GPU Temperature
   {
     QString gpuTemp = "--";
@@ -504,6 +518,7 @@ void SystemMonitor::setMonitoringActive( bool active )
       m_cpuTemp = "";
       m_cpuFrequency = "";
       m_cpuPower = "";
+      m_dramTemperaturesJSON = "[]";
       m_gpuTemp = "";
       m_gpuFrequency = "";
       m_gpuPower = "";

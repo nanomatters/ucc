@@ -962,6 +962,35 @@ std::optional< std::string > readJsonString( QDBusInterface *iface, const QStrin
 
   return obj[ key ].toString().toStdString();
 }
+
+std::optional< std::string > readJsonArrayCompact( QDBusInterface *iface, const QString &method, const QString &key )
+{
+  if ( !iface )
+  {
+    return std::nullopt;
+  }
+
+  QDBusMessage reply = iface->call( method );
+  if ( reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty() )
+  {
+    return std::nullopt;
+  }
+
+  const QString json = reply.arguments().at( 0 ).toString();
+  QJsonDocument doc = QJsonDocument::fromJson( json.toUtf8() );
+  if ( doc.isNull() || !doc.isObject() )
+  {
+    return std::nullopt;
+  }
+
+  const QJsonObject obj = doc.object();
+  if ( !obj.contains( key ) || !obj[ key ].isArray() )
+  {
+    return std::nullopt;
+  }
+
+  return QJsonDocument( obj[ key ].toArray() ).toJson( QJsonDocument::Compact ).toStdString();
+}
 } // namespace
 
 // System Monitoring implementations
@@ -1043,6 +1072,11 @@ std::optional< int > UccdClient::getBatteryTemperature()
 std::optional< int > UccdClient::getSsdTemperature()
 {
   return readJsonInt( m_interface.get(), "GetCpuPowerValuesJSON", "ssdTemp" );
+}
+
+std::optional< std::string > UccdClient::getDramTemperaturesJSON()
+{
+  return readJsonArrayCompact( m_interface.get(), "GetCpuPowerValuesJSON", "dramTemps" );
 }
 
 std::optional< double > UccdClient::getDGpuPowerAllocation()

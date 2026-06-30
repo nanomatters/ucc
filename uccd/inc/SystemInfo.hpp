@@ -18,6 +18,24 @@
 #include "profiles/DefaultProfiles.hpp"
 #include <string>
 #include <optional>
+#include <vector>
+
+/**
+ * @brief A single DRAM module decoded from SMBIOS Type 17.
+ */
+struct MemoryModuleInfo
+{
+  std::string locator;             // e.g. "DIMM_A1"
+  std::string bankLocator;         // e.g. "BANK 0"
+  std::string type;                // e.g. "DDR5"
+  std::string manufacturer;        // e.g. "Kingston" (if provided)
+  std::string partNumber;          // e.g. "KF560C36-16" (if provided)
+  std::string serialNumber;        // SMBIOS serial (if provided)
+  int sizeMiB = 0;                 // module capacity
+  int configuredSpeedMTs = 0;      // configured speed in MT/s
+  int maxSpeedMTs = 0;             // max/rated speed in MT/s
+  int configuredVoltageMv = 0;     // configured voltage in millivolts
+};
 
 /**
  * @brief Laptop manufacturer / brand
@@ -55,6 +73,13 @@ struct SystemInfo
   std::string boardVendor;        // raw DMI board_vendor
   std::string sysVendor;          // raw DMI sys_vendor
   std::string ecFirmwareVersion;  // uniwill EC firmware version, when exposed by the driver
+
+  // DRAM capacity fallback from /proc/meminfo. This is static hardware-ish
+  // information for the dashboard, not live memory pressure telemetry.
+  int ramTotalMiB = 0;
+
+  // DRAM module inventory (static SMBIOS Type 17 data)
+  std::vector< MemoryModuleInfo > ramModules;
 
   // Internal device ID (if matched)
   std::optional< UniwillDeviceID > deviceId;

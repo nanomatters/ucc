@@ -182,6 +182,7 @@ void MainWindow::setupUI()
 
   // Fetch system hardware info from daemon and pass to DashboardTab
   QString laptopModel, cpuModel, dGpuModel, iGpuModel;
+  QString ramSummaryText, ramModulesText;
   if ( auto sysInfoJson = m_UccdClient->getSystemInfoJSON() )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfoJson ) );
@@ -192,12 +193,52 @@ void MainWindow::setupUI()
       cpuModel    = obj.value( "cpuModel" ).toString();
       dGpuModel   = obj.value( "dGpuModel" ).toString();
       iGpuModel   = obj.value( "iGpuModel" ).toString();
+
+      const int ramTotalMiB = obj.value( "ramTotalMiB" ).toInt();
+      const QJsonArray modules = obj.value( "ramModules" ).toArray();
+      QStringList moduleLines;
+      int installedMiB = 0;
+      for ( const QJsonValue &mv : modules )
+      {
+        const QJsonObject m = mv.toObject();
+        const int sizeMiB   = m.value( "sizeMiB" ).toInt();
+        const int speed     = m.value( "configuredSpeedMTs" ).toInt();
+        const int voltageMv = m.value( "configuredVoltageMv" ).toInt();
+        const QString type  = m.value( "type" ).toString();
+        const QString locator = m.value( "locator" ).toString();
+        if ( sizeMiB <= 0 )
+          continue;
+
+        installedMiB += sizeMiB;
+
+        QString line;
+        if ( !locator.isEmpty() )
+          line += locator + QStringLiteral( ": " );
+        line += QString( "%1 GiB" ).arg( QString::number( sizeMiB / 1024.0, 'f', 1 ) );
+        if ( !type.isEmpty() ) line += QString( " %1" ).arg( type );
+        if ( speed > 0 )       line += QString( " @ %1 MT/s" ).arg( speed );
+        if ( voltageMv > 0 )   line += QString( " · %1 V" ).arg( QString::number( voltageMv / 1000.0, 'f', 3 ) );
+        moduleLines << line;
+      }
+      ramModulesText = moduleLines.join( QStringLiteral( " | " ) );
+
+      if ( installedMiB > 0 )
+      {
+        ramSummaryText = QString( "Installed %1 GiB" )
+                           .arg( QString::number( installedMiB / 1024.0, 'f', 1 ) );
+      }
+      else if ( ramTotalMiB > 0 )
+      {
+        ramSummaryText = QString( "Usable %1 GiB" )
+                           .arg( QString::number( ramTotalMiB / 1024.0, 'f', 1 ) );
+      }
     }
   }
 
   // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
   m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(), m_waterCoolerSupported,
-                                     laptopModel, cpuModel, dGpuModel, iGpuModel, this );
+                                     laptopModel, cpuModel, dGpuModel, iGpuModel,
+                                     ramSummaryText, ramModulesText, this );
   m_tabs->addTab( m_dashboardTab, "Dashboard" );
   setupProfilesPage();
 

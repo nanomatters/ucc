@@ -44,6 +44,8 @@ namespace ucc
                           const QString &cpuModel = {},
                           const QString &dGpuModel = {},
                           const QString &iGpuModel = {},
+                          const QString &ramSummary = {},
+                          const QString &ramModules = {},
                           QWidget *parent = nullptr );
     ~DashboardTab() override = default;
 
@@ -62,6 +64,7 @@ namespace ucc
     void onCpuTempChanged();
     void onCpuFrequencyChanged();
     void onCpuPowerChanged();
+    void onDramTemperaturesChanged();
     void onGpuTempChanged();
     void onGpuFrequencyChanged();
     void onGpuPowerChanged();
@@ -105,6 +108,8 @@ namespace ucc
     QLabel *m_fanSpeedLabel = nullptr;
     QLabel *m_gpuFanSpeedLabel = nullptr;
     QLabel *m_cpuPowerLabel = nullptr;
+    QLabel *m_ramSummaryLabel = nullptr;
+    QLabel *m_ramModulesLabel = nullptr;
     QLabel *m_gpuPowerLabel = nullptr;
     QLabel *m_iGpuTempLabel = nullptr;
     QLabel *m_iGpuFanSpeedLabel = nullptr;
@@ -117,6 +122,8 @@ namespace ucc
     QLabel *m_gpuClockOffsetLabel = nullptr;
     QWidget *m_dGpuExtraRow  = nullptr;
     QFrame  *m_dGpuExtraHSep = nullptr;
+    QWidget *m_dGpuBottomCaps = nullptr;
+    // Water cooler widgets
     QLabel *m_waterCoolerFanSpeedLabel = nullptr;
     QLabel *m_waterCoolerPumpLabel = nullptr;
     QGridLayout *m_waterCoolerGrid = nullptr;
@@ -130,6 +137,8 @@ namespace ucc
     QString m_cpuModel;
     QString m_dGpuModel;
     QString m_iGpuModel;
+    QString m_ramSummary;
+    QString m_ramModules;
 
     // GPU section header label (updated when toggling dGPU / iGPU)
     QLabel *m_gpuHeaderLabel = nullptr;

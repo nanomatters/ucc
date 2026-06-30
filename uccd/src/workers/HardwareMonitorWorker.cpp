@@ -798,6 +798,24 @@ void HardwareMonitorWorker::updateCpuPower()
     appendJsonOptional( jsonStream, "batteryTemp", telemetry.batteryTemperatureCelsius );
     appendJsonOptional( jsonStream, "ssdTemp", telemetry.ssdTemperatureCelsius );
     appendJsonOptional( jsonStream, "adapterCurrent", telemetry.adapterCurrentAmps );
+
+    // On-DIMM temperatures from the standard DDR SPD thermal sensors.
+    const auto dramTemps = ucc::uniwill::readDramTemperatures();
+    if ( not dramTemps.empty() )
+    {
+      std::ostringstream dramStructured;
+      dramStructured << "[";
+      for ( size_t i = 0; i < dramTemps.size(); ++i )
+      {
+        if ( i > 0 )
+          dramStructured << ",";
+        dramStructured << "{\"slot\":" << dramTemps[ i ].slot
+                       << ",\"temp\":" << dramTemps[ i ].temperatureCelsius
+                       << "}";
+      }
+      dramStructured << "]";
+      jsonStream << ",\"dramTemps\":" << dramStructured.str();
+    }
   }
   else
   {
