@@ -37,6 +37,7 @@ class SystemMonitor : public QObject
   Q_PROPERTY( QString cpuTemp READ cpuTemp NOTIFY cpuTempChanged )
   Q_PROPERTY( QString cpuFrequency READ cpuFrequency NOTIFY cpuFrequencyChanged )
   Q_PROPERTY( QString cpuPower READ cpuPower NOTIFY cpuPowerChanged )
+  Q_PROPERTY( QString ramUsageJSON READ ramUsageJSON NOTIFY ramUsageChanged )
   Q_PROPERTY( QString dramTemperaturesJSON READ dramTemperaturesJSON NOTIFY dramTemperaturesChanged )
   Q_PROPERTY( QString gpuTemp READ gpuTemp NOTIFY gpuTempChanged )
   Q_PROPERTY( QString gpuFrequency READ gpuFrequency NOTIFY gpuFrequencyChanged )
@@ -77,6 +78,7 @@ public:
   QString cpuTemp() const { return m_cpuTemp; }
   QString cpuFrequency() const { return m_cpuFrequency; }
   QString cpuPower() const { return m_cpuPower; }
+  QString ramUsageJSON() const { return m_ramUsageJSON; }
   QString dramTemperaturesJSON() const { return m_dramTemperaturesJSON; }
   QString gpuTemp() const { return m_gpuTemp; }
   QString gpuFrequency() const { return m_gpuFrequency; }
@@ -128,6 +130,7 @@ signals:
   void cpuTempChanged();
   void cpuFrequencyChanged();
   void cpuPowerChanged();
+  void ramUsageChanged();
   void dramTemperaturesChanged();
   void gpuTempChanged();
   void gpuFrequencyChanged();
@@ -173,6 +176,7 @@ private:
   QString m_cpuTemp = "0°C";
   QString m_cpuFrequency = "0 MHz";
   QString m_cpuPower = "0 W";
+  QString m_ramUsageJSON = "{}";
   QString m_dramTemperaturesJSON = "[]";
   QString m_gpuTemp = "0°C";
   QString m_gpuFrequency = "0 MHz";

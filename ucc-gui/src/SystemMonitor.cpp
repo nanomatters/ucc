@@ -101,6 +101,20 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get live RAM usage from daemon telemetry.
+  {
+    QString ramUsageJson = "{}";
+
+    if ( auto usage = m_client->getRamUsageJSON(); usage && !usage->empty() )
+      ramUsageJson = QString::fromStdString( *usage );
+
+    if ( m_ramUsageJSON != ramUsageJson )
+    {
+      m_ramUsageJSON = ramUsageJson;
+      emit ramUsageChanged();
+    }
+  }
+
   // Get DRAM stick temperature(s) as structured per-slot data.
   {
     QString dramTempsJson = "[]";
@@ -518,6 +532,7 @@ void SystemMonitor::setMonitoringActive( bool active )
       m_cpuTemp = "";
       m_cpuFrequency = "";
       m_cpuPower = "";
+      m_ramUsageJSON = "{}";
       m_dramTemperaturesJSON = "[]";
       m_gpuTemp = "";
       m_gpuFrequency = "";

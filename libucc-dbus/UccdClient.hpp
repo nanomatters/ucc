@@ -180,6 +180,7 @@ public:
   std::optional< double > getAdapterCurrent();
   std::optional< int > getBatteryTemperature();
   std::optional< int > getSsdTemperature();
+  std::optional< std::string > getRamUsageJSON();
   std::optional< std::string > getDramTemperaturesJSON();
   std::optional< double > getDGpuPowerAllocation();
   std::optional< double > getDGpuThermalBudget();

@@ -548,6 +548,8 @@ void DashboardTab::connectSignals()
            this, &DashboardTab::onCpuFrequencyChanged );
   connect( m_systemMonitor, &SystemMonitor::cpuPowerChanged,
            this, &DashboardTab::onCpuPowerChanged );
+  connect( m_systemMonitor, &SystemMonitor::ramUsageChanged,
+           this, &DashboardTab::onRamUsageChanged );
   connect( m_systemMonitor, &SystemMonitor::dramTemperaturesChanged,
            this, &DashboardTab::onDramTemperaturesChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuTempChanged,
@@ -722,6 +724,31 @@ void DashboardTab::onCpuPowerChanged()
     return;
   }
   m_cpuPowerLabel->setText( "--" );
+}
+
+void DashboardTab::onRamUsageChanged()
+{
+  if ( !m_ramSummaryLabel )
+    return;
+
+  const QJsonDocument doc = QJsonDocument::fromJson( m_systemMonitor->ramUsageJSON().toUtf8() );
+  if ( !doc.isObject() )
+    return;
+
+  const QJsonObject obj = doc.object();
+  const int totalMiB = obj.value( QStringLiteral( "totalMiB" ) ).toInt();
+  const int usedMiB = obj.value( QStringLiteral( "usedMiB" ) ).toInt();
+  const int availableMiB = obj.value( QStringLiteral( "availableMiB" ) ).toInt();
+  if ( totalMiB <= 0 )
+    return;
+
+  const auto gib = []( const int mib ) {
+    return QString::number( mib / 1024.0, 'f', 1 );
+  };
+
+  m_ramSummaryLabel->setText(
+    QStringLiteral( "Total %1 GiB | Used %2 GiB | Available %3 GiB" )
+      .arg( gib( totalMiB ), gib( usedMiB ), gib( availableMiB ) ) );
 }
 
 void DashboardTab::onDramTemperaturesChanged()

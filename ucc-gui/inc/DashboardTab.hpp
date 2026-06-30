@@ -64,6 +64,7 @@ namespace ucc
     void onCpuTempChanged();
     void onCpuFrequencyChanged();
     void onCpuPowerChanged();
+    void onRamUsageChanged();
     void onDramTemperaturesChanged();
     void onGpuTempChanged();
     void onGpuFrequencyChanged();

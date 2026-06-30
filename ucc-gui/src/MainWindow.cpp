@@ -205,16 +205,12 @@ void MainWindow::setupUI()
         const int speed     = m.value( "configuredSpeedMTs" ).toInt();
         const int voltageMv = m.value( "configuredVoltageMv" ).toInt();
         const QString type  = m.value( "type" ).toString();
-        const QString locator = m.value( "locator" ).toString();
         if ( sizeMiB <= 0 )
           continue;
 
         installedMiB += sizeMiB;
 
-        QString line;
-        if ( !locator.isEmpty() )
-          line += locator + QStringLiteral( ": " );
-        line += QString( "%1 GiB" ).arg( QString::number( sizeMiB / 1024.0, 'f', 1 ) );
+        QString line = QString( "%1 GiB" ).arg( QString::number( sizeMiB / 1024.0, 'f', 1 ) );
         if ( !type.isEmpty() ) line += QString( " %1" ).arg( type );
         if ( speed > 0 )       line += QString( " @ %1 MT/s" ).arg( speed );
         if ( voltageMv > 0 )   line += QString( " · %1 V" ).arg( QString::number( voltageMv / 1000.0, 'f', 3 ) );
@@ -222,15 +218,15 @@ void MainWindow::setupUI()
       }
       ramModulesText = moduleLines.join( QStringLiteral( " | " ) );
 
-      if ( installedMiB > 0 )
+      if ( ramTotalMiB > 0 )
       {
-        ramSummaryText = QString( "Installed %1 GiB" )
-                           .arg( QString::number( installedMiB / 1024.0, 'f', 1 ) );
-      }
-      else if ( ramTotalMiB > 0 )
-      {
-        ramSummaryText = QString( "Usable %1 GiB" )
+        ramSummaryText = QString( "Total %1 GiB" )
                            .arg( QString::number( ramTotalMiB / 1024.0, 'f', 1 ) );
+      }
+      else if ( installedMiB > 0 )
+      {
+        ramSummaryText = QString( "Total %1 GiB" )
+                           .arg( QString::number( installedMiB / 1024.0, 'f', 1 ) );
       }
     }
   }
