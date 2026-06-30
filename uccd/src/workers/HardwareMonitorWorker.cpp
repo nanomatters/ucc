@@ -14,6 +14,7 @@
  */
 
 #include "workers/HardwareMonitorWorker.hpp"
+#include "MemoryInfo.hpp"
 #include "SysfsNode.hpp"
 #include "UniwillSysfs.hpp"
 #include "Utils.hpp"
@@ -63,68 +64,6 @@ void appendJsonOptional( std::ostringstream &stream, const char *key, const std:
     stream << ",\"" << key << "\":" << *value;
 }
 
-struct MemoryUsage
-{
-  int totalMiB = 0;
-  int usedMiB = 0;
-  int availableMiB = 0;
-
-  [[nodiscard]] bool isAvailable() const noexcept
-  {
-    return totalMiB > 0;
-  }
-};
-
-long long parseMeminfoValueKiB( const std::string &line )
-{
-  long long value = 0;
-  bool found = false;
-  for ( const char c : line )
-  {
-    if ( c >= '0' and c <= '9' )
-    {
-      value = value * 10 + ( c - '0' );
-      found = true;
-    }
-    else if ( found )
-    {
-      break;
-    }
-  }
-  return found ? value : 0;
-}
-
-MemoryUsage readMemoryUsage()
-{
-  std::ifstream meminfo( "/proc/meminfo" );
-  if ( not meminfo.is_open() )
-    return {};
-
-  long long totalKiB = 0;
-  long long availableKiB = 0;
-  std::string line;
-  while ( std::getline( meminfo, line ) )
-  {
-    if ( line.rfind( "MemTotal:", 0 ) == 0 )
-      totalKiB = parseMeminfoValueKiB( line );
-    else if ( line.rfind( "MemAvailable:", 0 ) == 0 )
-      availableKiB = parseMeminfoValueKiB( line );
-  }
-
-  if ( totalKiB <= 0 )
-    return {};
-
-  if ( availableKiB < 0 )
-    availableKiB = 0;
-  if ( availableKiB > totalKiB )
-    availableKiB = totalKiB;
-
-  MemoryUsage usage;
-  usage.totalMiB = static_cast< int >( totalKiB / 1024 );
-  usage.availableMiB = static_cast< int >( availableKiB / 1024 );
-  usage.usedMiB = usage.totalMiB - usage.availableMiB;
-  return usage;
-}
 }
 
 // ============================================================================
@@ -862,7 +801,7 @@ void HardwareMonitorWorker::updateCpuPower()
     appendJsonOptional( jsonStream, "ssdTemp", telemetry.ssdTemperatureCelsius );
     appendJsonOptional( jsonStream, "adapterCurrent", telemetry.adapterCurrentAmps );
 
-    const auto memoryUsage = readMemoryUsage();
+    const auto memoryUsage = ucc::readMemoryUsage();
     if ( memoryUsage.isAvailable() )
     {
       jsonStream << ",\"ramUsage\":{"

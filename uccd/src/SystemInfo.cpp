@@ -14,6 +14,7 @@
  */
 
 #include "SystemInfo.hpp"
+#include "MemoryInfo.hpp"
 #include "SysfsNode.hpp"
 #include "SmbiosMemoryDecoder.hpp"
 
@@ -514,51 +515,6 @@ std::string jsonEscapeValue( const std::string &s )
   return oss.str();
 }
 
-// Parse the first integer found in a string (e.g. a /proc/meminfo line).
-long long parseFirstInt( const std::string &line )
-{
-  long long value = 0;
-  bool found = false;
-  for ( const char c : line )
-  {
-    if ( c >= '0' and c <= '9' )
-    {
-      value = value * 10 + ( c - '0' );
-      found = true;
-    }
-    else if ( found )
-    {
-      break;
-    }
-  }
-  return found ? value : 0;
-}
-
-// DRAM total from /proc/meminfo (value in MiB). Used only as a fallback when
-// SMBIOS module inventory is unavailable.
-int detectMemoryTotalMiB()
-{
-  std::ifstream meminfo( "/proc/meminfo" );
-  if ( not meminfo.is_open() )
-    return 0;
-
-  long long totalKiB = 0;
-  std::string line;
-  while ( std::getline( meminfo, line ) )
-  {
-    if ( line.rfind( "MemTotal:", 0 ) == 0 )
-    {
-      totalKiB = parseFirstInt( line );
-      break;
-    }
-  }
-
-  if ( totalKiB <= 0 )
-    return 0;
-
-  return static_cast< int >( totalKiB / 1024 );
-}
-
 } // anonymous namespace
 
 //  Public API
@@ -638,7 +594,7 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
           info.laptopModel.c_str(), info.manufacturerName.c_str() );
 
   // DRAM: static module inventory from SMBIOS + /proc/meminfo capacity fallback.
-  info.ramTotalMiB = detectMemoryTotalMiB();
+  info.ramTotalMiB = ucc::readMemoryUsage().totalMiB;
   info.ramModules = detectMemoryModulesFromSmbios();
   syslog( LOG_INFO, "[SystemInfo] RAM: total=%d MiB modules=%zu",
           info.ramTotalMiB, info.ramModules.size() );
