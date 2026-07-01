@@ -1955,7 +1955,11 @@ UccDBusService::UccDBusService()
 
   // detect system hardware info (CPU, GPU, laptop model)
   m_systemInfo = detectSystemInfo( m_deviceId );
-  m_systemInfo.ecFirmwareVersion = ucc::uniwill::readDriverInfo().ecFirmwareVersion;
+  const auto driverInfo = ucc::uniwill::readDriverInfo();
+  m_systemInfo.ecFirmwareVersion = driverInfo.ecFirmwareVersion;
+  m_systemInfo.projectId = driverInfo.projectId;
+  m_systemInfo.moduleId = driverInfo.moduleId;
+  m_systemInfo.romId = driverInfo.romId;
   m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
 
   // Check device whitelist - unsupported machines get a functional D-Bus

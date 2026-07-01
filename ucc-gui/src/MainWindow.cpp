@@ -181,7 +181,7 @@ void MainWindow::setupUI()
   connect( m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged );
 
   // Fetch system hardware info from daemon and pass to DashboardTab
-  QString laptopModel, cpuModel, dGpuModel, iGpuModel;
+  QString laptopModel, driverInfoText, cpuModel, dGpuModel, iGpuModel;
   QString ramSummaryText, ramModulesText, storageDevicesJSON;
   if ( auto sysInfoJson = m_UccdClient->getSystemInfoJSON() )
   {
@@ -193,6 +193,40 @@ void MainWindow::setupUI()
       cpuModel    = obj.value( "cpuModel" ).toString();
       dGpuModel   = obj.value( "dGpuModel" ).toString();
       iGpuModel   = obj.value( "iGpuModel" ).toString();
+
+      QStringList driverInfoParts;
+      const QString biosVersion = obj.value( "biosVersion" ).toString();
+      const QString biosDate = obj.value( "biosDate" ).toString();
+      if ( !biosVersion.isEmpty() )
+      {
+        QString biosText = QStringLiteral( "BIOS %1" ).arg( biosVersion );
+        if ( !biosDate.isEmpty() )
+          biosText += QStringLiteral( " (%1)" ).arg( biosDate );
+        driverInfoParts << biosText;
+      }
+
+      const QString ecFirmwareVersion = obj.value( "ecFirmwareVersion" ).toString();
+      if ( !ecFirmwareVersion.isEmpty() )
+        driverInfoParts << QStringLiteral( "EC %1" ).arg( ecFirmwareVersion );
+
+      const QJsonValue projectIdValue = obj.value( "projectId" );
+      if ( projectIdValue.isDouble() )
+      {
+        const int projectId = projectIdValue.toInt();
+        const QString projectIdHex =
+          QString::number( projectId, 16 ).rightJustified( 2, QLatin1Char( '0' ) ).toUpper();
+        driverInfoParts << QStringLiteral( "Project ID 0x%1" ).arg( projectIdHex );
+      }
+
+      const QString moduleId = obj.value( "moduleId" ).toString();
+      if ( !moduleId.isEmpty() )
+        driverInfoParts << QStringLiteral( "Module ID %1" ).arg( moduleId );
+
+      const QString romId = obj.value( "romId" ).toString();
+      if ( !romId.isEmpty() )
+        driverInfoParts << QStringLiteral( "ROM ID %1" ).arg( romId );
+
+      driverInfoText = driverInfoParts.join( QStringLiteral( " · " ) );
 
       const int ramTotalMiB = obj.value( "ramTotalMiB" ).toInt();
       const QJsonArray modules = obj.value( "ramModules" ).toArray();
@@ -237,7 +271,7 @@ void MainWindow::setupUI()
 
   // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
   m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(), m_waterCoolerSupported,
-                                     laptopModel, cpuModel, dGpuModel, iGpuModel,
+                                     laptopModel, driverInfoText, cpuModel, dGpuModel, iGpuModel,
                                      ramSummaryText, ramModulesText, storageDevicesJSON, this );
   m_tabs->addTab( m_dashboardTab, "Dashboard" );
   setupProfilesPage();

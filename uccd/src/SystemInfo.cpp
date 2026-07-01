@@ -530,7 +530,17 @@ std::string SystemInfo::toJSON() const
       << "\"boardName\":\"" << jsonEscapeValue( boardName ) << "\","
       << "\"boardVendor\":\"" << jsonEscapeValue( boardVendor ) << "\","
       << "\"sysVendor\":\"" << jsonEscapeValue( sysVendor ) << "\","
+      << "\"biosVersion\":\"" << jsonEscapeValue( biosVersion ) << "\","
+      << "\"biosDate\":\"" << jsonEscapeValue( biosDate ) << "\","
       << "\"ecFirmwareVersion\":\"" << jsonEscapeValue( ecFirmwareVersion ) << "\","
+      << "\"projectId\":";
+  if ( projectId )
+    oss << *projectId;
+  else
+    oss << "null";
+  oss << ","
+      << "\"moduleId\":\"" << jsonEscapeValue( moduleId ) << "\","
+      << "\"romId\":\"" << jsonEscapeValue( romId ) << "\","
       << "\"ramTotalMiB\":" << ramTotalMiB << ","
       << "\"ramModules\":[";
   for ( size_t i = 0; i < ramModules.size(); ++i )
@@ -581,6 +591,8 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
   info.boardName   = readFile( dmiBase + "/board_name" );
   info.boardVendor = readFile( dmiBase + "/board_vendor" );
   info.sysVendor   = readFile( dmiBase + "/sys_vendor" );
+  info.biosVersion = readFile( dmiBase + "/bios_version" );
+  info.biosDate    = readFile( dmiBase + "/bios_date" );
 
   syslog( LOG_INFO, "[SystemInfo] DMI: sku='%s' board='%s' boardVendor='%s' sysVendor='%s'",
           info.productSKU.c_str(), info.boardName.c_str(),

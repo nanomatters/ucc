@@ -73,7 +73,12 @@ struct SystemInfo
   std::string boardName;          // raw DMI board_name
   std::string boardVendor;        // raw DMI board_vendor
   std::string sysVendor;          // raw DMI sys_vendor
+  std::string biosVersion;        // raw DMI bios_version
+  std::string biosDate;           // raw DMI bios_date
   std::string ecFirmwareVersion;  // uniwill EC firmware version, when exposed by the driver
+  std::optional< int32_t > projectId; // uniwill project_id, when exposed by the driver
+  std::string moduleId;           // uniwill module_id, when exposed by the driver
+  std::string romId;              // uniwill rom_id, when exposed by the driver
 
   // DRAM capacity fallback from /proc/meminfo. This is static hardware-ish
   // information for the dashboard, not live memory pressure telemetry.

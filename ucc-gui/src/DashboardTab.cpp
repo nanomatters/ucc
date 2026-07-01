@@ -117,7 +117,7 @@ namespace ucc
 {
 
 DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager, bool waterCoolerSupported,
-                            const QString &laptopModel, const QString &cpuModel,
+                            const QString &laptopModel, const QString &driverInfo, const QString &cpuModel,
                             const QString &dGpuModel, const QString &iGpuModel,
                             const QString &ramSummary, const QString &ramModules,
                             const QString &storageDevicesJSON,
@@ -127,6 +127,7 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   , m_profileManager( profileManager )
   , m_waterCoolerSupported( waterCoolerSupported )
   , m_laptopModel( laptopModel )
+  , m_driverInfo( driverInfo )
   , m_cpuModel( cpuModel )
   , m_dGpuModel( dGpuModel )
   , m_iGpuModel( iGpuModel )
@@ -172,7 +173,13 @@ void DashboardTab::setupUI()
   // Title — use laptop model from daemon if available
   // Use a grid so the title is centered over the full row width while
   // the checkbox floats to the right edge, both occupying the same cell.
+  QWidget *titleBlock = new QWidget();
+  QVBoxLayout *titleBlockLayout = new QVBoxLayout( titleBlock );
+  titleBlockLayout->setContentsMargins( 0, 0, 0, 0 );
+  titleBlockLayout->setSpacing( 6 );
+
   QGridLayout *titleLayout = new QGridLayout();
+  titleLayout->setContentsMargins( 0, 0, 0, 0 );
   const QString titleText = m_laptopModel.isEmpty() ? QStringLiteral( "System Monitor" ) : m_laptopModel;
   QLabel *titleLabel = new QLabel( titleText );
   titleLabel->setStyleSheet( QString("font-size: 22px; font-weight: bold;") );
@@ -200,7 +207,17 @@ void DashboardTab::setupUI()
   // Both widgets share the same cell — title centered, checkbox right-aligned
   titleLayout->addWidget( titleLabel,                  0, 0, Qt::AlignCenter );
   titleLayout->addWidget( m_waterCoolerEnableCheckBox, 0, 0, Qt::AlignRight | Qt::AlignVCenter );
-  layout->addLayout( titleLayout );
+  titleBlockLayout->addLayout( titleLayout );
+
+  m_driverInfoLabel = new QLabel( m_driverInfo );
+  m_driverInfoLabel->setStyleSheet( QString( "font-size: 12px; font-weight: 600; color: %1;" ).arg( textHex ) );
+  m_driverInfoLabel->setAlignment( Qt::AlignCenter );
+  m_driverInfoLabel->setWordWrap( true );
+  m_driverInfoLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  m_driverInfoLabel->setVisible( !m_driverInfo.isEmpty() );
+  titleBlockLayout->addWidget( m_driverInfoLabel );
+
+  layout->addWidget( titleBlock );
 
   // Active Profile label (created but not shown; only used in status bar)
   m_activeProfileLabel = new QLabel( "Loading..." );

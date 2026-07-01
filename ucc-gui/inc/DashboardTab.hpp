@@ -41,6 +41,7 @@ namespace ucc
   public:
     explicit DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager, bool waterCoolerSupported,
                           const QString &laptopModel = {},
+                          const QString &driverInfo = {},
                           const QString &cpuModel = {},
                           const QString &dGpuModel = {},
                           const QString &iGpuModel = {},
@@ -109,6 +110,7 @@ namespace ucc
     // Dashboard widgets
     QLabel *m_activeProfileLabel = nullptr;
     QLabel *m_waterCoolerStatusLabel = nullptr;
+    QLabel *m_driverInfoLabel = nullptr;
     QLabel *m_cpuTempLabel = nullptr;
     QLabel *m_cpuFrequencyLabel = nullptr;
     QLabel *m_gpuTempLabel = nullptr;
@@ -146,6 +148,7 @@ namespace ucc
 
     // System hardware info strings
     QString m_laptopModel;
+    QString m_driverInfo;
     QString m_cpuModel;
     QString m_dGpuModel;
     QString m_iGpuModel;
