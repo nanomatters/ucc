@@ -6,6 +6,7 @@
 #include <QTest>
 
 #include "SysfsNode.hpp"
+#include "StorageInfo.hpp"
 #include "UniwillSysfs.hpp"
 #include "PowerSupplyController.hpp"
 
@@ -323,6 +324,60 @@ private slots:
     QCOMPARE( temps[ 0 ].temperatureCelsius, 54 );
     QCOMPARE( temps[ 1 ].slot, 1 );
     QCOMPARE( temps[ 1 ].temperatureCelsius, 53 );
+  }
+
+  void readsStorageInventoryAndTemperatures()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+
+    const fs::path nvme0 = root / "block/nvme0n1";
+    const fs::path nvme1 = root / "block/nvme1n1";
+    const fs::path ignored = root / "block/zram0";
+    writeFile( nvme0 / "size", "3907029168\n" );
+    writeFile( nvme0 / "removable", "0\n" );
+    writeFile( nvme0 / "queue/rotational", "0\n" );
+    writeFile( nvme1 / "size", "1953525168\n" );
+    writeFile( nvme1 / "removable", "0\n" );
+    writeFile( nvme1 / "queue/rotational", "0\n" );
+    writeFile( ignored / "size", "1048576\n" );
+    writeFile( ignored / "removable", "0\n" );
+    writeFile( ignored / "queue/rotational", "0\n" );
+
+    fs::create_directories( root / "devices/pci/nvme/nvme0/hwmon3" );
+    fs::create_directories( root / "devices/pci/nvme/nvme1/hwmon4" );
+    fs::create_directory_symlink( root / "devices/pci/nvme/nvme0", nvme0 / "device" );
+    fs::create_directory_symlink( root / "devices/pci/nvme/nvme1", nvme1 / "device" );
+    writeFile( nvme0 / "device/model", "  Samsung   SSD 990 PRO  \n" );
+    writeFile( nvme1 / "device/model", "WD_BLACK SN850X\n" );
+
+    const fs::path hwmon0 = root / "devices/pci/nvme/nvme0/hwmon3";
+    const fs::path hwmon1 = root / "devices/pci/nvme/nvme1/hwmon4";
+    writeFile( hwmon0 / "name", "nvme\n" );
+    writeFile( hwmon0 / "temp1_label", "Sensor 1\n" );
+    writeFile( hwmon0 / "temp1_input", "60000\n" );
+    writeFile( hwmon0 / "temp2_label", "Composite\n" );
+    writeFile( hwmon0 / "temp2_input", "38850\n" );
+    writeFile( hwmon1 / "name", "nvme\n" );
+    writeFile( hwmon1 / "temp1_input", "35850\n" );
+    fs::create_directories( root / "class/hwmon" );
+    fs::create_directory_symlink( hwmon0, root / "class/hwmon/hwmon3" );
+    fs::create_directory_symlink( hwmon1, root / "class/hwmon/hwmon4" );
+
+    const auto devices = detectStorageDevices( root.string() );
+    QCOMPARE( devices.size(), static_cast< size_t >( 2 ) );
+    QCOMPARE( devices[ 0 ].name, std::string( "nvme0n1" ) );
+    QCOMPARE( devices[ 0 ].model, std::string( "Samsung SSD 990 PRO" ) );
+    QCOMPARE( devices[ 1 ].name, std::string( "nvme1n1" ) );
+    QCOMPARE( devices[ 1 ].model, std::string( "WD_BLACK SN850X" ) );
+
+    const auto temps = readStorageTemperatures( root.string() );
+    QCOMPARE( temps.size(), static_cast< size_t >( 2 ) );
+    QCOMPARE( temps[ 0 ].name, std::string( "nvme0n1" ) );
+    QCOMPARE( temps[ 0 ].temperatureCelsius, 39 );
+    QCOMPARE( temps[ 1 ].name, std::string( "nvme1n1" ) );
+    QCOMPARE( temps[ 1 ].temperatureCelsius, 36 );
   }
 
   void writesFanCurveAndMode()

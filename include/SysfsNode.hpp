@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -61,12 +62,94 @@ public:
     , m_delimiter( delimiter )
   {}
 
+  explicit SysfsNode( const char *path, const std::string &delimiter = "" )
+    : m_path( path ? path : "" )
+    , m_delimiter( delimiter )
+  {}
+
+  explicit SysfsNode( const std::filesystem::path &path, const std::string &delimiter = "" )
+    : m_path( path.string() )
+    , m_delimiter( delimiter )
+  {}
+
   /**
    * @brief Check if the sysfs node exists and is accessible
    */
   [[nodiscard]] bool isAvailable() const noexcept
   {
     return std::filesystem::exists( m_path );
+  }
+
+  [[nodiscard]] static bool exists( const std::filesystem::path &path ) noexcept
+  {
+    std::error_code ec;
+    return std::filesystem::exists( path, ec ) && !ec;
+  }
+
+  [[nodiscard]] static std::optional< std::filesystem::path > canonicalPath(
+    const std::filesystem::path &path ) noexcept
+  {
+    std::error_code ec;
+    const std::filesystem::path canonical = std::filesystem::canonical( path, ec );
+    if ( ec )
+      return std::nullopt;
+    return canonical;
+  }
+
+  [[nodiscard]] static std::optional< std::filesystem::path > readSymlink(
+    const std::filesystem::path &path ) noexcept
+  {
+    std::error_code ec;
+    const std::filesystem::path target = std::filesystem::read_symlink( path, ec );
+    if ( ec )
+      return std::nullopt;
+    return target;
+  }
+
+  [[nodiscard]] static std::optional< std::vector< std::string > > readLines(
+    const std::filesystem::path &path ) noexcept
+  {
+    try
+    {
+      std::ifstream file( path );
+      if ( not file.is_open() )
+        return std::nullopt;
+
+      std::vector< std::string > lines;
+      std::string line;
+      while ( std::getline( file, line ) )
+      {
+        if ( not line.empty() and line.back() == '\r' )
+          line.pop_back();
+        lines.push_back( line );
+      }
+
+      return lines;
+    }
+    catch ( ... )
+    {
+      return std::nullopt;
+    }
+  }
+
+  [[nodiscard]] static std::vector< std::filesystem::path > directoryEntries(
+    const std::filesystem::path &path ) noexcept
+  {
+    std::vector< std::filesystem::path > entries;
+    std::error_code ec;
+    std::filesystem::directory_iterator it( path, ec );
+    if ( ec )
+      return entries;
+
+    const std::filesystem::directory_iterator end;
+    while ( it != end && !ec )
+    {
+      entries.push_back( it->path() );
+      it.increment( ec );
+    }
+
+    std::sort( entries.begin(), entries.end() );
+    return entries;
   }
 
   /**
@@ -224,6 +307,32 @@ private:
 
   [[nodiscard]] std::string formatWriteValue( const T &value ) const
     requires std::is_same_v< T, int64_t >
+  {
+    return std::to_string( value );
+  }
+
+  // Specialization for uint64_t
+  [[nodiscard]] std::optional< T > readImpl( std::ifstream &file ) const
+    requires std::is_same_v< T, uint64_t >
+  {
+    uint64_t value;
+    file >> value;
+
+    if ( file.fail() )
+      return std::nullopt;
+
+    return value;
+  }
+
+  bool writeImpl( std::ofstream &file, const T &value ) const
+    requires std::is_same_v< T, uint64_t >
+  {
+    file << value;
+    return not file.fail();
+  }
+
+  [[nodiscard]] std::string formatWriteValue( const T &value ) const
+    requires std::is_same_v< T, uint64_t >
   {
     return std::to_string( value );
   }

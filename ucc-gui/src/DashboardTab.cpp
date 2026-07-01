@@ -99,6 +99,17 @@ QString formatFanSpeed( const QString &fanSpeed )
   return display;
 }
 
+QString formatStorageSize( const double bytes )
+{
+  if ( bytes >= 1'000'000'000'000.0 )
+    return QStringLiteral( "%1 TB" ).arg( QString::number( bytes / 1'000'000'000'000.0, 'f', 1 ) );
+  if ( bytes >= 1'000'000'000.0 )
+    return QStringLiteral( "%1 GB" ).arg( QString::number( bytes / 1'000'000'000.0, 'f', 0 ) );
+  if ( bytes >= 1'000'000.0 )
+    return QStringLiteral( "%1 MB" ).arg( QString::number( bytes / 1'000'000.0, 'f', 0 ) );
+  return {};
+}
+
 }
 
 
@@ -109,6 +120,7 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
                             const QString &laptopModel, const QString &cpuModel,
                             const QString &dGpuModel, const QString &iGpuModel,
                             const QString &ramSummary, const QString &ramModules,
+                            const QString &storageDevicesJSON,
                             QWidget *parent )
   : QWidget( parent )
   , m_systemMonitor( systemMonitor )
@@ -120,6 +132,7 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   , m_iGpuModel( iGpuModel )
   , m_ramSummary( ramSummary )
   , m_ramModules( ramModules )
+  , m_storageDevicesJSON( storageDevicesJSON )
 {
   setupUI();
   connectSignals();
@@ -367,20 +380,33 @@ void DashboardTab::setupUI()
     m_ramSummaryLabel->setWordWrap( true );
     ramInfoLayout->addWidget( m_ramSummaryLabel );
 
-    m_ramModulesLabel = new QLabel( m_ramModules );
+    m_ramModulesLabel = new QLabel();
     m_ramModulesLabel->setStyleSheet( QString( "font-size: 13px; color: %1;" ).arg( textHex ) );
     m_ramModulesLabel->setAlignment( Qt::AlignCenter );
     m_ramModulesLabel->setWordWrap( true );
     m_ramModulesLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
-    m_ramModulesLabel->setVisible( !m_ramModules.isEmpty() );
     ramInfoLayout->addWidget( m_ramModulesLabel );
+    updateMemoryAndStorageInfo();
 
     cpuContentLayout->addWidget( ramInfo );
+
+    QFrame *powerSep = new QFrame();
+    powerSep->setFrameShape( QFrame::HLine );
+    powerSep->setFixedHeight( 2 );
+    powerSep->setStyleSheet( QString("QFrame { border: none; border-top: 2px dashed %1; background: transparent; margin: 0px 8px; }").arg(m_ringColorHex) );
+    cpuContentLayout->addWidget( powerSep );
+
+    cpuContentLayout->addWidget( makeCardRow({
+      makeCard( m_systemPowerLabel ),
+      makeCard( m_adapterCurrentLabel ),
+      makeCard( m_batteryTempLabel ),
+      makeCard( m_powerSourceLabel )
+    }) );
 
     layout->addWidget( makePanelWithCaps(
       cpuContent,
       makeCaptionRow({ makeCaptionBadge("Temperature (°C)"), makeCaptionBadge("Fan (%)"), makeCaptionBadge("Frequency (GHz)"), makeCaptionBadge("Power (W)") }),
-      makeCaptionRow({ makeCaptionBadge("Memory") })
+      makeCaptionRow({ makeCaptionBadge("System Power (W)"), makeCaptionBadge("Adapter Current (A)"), makeCaptionBadge("Battery Temp (°C)"), makeCaptionBadge("AC/DC") })
     ) );
   }
 
@@ -552,6 +578,16 @@ void DashboardTab::connectSignals()
            this, &DashboardTab::onRamUsageChanged );
   connect( m_systemMonitor, &SystemMonitor::dramTemperaturesChanged,
            this, &DashboardTab::onDramTemperaturesChanged );
+  connect( m_systemMonitor, &SystemMonitor::ssdTemperaturesChanged,
+           this, &DashboardTab::onSsdTemperaturesChanged );
+  connect( m_systemMonitor, &SystemMonitor::systemPowerChanged,
+           this, &DashboardTab::onSystemPowerChanged );
+  connect( m_systemMonitor, &SystemMonitor::adapterCurrentChanged,
+           this, &DashboardTab::onAdapterCurrentChanged );
+  connect( m_systemMonitor, &SystemMonitor::batteryTempChanged,
+           this, &DashboardTab::onBatteryTempChanged );
+  connect( m_systemMonitor, &SystemMonitor::powerSourceChanged,
+           this, &DashboardTab::onPowerSourceChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuTempChanged,
            this, &DashboardTab::onGpuTempChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuFrequencyChanged,
@@ -753,6 +789,16 @@ void DashboardTab::onRamUsageChanged()
 
 void DashboardTab::onDramTemperaturesChanged()
 {
+  updateMemoryAndStorageInfo();
+}
+
+void DashboardTab::onSsdTemperaturesChanged()
+{
+  updateMemoryAndStorageInfo();
+}
+
+void DashboardTab::updateMemoryAndStorageInfo()
+{
   if ( !m_ramModulesLabel )
     return;
 
@@ -791,11 +837,124 @@ void DashboardTab::onDramTemperaturesChanged()
     }
   }
 
-  if ( !text.isEmpty() )
+  QMap< QString, int > ssdTempsByName;
+  const QJsonDocument ssdTempsDoc = QJsonDocument::fromJson( m_systemMonitor->ssdTemperaturesJSON().toUtf8() );
+  if ( ssdTempsDoc.isArray() )
   {
-    m_ramModulesLabel->setText( text );
-    m_ramModulesLabel->setVisible( true );
+    const QJsonArray array = ssdTempsDoc.array();
+    for ( const QJsonValue &value : array )
+    {
+      const QJsonObject obj = value.toObject();
+      const QString name = obj.value( QStringLiteral( "name" ) ).toString();
+      const int temp = obj.value( QStringLiteral( "temp" ) ).toInt( -1 );
+      if ( !name.isEmpty() && temp >= 0 )
+        ssdTempsByName.insert( name, temp );
+    }
   }
+
+  QStringList storageLines;
+  const QJsonDocument storageDoc = QJsonDocument::fromJson( m_storageDevicesJSON.toUtf8() );
+  if ( storageDoc.isArray() )
+  {
+    const QJsonArray array = storageDoc.array();
+    for ( const QJsonValue &value : array )
+    {
+      const QJsonObject storage = value.toObject();
+      const QString name = storage.value( QStringLiteral( "name" ) ).toString().simplified();
+      QString model = storage.value( QStringLiteral( "model" ) ).toString().simplified();
+      const QString vendor = storage.value( QStringLiteral( "vendor" ) ).toString().simplified();
+      const double sizeBytes = storage.value( QStringLiteral( "sizeBytes" ) ).toDouble();
+
+      if ( model.isEmpty() )
+        model = name;
+      if ( !vendor.isEmpty() && !model.contains( vendor, Qt::CaseInsensitive ) )
+        model.prepend( vendor + QStringLiteral( " " ) );
+
+      QString line = model;
+      if ( const QString size = formatStorageSize( sizeBytes ); !size.isEmpty() )
+        line += QStringLiteral( " " ) + size;
+
+      if ( const int temp = ssdTempsByName.value( name, -1 ); temp >= 0 )
+        line += QStringLiteral( " · %1 °C" ).arg( temp );
+
+      if ( !line.isEmpty() )
+        storageLines << line;
+    }
+  }
+
+  if ( storageLines.isEmpty() && !ssdTempsByName.isEmpty() )
+  {
+    for ( auto it = ssdTempsByName.cbegin(); it != ssdTempsByName.cend(); ++it )
+      storageLines << QStringLiteral( "%1 · %2 °C" ).arg( it.key() ).arg( it.value() );
+  }
+
+  const QString storageText = storageLines.join( QStringLiteral( " | " ) );
+
+  QStringList detailLines;
+  if ( !text.isEmpty() )
+    detailLines << text;
+  if ( !storageText.isEmpty() )
+    detailLines << storageText;
+
+  if ( !detailLines.isEmpty() )
+  {
+    m_ramModulesLabel->setText( detailLines.join( QStringLiteral( "\n" ) ) );
+    m_ramModulesLabel->setVisible( true );
+    return;
+  }
+
+  m_ramModulesLabel->clear();
+  m_ramModulesLabel->setVisible( false );
+}
+
+void DashboardTab::onSystemPowerChanged()
+{
+  QString power = m_systemMonitor->systemPower();
+  QString trimmed = power.replace( " W", "" ).trimmed();
+  bool ok = false;
+  double watts = trimmed.toDouble( &ok );
+
+  if ( ok && watts > 0.0 )
+  {
+    m_systemPowerLabel->setText( QString::number( watts, 'f', 1 ) );
+    return;
+  }
+  m_systemPowerLabel->setText( "--" );
+}
+
+void DashboardTab::onAdapterCurrentChanged()
+{
+  QString current = m_systemMonitor->adapterCurrent();
+  QString trimmed = current.replace( " A", "" ).trimmed();
+  bool ok = false;
+  double amps = trimmed.toDouble( &ok );
+
+  if ( ok && amps > 0.0 )
+  {
+    m_adapterCurrentLabel->setText( QString::number( amps, 'f', 1 ) );
+    return;
+  }
+  m_adapterCurrentLabel->setText( "--" );
+}
+
+void DashboardTab::onBatteryTempChanged()
+{
+  QString temp = m_systemMonitor->batteryTemp().replace( "°C", "" ).trimmed();
+  bool ok = false;
+  int tempValue = temp.toInt( &ok );
+
+  if ( ok && tempValue > 0 )
+  {
+    m_batteryTempLabel->setText( temp );
+    return;
+  }
+  m_batteryTempLabel->setText( "--" );
+}
+
+void DashboardTab::onPowerSourceChanged()
+{
+  const QString powerSource = m_systemMonitor->powerSource().trimmed();
+  m_powerSourceLabel->setText( powerSource.isEmpty() ? QStringLiteral( "--" ) : powerSource );
 }
 
 void DashboardTab::onGpuTempChanged()

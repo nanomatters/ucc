@@ -39,6 +39,11 @@ class SystemMonitor : public QObject
   Q_PROPERTY( QString cpuPower READ cpuPower NOTIFY cpuPowerChanged )
   Q_PROPERTY( QString ramUsageJSON READ ramUsageJSON NOTIFY ramUsageChanged )
   Q_PROPERTY( QString dramTemperaturesJSON READ dramTemperaturesJSON NOTIFY dramTemperaturesChanged )
+  Q_PROPERTY( QString ssdTemperaturesJSON READ ssdTemperaturesJSON NOTIFY ssdTemperaturesChanged )
+  Q_PROPERTY( QString systemPower READ systemPower NOTIFY systemPowerChanged )
+  Q_PROPERTY( QString adapterCurrent READ adapterCurrent NOTIFY adapterCurrentChanged )
+  Q_PROPERTY( QString batteryTemp READ batteryTemp NOTIFY batteryTempChanged )
+  Q_PROPERTY( QString powerSource READ powerSource NOTIFY powerSourceChanged )
   Q_PROPERTY( QString gpuTemp READ gpuTemp NOTIFY gpuTempChanged )
   Q_PROPERTY( QString gpuFrequency READ gpuFrequency NOTIFY gpuFrequencyChanged )
   Q_PROPERTY( QString gpuPower READ gpuPower NOTIFY gpuPowerChanged )
@@ -80,6 +85,11 @@ public:
   QString cpuPower() const { return m_cpuPower; }
   QString ramUsageJSON() const { return m_ramUsageJSON; }
   QString dramTemperaturesJSON() const { return m_dramTemperaturesJSON; }
+  QString ssdTemperaturesJSON() const { return m_ssdTemperaturesJSON; }
+  QString systemPower() const { return m_systemPower; }
+  QString adapterCurrent() const { return m_adapterCurrent; }
+  QString batteryTemp() const { return m_batteryTemp; }
+  QString powerSource() const { return m_powerSource; }
   QString gpuTemp() const { return m_gpuTemp; }
   QString gpuFrequency() const { return m_gpuFrequency; }
   QString gpuPower() const { return m_gpuPower; }
@@ -132,6 +142,11 @@ signals:
   void cpuPowerChanged();
   void ramUsageChanged();
   void dramTemperaturesChanged();
+  void ssdTemperaturesChanged();
+  void systemPowerChanged();
+  void adapterCurrentChanged();
+  void batteryTempChanged();
+  void powerSourceChanged();
   void gpuTempChanged();
   void gpuFrequencyChanged();
   void gpuPowerChanged();
@@ -178,6 +193,11 @@ private:
   QString m_cpuPower = "0 W";
   QString m_ramUsageJSON = "{}";
   QString m_dramTemperaturesJSON = "[]";
+  QString m_ssdTemperaturesJSON = "[]";
+  QString m_systemPower = "--";
+  QString m_adapterCurrent = "--";
+  QString m_batteryTemp = "--";
+  QString m_powerSource = "--";
   QString m_gpuTemp = "0°C";
   QString m_gpuFrequency = "0 MHz";
   QString m_gpuPower = "0 W";

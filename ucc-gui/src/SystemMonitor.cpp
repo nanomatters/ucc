@@ -129,6 +129,95 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get per-SSD temperatures from daemon telemetry.
+  {
+    QString ssdTempsJson = "[]";
+
+    if ( auto temps = m_client->getSsdTemperaturesJSON(); temps && !temps->empty() )
+      ssdTempsJson = QString::fromStdString( *temps );
+
+    if ( m_ssdTemperaturesJSON != ssdTempsJson )
+    {
+      m_ssdTemperaturesJSON = ssdTempsJson;
+      emit ssdTemperaturesChanged();
+    }
+  }
+
+  // Get chassis/system power from EC telemetry.
+  {
+    QString systemPower = "--";
+
+    if ( auto power = m_client->getSystemPower(); power && *power > 0.0 )
+      systemPower = QString::number( *power, 'f', 1 ) + " W";
+
+    if ( m_systemPower != systemPower )
+    {
+      m_systemPower = systemPower;
+      emit systemPowerChanged();
+    }
+  }
+
+  // Get AC adapter current from EC telemetry.
+  {
+    QString adapterCurrent = "--";
+
+    if ( auto current = m_client->getAdapterCurrent(); current && *current > 0.0 )
+      adapterCurrent = QString::number( *current, 'f', 1 ) + " A";
+
+    if ( m_adapterCurrent != adapterCurrent )
+    {
+      m_adapterCurrent = adapterCurrent;
+      emit adapterCurrentChanged();
+    }
+  }
+
+  // Get battery pack temperature from EC telemetry.
+  {
+    QString batteryTemp = "--";
+
+    if ( auto temp = m_client->getBatteryTemperature(); temp && *temp > 0 )
+      batteryTemp = QString::number( *temp ) + "°C";
+
+    if ( m_batteryTemp != batteryTemp )
+    {
+      m_batteryTemp = batteryTemp;
+      emit batteryTempChanged();
+    }
+  }
+
+  // Get AC/DC state. uccd reports power_ac, power_bat, or power_wc.
+  {
+    QString powerSource = "--";
+    bool acPower = m_isACPower;
+
+    if ( auto state = m_client->getPowerState() )
+    {
+      const QString stateString = QString::fromStdString( *state ).toLower();
+      if ( stateString == QStringLiteral( "power_bat" ) || stateString.contains( QStringLiteral( "bat" ) ) )
+      {
+        powerSource = QStringLiteral( "DC" );
+        acPower = false;
+      }
+      else if ( stateString == QStringLiteral( "power_ac" ) || stateString == QStringLiteral( "power_wc" ) )
+      {
+        powerSource = QStringLiteral( "AC" );
+        acPower = true;
+      }
+    }
+
+    if ( m_powerSource != powerSource )
+    {
+      m_powerSource = powerSource;
+      emit powerSourceChanged();
+    }
+
+    if ( m_isACPower != acPower )
+    {
+      m_isACPower = acPower;
+      emit isACPowerChanged();
+    }
+  }
+
   // Get GPU Temperature
   {
     QString gpuTemp = "--";
@@ -534,6 +623,11 @@ void SystemMonitor::setMonitoringActive( bool active )
       m_cpuPower = "";
       m_ramUsageJSON = "{}";
       m_dramTemperaturesJSON = "[]";
+      m_ssdTemperaturesJSON = "[]";
+      m_systemPower = "";
+      m_adapterCurrent = "";
+      m_batteryTemp = "";
+      m_powerSource = "";
       m_gpuTemp = "";
       m_gpuFrequency = "";
       m_gpuPower = "";

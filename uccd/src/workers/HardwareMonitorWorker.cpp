@@ -15,13 +15,14 @@
 
 #include "workers/HardwareMonitorWorker.hpp"
 #include "MemoryInfo.hpp"
+#include "StorageInfo.hpp"
 #include "SysfsNode.hpp"
 #include "UniwillSysfs.hpp"
 #include "Utils.hpp"
 #include <iostream>
-#include <fstream>
 #include <sstream>
 #include <regex>
+#include <string_view>
 #include <filesystem>
 #include <thread>
 #include <chrono>
@@ -62,6 +63,24 @@ void appendJsonOptional( std::ostringstream &stream, const char *key, const std:
 {
   if ( value )
     stream << ",\"" << key << "\":" << *value;
+}
+
+std::string jsonEscape( std::string_view value )
+{
+  std::ostringstream escaped;
+  for ( const char c : value )
+  {
+    switch ( c )
+    {
+      case '"':  escaped << "\\\""; break;
+      case '\\': escaped << "\\\\"; break;
+      case '\n': escaped << "\\n";  break;
+      case '\r': escaped << "\\r";  break;
+      case '\t': escaped << "\\t";  break;
+      default:   escaped << c;      break;
+    }
+  }
+  return escaped.str();
 }
 
 }
@@ -159,57 +178,23 @@ public:
 private:
   [[nodiscard]] bool isPropertyAvailable( const std::string &propertyName ) const noexcept
   {
-    try
-    {
-      std::string filePath = m_basePath + "/" + propertyName;
-      return std::filesystem::exists( filePath ) and std::filesystem::is_regular_file( filePath );
-    }
-    catch ( ... ) { return false; }
+    return SysfsNode< std::string >( m_basePath + "/" + propertyName ).isAvailable();
   }
 
   [[nodiscard]] std::string readStringProperty( const std::string &propertyName,
                                                const std::string &defaultValue ) const noexcept
   {
-    try
-    {
-      if ( not isPropertyAvailable( propertyName ) )
-        return defaultValue;
-
-      std::ifstream file( m_basePath + "/" + propertyName );
-      if ( not file.is_open() )
-        return defaultValue;
-
-      std::string value;
-      if ( std::getline( file, value ) )
-      {
-        while ( not value.empty() and ( value.back() == '\n' or value.back() == '\r' or
-                                         value.back() == ' ' or value.back() == '\t' ) )
-          value.pop_back();
-        return value;
-      }
-      return defaultValue;
-    }
-    catch ( ... ) { return defaultValue; }
+    std::string value = SysfsNode< std::string >( m_basePath + "/" + propertyName ).read().value_or( "" );
+    while ( not value.empty() and ( value.back() == '\n' or value.back() == '\r' or
+                                    value.back() == ' ' or value.back() == '\t' ) )
+      value.pop_back();
+    return value.empty() ? defaultValue : value;
   }
 
   [[nodiscard]] int64_t readIntegerProperty( const std::string &propertyName,
                                             int64_t defaultValue ) const noexcept
   {
-    try
-    {
-      if ( not isPropertyAvailable( propertyName ) )
-        return defaultValue;
-
-      std::ifstream file( m_basePath + "/" + propertyName );
-      if ( not file.is_open() )
-        return defaultValue;
-
-      int64_t value = defaultValue;
-      if ( file >> value )
-        return value;
-      return defaultValue;
-    }
-    catch ( ... ) { return defaultValue; }
+    return SysfsNode< int64_t >( m_basePath + "/" + propertyName ).read().value_or( defaultValue );
   }
 
   [[nodiscard]] bool readBoolProperty( const std::string &propertyName,
@@ -221,15 +206,7 @@ private:
 
   bool writeIntegerProperty( const std::string &propertyName, int64_t value ) noexcept
   {
-    try
-    {
-      std::ofstream file( m_basePath + "/" + propertyName );
-      if ( not file.is_open() )
-        return false;
-      file << value;
-      return file.good();
-    }
-    catch ( ... ) { return false; }
+    return SysfsNode< int64_t >( m_basePath + "/" + propertyName ).write( value );
   }
 
   bool writeBoolProperty( const std::string &propertyName, bool value ) noexcept
@@ -467,31 +444,26 @@ bool HardwareMonitorWorker::checkAmdDGpuHwmonPath() noexcept
 
 std::string HardwareMonitorWorker::getIntelIGpuDrmPathImpl() const noexcept
 {
-  namespace fs = std::filesystem;
   try
   {
     const std::string intelIGpuPattern = GpuDeviceDetector().getIntelIGpuPatternPublic();
     const std::regex idRegex( "PCI_ID=" + intelIGpuPattern );
 
-    for ( const auto &pciDev : fs::directory_iterator( "/sys/bus/pci/devices" ) )
+    for ( const std::filesystem::path &pciDev :
+          SysfsNode< std::string >::directoryEntries( "/sys/bus/pci/devices" ) )
     {
-      const auto drmDir = pciDev.path() / "drm";
-      std::error_code ec;
-      if ( not fs::is_directory( drmDir, ec ) )
-        continue;
+      const auto drmDir = pciDev / "drm";
 
-      for ( const auto &card : fs::directory_iterator( drmDir ) )
+      for ( const std::filesystem::path &card : SysfsNode< std::string >::directoryEntries( drmDir ) )
       {
-        auto ueventPath = card.path() / "device" / "uevent";
-        std::ifstream ueventFile( ueventPath );
-        if ( not ueventFile )
+        const auto ueventLines = SysfsNode< std::string >::readLines( card / "device" / "uevent" );
+        if ( !ueventLines )
           continue;
 
-        std::string line;
-        while ( std::getline( ueventFile, line ) )
+        for ( const std::string &line : *ueventLines )
         {
           if ( std::regex_search( line, idRegex ) )
-            return card.path().string();
+            return card.string();
         }
       }
     }
@@ -502,7 +474,6 @@ std::string HardwareMonitorWorker::getIntelIGpuDrmPathImpl() const noexcept
 
 std::string HardwareMonitorWorker::getAmdIGpuHwmonPathImpl() const noexcept
 {
-  namespace fs = std::filesystem;
   try
   {
     const std::string amdIGpuPattern = "1002:(164E|1506|15DD|15D8|15E7|1636|1638|164C|164D|1681|15BF|"
@@ -514,24 +485,23 @@ std::string HardwareMonitorWorker::getAmdIGpuHwmonPathImpl() const noexcept
                                  "98E4|13FE|143F|74A0|1435|163f|1900|1901|1114|150E)";
     const std::regex idRegex( "PCI_ID=" + amdIGpuPattern );
 
-    for ( const auto &hwmonEntry : fs::directory_iterator( "/sys/class/hwmon" ) )
+    for ( const std::filesystem::path &hwmonEntry :
+          SysfsNode< std::string >::directoryEntries( "/sys/class/hwmon" ) )
     {
-      auto ueventPath = hwmonEntry.path() / "device" / "uevent";
-      std::ifstream ueventFile( ueventPath );
-      if ( not ueventFile )
+      const auto ueventLines = SysfsNode< std::string >::readLines( hwmonEntry / "device" / "uevent" );
+      if ( !ueventLines )
         continue;
 
       bool hasAmdGpu = false;
       bool hasMatchingId = false;
-      std::string line;
-      while ( std::getline( ueventFile, line ) )
+      for ( const std::string &line : *ueventLines )
       {
         if ( line == "DRIVER=amdgpu" )
           hasAmdGpu = true;
         if ( std::regex_search( line, idRegex ) )
           hasMatchingId = true;
         if ( hasAmdGpu and hasMatchingId )
-          return hwmonEntry.path().string();
+          return hwmonEntry.string();
       }
     }
     return "";
@@ -828,6 +798,21 @@ void HardwareMonitorWorker::updateCpuPower()
       dramStructured << "]";
       jsonStream << ",\"dramTemps\":" << dramStructured.str();
     }
+
+    const auto ssdTemps = readStorageTemperatures();
+    if ( not ssdTemps.empty() )
+    {
+      jsonStream << ",\"ssdTemps\":[";
+      for ( size_t i = 0; i < ssdTemps.size(); ++i )
+      {
+        if ( i > 0 )
+          jsonStream << ",";
+        jsonStream << "{\"name\":\"" << jsonEscape( ssdTemps[ i ].name ) << "\""
+                   << ",\"temp\":" << ssdTemps[ i ].temperatureCelsius
+                   << "}";
+      }
+      jsonStream << "]";
+    }
   }
   else
   {
@@ -984,36 +969,23 @@ std::string HardwareMonitorWorker::transformPrimeStatus( const std::string &stat
 
 bool HardwareMonitorWorker::getDisplayConnectedToNvidia() const noexcept
 {
-  namespace fs = std::filesystem;
-
   try
   {
-    const std::string drmPath = "/sys/class/drm/";
-    std::error_code ec;
+    const std::filesystem::path drmPath = "/sys/class/drm";
 
-    if ( not fs::exists( drmPath, ec ) )
+    if ( not SysfsNode< std::string >::exists( drmPath ) )
       return false;
 
-    for ( const auto &entry : fs::directory_iterator( drmPath, ec ) )
+    for ( const std::filesystem::path &entry : SysfsNode< std::string >::directoryEntries( drmPath ) )
     {
-      const std::string name = entry.path().filename().string();
+      const std::string name = entry.filename().string();
 
       // Look for eDP connector entries (e.g. card0-eDP-1, card1-eDP-2)
       if ( name.find( "eDP" ) == std::string::npos )
         continue;
 
-      const std::string vendorPath = entry.path().string() + "/device/device/vendor";
-      const std::string statusPath = entry.path().string() + "/status";
-
-      std::ifstream vendorFile( vendorPath );
-      std::ifstream statusFile( statusPath );
-
-      if ( not vendorFile.is_open() or not statusFile.is_open() )
-        continue;
-
-      std::string vendorId, status;
-      std::getline( vendorFile, vendorId );
-      std::getline( statusFile, status );
+      std::string vendorId = SysfsNode< std::string >( entry / "device/device/vendor" ).read().value_or( "" );
+      std::string status = SysfsNode< std::string >( entry / "status" ).read().value_or( "" );
 
       // Trim whitespace
       while ( not vendorId.empty() and ( vendorId.back() == '\n' or vendorId.back() == ' ' ) )
@@ -1049,16 +1021,11 @@ void HardwareMonitorWorker::updateCpuFrequency() noexcept
 
   try
   {
-    std::ifstream ifs( "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" );
-    if ( ifs.is_open() )
+    if ( const auto freqKHz = SysfsNode< int32_t >( "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" ).read();
+         freqKHz and *freqKHz > 0 )
     {
-      int freqKHz = -1;
-      ifs >> freqKHz;
-      if ( freqKHz > 0 )
-      {
-        m_cpuFrequencyCallback( freqKHz / 1000 );
-        return;
-      }
+      m_cpuFrequencyCallback( *freqKHz / 1000 );
+      return;
     }
   }
   catch ( ... ) { /* ignore */ }

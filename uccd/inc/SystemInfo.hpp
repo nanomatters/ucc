@@ -16,6 +16,7 @@
 #pragma once
 
 #include "profiles/DefaultProfiles.hpp"
+#include "StorageInfo.hpp"
 #include <string>
 #include <optional>
 #include <vector>
@@ -80,6 +81,9 @@ struct SystemInfo
 
   // DRAM module inventory (static SMBIOS Type 17 data)
   std::vector< MemoryModuleInfo > ramModules;
+
+  // Internal SSD / non-rotational storage inventory
+  std::vector< StorageDeviceInfo > storageDevices;
 
   // Internal device ID (if matched)
   std::optional< UniwillDeviceID > deviceId;

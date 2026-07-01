@@ -1103,6 +1103,11 @@ std::optional< int > UccdClient::getSsdTemperature()
   return readJsonInt( m_interface.get(), "GetCpuPowerValuesJSON", "ssdTemp" );
 }
 
+std::optional< std::string > UccdClient::getSsdTemperaturesJSON()
+{
+  return readJsonArrayCompact( m_interface.get(), "GetCpuPowerValuesJSON", "ssdTemps" );
+}
+
 std::optional< std::string > UccdClient::getRamUsageJSON()
 {
   return readJsonObjectCompact( m_interface.get(), "GetCpuPowerValuesJSON", "ramUsage" );

@@ -117,15 +117,7 @@ static int32_t getDefaultOnlineCores()
 
 static int32_t readSysFsInt( const std::string &path, int32_t defaultValue )
 {
-  std::ifstream file( path );
-  if ( !file.is_open() )
-    return defaultValue;
-
-  int32_t value;
-  if ( !( file >> value ) )
-    return defaultValue;
-
-  return value;
+  return SysfsNode< int32_t >( path ).read().value_or( defaultValue );
 }
 
 static int32_t getCpuMinFrequency()
@@ -3723,10 +3715,8 @@ void UccDBusService::computeDeviceCapabilities()
 
   // Detect HWP Dynamic Boost support
   {
-    std::error_code ec;
     const std::string hwpBoostPath = "/sys/devices/system/cpu/intel_pstate/hwp_dynamic_boost";
-    m_dbusData.hwpDynamicBoostSupported = std::filesystem::exists( hwpBoostPath, ec )
-                                          && std::filesystem::is_regular_file( hwpBoostPath, ec );
+    m_dbusData.hwpDynamicBoostSupported = SysfsNode< bool >( hwpBoostPath ).isAvailable();
   }
 
   syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, hwpDynamicBoost=%s",

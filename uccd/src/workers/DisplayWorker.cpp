@@ -189,21 +189,17 @@ void DisplayWorker::initBacklight()
 {
   try
   {
-    const std::string backlightBase = "/sys/class/backlight";
-    std::error_code ec;
+    const fs::path backlightBase = "/sys/class/backlight";
 
-    if ( not fs::exists( backlightBase, ec ) )
+    if ( not SysfsNode< std::string >::exists( backlightBase ) )
       return;
 
-    for ( const auto &entry : fs::directory_iterator( backlightBase, ec ) )
+    for ( const fs::path &entry : SysfsNode< std::string >::directoryEntries( backlightBase ) )
     {
-      if ( not entry.is_directory( ec ) )
-        continue;
+      std::string driverPath = entry.string();
+      std::string maxBrightnessPath = ( entry / "max_brightness" ).string();
 
-      std::string driverPath = entry.path().string();
-      std::string maxBrightnessPath = driverPath + "/max_brightness";
-
-      if ( not fs::exists( maxBrightnessPath, ec ) )
+      if ( not SysfsNode< std::string >::exists( maxBrightnessPath ) )
         continue;
 
       SysfsNode< int > maxBrightness( maxBrightnessPath );
@@ -211,7 +207,7 @@ void DisplayWorker::initBacklight()
       if ( not maxVal.has_value() or maxVal.value() <= 0 )
         continue;
 
-      std::string driverName = entry.path().filename().string();
+      std::string driverName = entry.filename().string();
       bool isAmdgpuBl = ( driverName == "amdgpu_bl0" or driverName == "amdgpu_bl1" );
 
       m_backlightController = std::make_unique< DisplayBacklightController >(
@@ -665,4 +661,3 @@ void DisplayWorker::reapplyProfile() noexcept
 {
   applyBacklightFromProfile();
 }
-

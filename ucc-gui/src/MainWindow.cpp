@@ -182,7 +182,7 @@ void MainWindow::setupUI()
 
   // Fetch system hardware info from daemon and pass to DashboardTab
   QString laptopModel, cpuModel, dGpuModel, iGpuModel;
-  QString ramSummaryText, ramModulesText;
+  QString ramSummaryText, ramModulesText, storageDevicesJSON;
   if ( auto sysInfoJson = m_UccdClient->getSystemInfoJSON() )
   {
     QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *sysInfoJson ) );
@@ -228,13 +228,17 @@ void MainWindow::setupUI()
         ramSummaryText = QString( "Total %1 GiB" )
                            .arg( QString::number( installedMiB / 1024.0, 'f', 1 ) );
       }
+
+      const QJsonArray storageDevices = obj.value( "storageDevices" ).toArray();
+      storageDevicesJSON = QString::fromUtf8(
+        QJsonDocument( storageDevices ).toJson( QJsonDocument::Compact ) );
     }
   }
 
   // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
   m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(), m_waterCoolerSupported,
                                      laptopModel, cpuModel, dGpuModel, iGpuModel,
-                                     ramSummaryText, ramModulesText, this );
+                                     ramSummaryText, ramModulesText, storageDevicesJSON, this );
   m_tabs->addTab( m_dashboardTab, "Dashboard" );
   setupProfilesPage();
 

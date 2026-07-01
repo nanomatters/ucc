@@ -17,6 +17,7 @@
 
 #include "TccSettings.hpp"
 #include "PowerSupplyController.hpp"
+#include "SysfsNode.hpp"
 #include <filesystem>
 #include <iostream>
 #include <syslog.h>
@@ -30,44 +31,22 @@ inline ProfileState determineState() noexcept
     namespace fs = std::filesystem;
     const fs::path pathPowerSupplies = "/sys/class/power_supply";
 
-    if ( !fs::exists( pathPowerSupplies ) )
+    if ( !SysfsNode< std::string >::exists( pathPowerSupplies ) )
     {
       return state;
     }
 
     // Find a 'Mains' type power supply
-    for ( const auto &entry : fs::directory_iterator( pathPowerSupplies ) )
+    for ( const fs::path &entry : SysfsNode< std::string >::directoryEntries( pathPowerSupplies ) )
     {
-      if ( !entry.is_directory() )
-        continue;
-
-      fs::path typePath = entry.path() / "type";
-      if ( !fs::exists( typePath ) )
-        continue;
-
-      // Read type
-      std::ifstream typeFile( typePath );
-      if ( !typeFile )
-        continue;
-
-      std::string type;
-      std::getline( typeFile, type );
-
-      if ( type == "Mains" )
+      if ( SysfsNode< std::string >( entry / "type" ).read().value_or( "" ) == "Mains" )
       {
         // Found AC power supply, check if it's online
-        fs::path onlinePath = entry.path() / "online";
-        if ( !fs::exists( onlinePath ) )
+        const auto online = SysfsNode< int64_t >( entry / "online" ).read();
+        if ( !online )
           continue;
 
-        std::ifstream onlineFile( onlinePath );
-        if ( !onlineFile )
-          continue;
-
-        std::string online;
-        std::getline( onlineFile, online );
-
-        if ( online == "1" )
+        if ( *online == 1 )
         {
           state = ProfileState::AC;
         }

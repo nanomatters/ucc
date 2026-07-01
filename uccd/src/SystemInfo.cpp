@@ -19,6 +19,7 @@
 #include "SmbiosMemoryDecoder.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -34,6 +35,8 @@ namespace fs = std::filesystem;
 namespace
 {
 
+using Sysfs = SysfsNode< std::string >;
+
 /**
  * @brief Trim leading and trailing whitespace (including newlines)
  */
@@ -46,16 +49,11 @@ std::string trim( const std::string &s )
 }
 
 /**
- * @brief Read a single-line sysfs/proc file and return its trimmed content
+ * @brief Read a single-line sysfs file and return its trimmed content
  */
 std::string readFile( const std::string &path )
 {
-  std::ifstream file( path );
-  if ( !file.is_open() )
-    return {};
-  std::string line;
-  std::getline( file, line );
-  return trim( line );
+  return trim( SysfsNode< std::string >( path ).read().value_or( "" ) );
 }
 
 //  CPU detection
@@ -189,21 +187,21 @@ std::string decodePciName( unsigned vendor, [[maybe_unused]] unsigned device,
 
   // Walk drm subdirectory if present
   const fs::path drmDir = fs::path( sysfsDir ) / "drm";
-  if ( fs::exists( drmDir ) )
+  if ( Sysfs::exists( drmDir ) )
   {
     try
     {
-      for ( const auto &entry : fs::directory_iterator( drmDir ) )
+      for ( const fs::path &entry : Sysfs::directoryEntries( drmDir ) )
       {
         // card0, card1, ...
-        const auto cardName = entry.path().filename().string();
+        const auto cardName = entry.filename().string();
         if ( cardName.rfind( "card", 0 ) != 0 )
           continue;
 
         // Try common locations for GPU product name
         for ( const char *subpath : { "device/product_name", "product_name" } )
         {
-          std::string productName = readFile( ( entry.path() / subpath ).string() );
+          std::string productName = readFile( ( entry / subpath ).string() );
           if ( !productName.empty() )
             return productName;
         }
@@ -266,14 +264,14 @@ void detectGpus( std::string &iGpu, std::string &dGpu )
 {
   const std::string pciBasePath = "/sys/bus/pci/devices";
 
-  if ( !fs::exists( pciBasePath ) )
+  if ( !Sysfs::exists( pciBasePath ) )
     return;
 
   try
   {
-    for ( const auto &entry : fs::directory_iterator( pciBasePath ) )
+    for ( const fs::path &entry : Sysfs::directoryEntries( pciBasePath ) )
     {
-      const std::string devDir = entry.path().string();
+      const std::string devDir = entry.string();
       const std::string classStr = readFile( devDir + "/class" );
       if ( classStr.empty() )
         continue;
@@ -300,7 +298,7 @@ void detectGpus( std::string &iGpu, std::string &dGpu )
 
       // Heuristic: Intel and AMD integrated GPUs sit on bus 00.
       // Discrete GPUs (NVIDIA, AMD dGPU) are typically on bus 01+.
-      const std::string busAddr = entry.path().filename().string();
+      const std::string busAddr = entry.filename().string();
       // Format: "DDDD:BB:DD.F" - extract BB
       bool integrated = false;
       if ( busAddr.size() >= 7 )
@@ -553,6 +551,20 @@ std::string SystemInfo::toJSON() const
         << "\"configuredVoltageMv\":" << mod.configuredVoltageMv
         << "}";
   }
+  oss << "],"
+      << "\"storageDevices\":[";
+  for ( size_t i = 0; i < storageDevices.size(); ++i )
+  {
+    const auto &device = storageDevices[ i ];
+    if ( i > 0 )
+      oss << ",";
+    oss << "{"
+        << "\"name\":\"" << jsonEscapeValue( device.name ) << "\","
+        << "\"model\":\"" << jsonEscapeValue( device.model ) << "\","
+        << "\"vendor\":\"" << jsonEscapeValue( device.vendor ) << "\","
+        << "\"sizeBytes\":" << device.sizeBytes
+        << "}";
+  }
   oss << "]"
       << "}";
   return oss.str();
@@ -598,6 +610,10 @@ SystemInfo detectSystemInfo( std::optional< UniwillDeviceID > deviceId )
   info.ramModules = detectMemoryModulesFromSmbios();
   syslog( LOG_INFO, "[SystemInfo] RAM: total=%d MiB modules=%zu",
           info.ramTotalMiB, info.ramModules.size() );
+
+  // Storage: static physical SSD inventory from block sysfs.
+  info.storageDevices = detectStorageDevices();
+  syslog( LOG_INFO, "[SystemInfo] Storage: devices=%zu", info.storageDevices.size() );
 
   return info;
 }

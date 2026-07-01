@@ -21,7 +21,6 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
-#include <fstream>
 
 /**
  * @brief Power supply type enumeration
@@ -271,16 +270,13 @@ public:
 
     try
     {
-      if ( not std::filesystem::exists( psPath ) )
+      if ( not SysfsNode< std::string >::exists( psPath ) )
         return batteries;
 
-      for ( const auto &entry : std::filesystem::directory_iterator( psPath ) )
+      for ( const std::filesystem::path &entry : SysfsNode< std::string >::directoryEntries( psPath ) )
       {
-        if ( entry.is_directory() or entry.is_symlink() )
-        {
-          if ( PowerSupplyController ps( entry.path().string() ); ps.getType() == PowerSupplyType::Battery )
-            batteries.push_back( std::move( ps ) );
-        }
+        if ( PowerSupplyController ps( entry.string() ); ps.getType() == PowerSupplyType::Battery )
+          batteries.push_back( std::move( ps ) );
       }
     }
     catch ( const std::exception & )

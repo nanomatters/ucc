@@ -15,7 +15,6 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -26,6 +25,7 @@
 namespace ucc::uniwill
 {
 namespace fs = std::filesystem;
+using Sysfs = SysfsNode< std::string >;
 
 inline constexpr uint32_t TDP_MIN_WATTS = 25;
 inline constexpr int32_t FAN_MIN_SPEED_PERCENT = 25;
@@ -229,63 +229,26 @@ struct DramTemperature
 
 [[nodiscard]] inline std::optional< std::string > readFirstLine( const fs::path &path )
 {
-  std::ifstream file( path );
-  if ( not file.is_open() )
-    return std::nullopt;
-
-  std::string line;
-  if ( not std::getline( file, line ) )
-    return std::nullopt;
-
-  return line;
+  return Sysfs( path ).read();
 }
 
 [[nodiscard]] inline std::optional< uint32_t > readUint32( const fs::path &path )
 {
-  if ( auto line = readFirstLine( path ) )
-  {
-    try
-    {
-      return static_cast< uint32_t >( std::stoul( *line ) );
-    }
-    catch ( ... )
-    {
-    }
-  }
+  const auto value = SysfsNode< uint64_t >( path ).read();
+  if ( value && *value <= std::numeric_limits< uint32_t >::max() )
+    return static_cast< uint32_t >( *value );
 
   return std::nullopt;
 }
 
 [[nodiscard]] inline std::optional< int64_t > readInt64( const fs::path &path )
 {
-  if ( auto line = readFirstLine( path ) )
-  {
-    try
-    {
-      return static_cast< int64_t >( std::stoll( *line ) );
-    }
-    catch ( ... )
-    {
-    }
-  }
-
-  return std::nullopt;
+  return SysfsNode< int64_t >( path ).read();
 }
 
 [[nodiscard]] inline std::optional< int32_t > readInt32( const fs::path &path )
 {
-  if ( auto line = readFirstLine( path ) )
-  {
-    try
-    {
-      return static_cast< int32_t >( std::stol( *line ) );
-    }
-    catch ( ... )
-    {
-    }
-  }
-
-  return std::nullopt;
+  return SysfsNode< int32_t >( path ).read();
 }
 
 [[nodiscard]] inline std::optional< int32_t > parseInt32AutoBase( const std::string &line )
@@ -392,13 +355,13 @@ struct DramTemperature
   {
     try
     {
-      if ( not fs::exists( root ) )
+      if ( not Sysfs::exists( root ) )
         continue;
 
-      for ( const auto &entry : fs::directory_iterator( root ) )
+      for ( const fs::path &entry : Sysfs::directoryEntries( root ) )
       {
-        if ( entry.path().filename().string().starts_with( "INOU0000:" ) )
-          return entry.path();
+        if ( entry.filename().string().starts_with( "INOU0000:" ) )
+          return entry;
       }
     }
     catch ( ... )
@@ -415,13 +378,13 @@ struct DramTemperature
 
   try
   {
-    if ( not fs::exists( root ) )
+    if ( not Sysfs::exists( root ) )
       return std::nullopt;
 
-    for ( const auto &entry : fs::directory_iterator( root ) )
+    for ( const fs::path &entry : Sysfs::directoryEntries( root ) )
     {
-      if ( auto name = readFirstLine( entry.path() / "name" ); name and *name == "uniwill" )
-        return entry.path();
+      if ( auto name = readFirstLine( entry / "name" ); name and *name == "uniwill" )
+        return entry;
     }
   }
   catch ( ... )
@@ -460,18 +423,18 @@ struct DramTemperature
 
   try
   {
-    if ( not fs::exists( root ) )
+    if ( not Sysfs::exists( root ) )
       return std::nullopt;
 
-    for ( const auto &entry : fs::directory_iterator( root ) )
+    for ( const fs::path &entry : Sysfs::directoryEntries( root ) )
     {
-      const fs::path profilePath = entry.path() / "profile";
-      const fs::path choicesPath = entry.path() / "choices";
+      const fs::path profilePath = entry / "profile";
+      const fs::path choicesPath = entry / "choices";
 
-      if ( not fs::exists( profilePath ) or not fs::exists( choicesPath ) )
+      if ( not Sysfs::exists( profilePath ) or not Sysfs::exists( choicesPath ) )
         continue;
 
-      if ( auto foundName = readFirstLine( entry.path() / "name" ); foundName and *foundName == name )
+      if ( auto foundName = readFirstLine( entry / "name" ); foundName and *foundName == name )
       {
         return PlatformProfileSink{
           profilePath.string(),
@@ -499,7 +462,7 @@ struct DramTemperature
 
   const fs::path profilePath = sysfsPath( sysfsRoot, "firmware/acpi/platform_profile" );
   const fs::path choicesPath = sysfsPath( sysfsRoot, "firmware/acpi/platform_profile_choices" );
-  if ( not fs::exists( profilePath ) or not fs::exists( choicesPath ) )
+  if ( not Sysfs::exists( profilePath ) or not Sysfs::exists( choicesPath ) )
     return std::nullopt;
 
   if ( not looksLikeUniwillProfileChoices( readChoices( choicesPath.string() ) ) )
@@ -537,13 +500,13 @@ struct DramTemperature
     return info;
 
   const fs::path infoPath = *platformDevice / "info";
-  if ( not fs::exists( infoPath ) )
+  if ( not Sysfs::exists( infoPath ) )
     return info;
 
   info.infoPath = infoPath.string();
 
   const fs::path projectIdPath = infoPath / "project_id";
-  if ( fs::exists( projectIdPath ) )
+  if ( Sysfs::exists( projectIdPath ) )
   {
     info.projectIdPath = projectIdPath.string();
     if ( auto projectId = readFirstLine( projectIdPath ) )
@@ -551,21 +514,21 @@ struct DramTemperature
   }
 
   const fs::path moduleIdPath = infoPath / "module_id";
-  if ( fs::exists( moduleIdPath ) )
+  if ( Sysfs::exists( moduleIdPath ) )
   {
     info.moduleIdPath = moduleIdPath.string();
     info.moduleId = readFirstLine( moduleIdPath ).value_or( "" );
   }
 
   const fs::path romIdPath = infoPath / "rom_id";
-  if ( fs::exists( romIdPath ) )
+  if ( Sysfs::exists( romIdPath ) )
   {
     info.romIdPath = romIdPath.string();
     info.romId = readFirstLine( romIdPath ).value_or( "" );
   }
 
   const fs::path ecFirmwareVersionPath = infoPath / "ec_firmware_version";
-  if ( fs::exists( ecFirmwareVersionPath ) )
+  if ( Sysfs::exists( ecFirmwareVersionPath ) )
   {
     info.ecFirmwareVersionPath = ecFirmwareVersionPath.string();
     info.ecFirmwareVersion = readFirstLine( ecFirmwareVersionPath ).value_or( "" );
@@ -624,27 +587,25 @@ struct DramTemperature
 
   try
   {
-    if ( not fs::exists( root ) )
+    if ( not Sysfs::exists( root ) )
       return temps;
 
-    for ( const auto &entry : fs::directory_iterator( root ) )
+    for ( const fs::path &entry : Sysfs::directoryEntries( root ) )
     {
-      const auto name = readFirstLine( entry.path() / "name" );
+      const auto name = readFirstLine( entry / "name" );
       if ( not name or ( *name != "spd5118" and *name != "jc42" ) )
         continue;
 
-      const fs::path inputPath = entry.path() / "temp1_input";
+      const fs::path inputPath = entry / "temp1_input";
       const auto millidegrees = readInt32( inputPath );
       if ( not millidegrees )
         continue;
 
       // The hwmon's "device" symlink basename carries the i2c address (e.g. 11-0050).
       int slot = static_cast< int >( temps.size() );
-      std::error_code ec;
-      const fs::path devLink = fs::read_symlink( entry.path() / "device", ec );
-      if ( not ec )
+      if ( const auto devLink = Sysfs::readSymlink( entry / "device" ) )
       {
-        const int parsed = dramSlotFromI2cName( devLink.filename().string() );
+        const int parsed = dramSlotFromI2cName( devLink->filename().string() );
         if ( parsed >= 0 )
           slot = parsed;
       }
@@ -675,9 +636,9 @@ struct DramTemperature
     const std::string prefix =
       "pwm" + std::to_string( number ) + "_auto_point" + std::to_string( point );
 
-    if ( not fs::exists( hwmonPath / ( prefix + "_pwm" ) ) or
-         not fs::exists( hwmonPath / ( prefix + "_temp" ) ) or
-         not fs::exists( hwmonPath / ( prefix + "_temp_hyst" ) ) )
+    if ( not Sysfs::exists( hwmonPath / ( prefix + "_pwm" ) ) or
+         not Sysfs::exists( hwmonPath / ( prefix + "_temp" ) ) or
+         not Sysfs::exists( hwmonPath / ( prefix + "_temp_hyst" ) ) )
       return false;
   }
 
@@ -706,10 +667,10 @@ struct DramTemperature
     FanChannel channel{
       channelIndex,
       readFirstLine( fanLabelPath ).value_or( channelIndex == 0 ? "Main" : "Secondary" ),
-      fs::exists( fanInputPath ) ? fanInputPath.string() : "",
-      fs::exists( tempInputPath ) ? tempInputPath.string() : "",
-      fs::exists( pwmPath ) ? pwmPath.string() : "",
-      fs::exists( pwmEnablePath ) ? pwmEnablePath.string() : "",
+      Sysfs::exists( fanInputPath ) ? fanInputPath.string() : "",
+      Sysfs::exists( tempInputPath ) ? tempInputPath.string() : "",
+      Sysfs::exists( pwmPath ) ? pwmPath.string() : "",
+      Sysfs::exists( pwmEnablePath ) ? pwmEnablePath.string() : "",
       hasFanAutoPointFiles( *hwmon, channelIndex )
     };
 
@@ -810,7 +771,7 @@ inline bool writeFanCurve( const FanChannel &channel, const std::vector< FanCurv
     return priority;
 
   const fs::path path = *platformDevice / "usb_c_power_priority";
-  if ( not fs::exists( path ) )
+  if ( not Sysfs::exists( path ) )
     return priority;
 
   priority.path = path.string();
@@ -842,7 +803,7 @@ inline bool writeUsbCPowerPriority(
     return bridge;
 
   const fs::path enablePath = *platformDevice / "wc" / "enable";
-  if ( not fs::exists( enablePath ) )
+  if ( not Sysfs::exists( enablePath ) )
     return bridge;
 
   bridge.enablePath = enablePath.string();
@@ -912,7 +873,7 @@ inline SysfsWriteResult writeWaterCoolerBridgeEnable(
 
   const fs::path dgpuPath = *platformDevice / "dgpu";
   const fs::path offsetPath = dgpuPath / "ctgp_offset";
-  if ( not fs::exists( offsetPath ) )
+  if ( not Sysfs::exists( offsetPath ) )
     return info;
 
   info.offsetPath = offsetPath.string();

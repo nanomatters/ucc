@@ -17,13 +17,13 @@
 
 #include "DaemonWorker.hpp"
 #include "../NvmlWrapper.hpp"
+#include "SysfsNode.hpp"
 #include <climits>
 #include <string>
 #include <optional>
 #include <memory>
 #include <functional>
 #include <set>
-#include <fstream>
 #include <filesystem>
 #include <regex>
 
@@ -161,23 +161,21 @@ private:
 
   [[nodiscard]] int countDevicesMatchingPattern( const std::string &pattern ) const noexcept
   {
-    namespace fs = std::filesystem;
     try
     {
       const std::regex idRegex( "PCI_ID=" + pattern );
       int count = 0;
 
-      for ( const auto &entry : fs::directory_iterator( "/sys/bus/pci/devices" ) )
+      for ( const std::filesystem::path &entry :
+            SysfsNode< std::string >::directoryEntries( "/sys/bus/pci/devices" ) )
       {
-        auto ueventPath = entry.path() / "uevent";
-        std::ifstream ueventFile( ueventPath );
-        if ( not ueventFile )
+        const auto ueventLines = SysfsNode< std::string >::readLines( entry / "uevent" );
+        if ( !ueventLines )
           continue;
 
         bool hasDisplayClass = false;
         bool hasMatchingId   = false;
-        std::string line;
-        while ( std::getline( ueventFile, line ) )
+        for ( const std::string &line : *ueventLines )
         {
           if ( line == "PCI_CLASS=30000" )
             hasDisplayClass = true;
@@ -197,21 +195,15 @@ private:
 
   [[nodiscard]] int countNvidiaDevices() const noexcept
   {
-    namespace fs = std::filesystem;
     try
     {
       const std::string nvidiaVendorId = "0x10de";
       std::set< std::string > uniqueDevices;
 
-      for ( const auto &entry : fs::directory_iterator( "/sys/bus/pci/devices" ) )
+      for ( const std::filesystem::path &entry :
+            SysfsNode< std::string >::directoryEntries( "/sys/bus/pci/devices" ) )
       {
-        auto vendorPath = entry.path() / "vendor";
-        std::ifstream vendorFile( vendorPath );
-        if ( not vendorFile )
-          continue;
-
-        std::string vendorValue;
-        std::getline( vendorFile, vendorValue );
+        std::string vendorValue = SysfsNode< std::string >( entry / "vendor" ).read().value_or( "" );
 
         // Trim trailing whitespace / newline
         while ( not vendorValue.empty() and
@@ -221,7 +213,7 @@ private:
         if ( vendorValue == nvidiaVendorId )
         {
           // Group by base device (strip PCI function suffix, e.g. ".0")
-          std::string devicePath = entry.path().string();
+          std::string devicePath = entry.string();
           size_t lastDot = devicePath.rfind( '.' );
           if ( lastDot != std::string::npos )
             devicePath = devicePath.substr( 0, lastDot );
