@@ -183,6 +183,7 @@ public:
   std::optional< std::string > getSsdTemperaturesJSON();
   std::optional< std::string > getRamUsageJSON();
   std::optional< std::string > getDramTemperaturesJSON();
+  std::optional< std::string > getGpuPlatformState();
   std::optional< double > getDGpuPowerAllocation();
   std::optional< double > getDGpuThermalBudget();
   // Extended discrete GPU metrics (NVIDIA, -1 when unavailable)

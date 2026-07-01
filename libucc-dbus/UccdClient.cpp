@@ -1118,6 +1118,11 @@ std::optional< std::string > UccdClient::getDramTemperaturesJSON()
   return readJsonArrayCompact( m_interface.get(), "GetCpuPowerValuesJSON", "dramTemps" );
 }
 
+std::optional< std::string > UccdClient::getGpuPlatformState()
+{
+  return readJsonString( m_interface.get(), "GetCpuPowerValuesJSON", "gpuPlatformState" );
+}
+
 std::optional< double > UccdClient::getDGpuPowerAllocation()
 {
   return readJsonDouble( m_interface.get(), "GetDGpuInfoValuesJSON", "powerAllocation" );

@@ -463,6 +463,29 @@ private slots:
     QVERIFY( !bridge.enabled );
   }
 
+  void readsDgpuPlatformState()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path devicePath = root / "bus/platform/devices/INOU0000:00";
+
+    writeFile( devicePath / "dgpu/tgp_base", "80\n" );
+    writeFile( devicePath / "dgpu/ctgp_offset", "15\n" );
+    writeFile( devicePath / "dgpu/db_offset_max", "20\n" );
+    writeFile( devicePath / "dgpu/dynamic_boost_enable", "1\n" );
+    writeFile( devicePath / "dgpu/mux_mode", "hybrid\n" );
+
+    const auto state = ucc::uniwill::readDgpuPlatformState( root.string() );
+
+    QVERIFY( state.isAvailable() );
+    QCOMPARE( state.tgpBase.value_or( -1 ), static_cast< int32_t >( 80 ) );
+    QCOMPARE( state.currentCtgpOffset.value_or( -1 ), static_cast< int32_t >( 15 ) );
+    QCOMPARE( state.maxDynamicBoostOffset.value_or( -1 ), static_cast< int32_t >( 20 ) );
+    QVERIFY( state.dynamicBoostEnabled.value_or( false ) );
+    QCOMPARE( state.muxMode, std::string( "hybrid" ) );
+  }
+
   void chargeEndThresholdAvailabilityRequiresWritableNode()
   {
     QTemporaryDir dir;

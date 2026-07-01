@@ -524,6 +524,7 @@ std::string SystemInfo::toJSON() const
       << "\"cpuModel\":\"" << jsonEscapeValue( cpuModel ) << "\","
       << "\"iGpuModel\":\"" << jsonEscapeValue( iGpuModel ) << "\","
       << "\"dGpuModel\":\"" << jsonEscapeValue( dGpuModel ) << "\","
+      << "\"gpuPlatformState\":\"" << jsonEscapeValue( gpuPlatformState ) << "\","
       << "\"manufacturer\":\"" << jsonEscapeValue( manufacturerName ) << "\","
       << "\"laptopModel\":\"" << jsonEscapeValue( laptopModel ) << "\","
       << "\"productSKU\":\"" << jsonEscapeValue( productSKU ) << "\","

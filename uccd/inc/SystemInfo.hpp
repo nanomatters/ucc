@@ -64,6 +64,7 @@ struct SystemInfo
   // GPUs
   std::string iGpuModel;          // e.g. "AMD Radeon 780M" or "" if absent
   std::string dGpuModel;          // e.g. "NVIDIA GeForce RTX 4070" or "" if absent
+  std::string gpuPlatformState;   // compact uniwill dGPU/platform state summary
 
   // Laptop
   LaptopManufacturer manufacturer = LaptopManufacturer::Unknown;

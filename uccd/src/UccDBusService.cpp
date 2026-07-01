@@ -29,19 +29,121 @@
 #include <thread>
 #include <cmath>
 #include <climits>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <filesystem>
+#include <optional>
+#include <vector>
 #include <syslog.h>
 #include <libudev.h>
 #include <algorithm>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QByteArray>
 #include <QCoreApplication>
 #include <QEventLoop>
 
 static std::string jsonEscape( const std::string &value );
+
+static std::string joinParts( const std::vector< std::string > &parts, const std::string &separator )
+{
+  std::ostringstream stream;
+  for ( size_t i = 0; i < parts.size(); ++i )
+  {
+    if ( i > 0 )
+      stream << separator;
+    stream << parts[ i ];
+  }
+  return stream.str();
+}
+
+static std::string formatWatts( int32_t watts )
+{
+  return std::to_string( watts ) + "W";
+}
+
+static std::string formatMuxMode( std::string mode )
+{
+  if ( mode == "dgpu_direct" )
+    return "DGPU Only";
+  if ( mode == "igpu_only" )
+    return "iGPU Only";
+  if ( mode == "hybrid" )
+    return "MUX Hybrid";
+
+  for ( char &ch : mode )
+  {
+    if ( ch == '_' )
+      ch = ' ';
+  }
+
+  if ( mode.empty() )
+    return "";
+
+  mode[ 0 ] = static_cast< char >( std::toupper( static_cast< unsigned char >( mode[ 0 ] ) ) );
+  return "MUX " + mode;
+}
+
+static std::optional< int32_t > currentDgpuPowerLimit( const ucc::uniwill::DgpuPlatformState &state )
+{
+  if ( not state.tgpBase )
+    return std::nullopt;
+
+  return *state.tgpBase + state.currentCtgpOffset.value_or( 0 );
+}
+
+static std::string formatDgpuPlatformState( const ucc::uniwill::DgpuPlatformState &state )
+{
+  std::vector< std::string > parts;
+  const auto powerLimit = currentDgpuPowerLimit( state );
+
+  if ( powerLimit )
+  {
+    parts.push_back( formatWatts( *powerLimit ) );
+
+    if ( state.maxDynamicBoostOffset and state.dynamicBoostEnabled )
+    {
+      const int32_t dynamicBoostMaxPower = *state.maxDynamicBoostOffset;
+      parts.push_back( "+ " + formatWatts( dynamicBoostMaxPower ) + " Dynamic Boost" );
+    }
+  }
+
+  if ( not state.muxMode.empty() )
+    parts.push_back( "| GPU Switch: " + formatMuxMode( state.muxMode ) );
+
+  if ( parts.empty() )
+    return "";
+
+  if ( powerLimit or state.maxDynamicBoostOffset )
+    return "Power Limit " + joinParts( parts, " " );
+
+  return joinParts( parts, ", " );
+}
+
+static std::string readFormattedDgpuPlatformState()
+{
+  return formatDgpuPlatformState( ucc::uniwill::readDgpuPlatformState() );
+}
+
+static std::string withJsonStringField(
+  const std::string &json,
+  const QString &key,
+  const std::string &value )
+{
+  QJsonDocument document = QJsonDocument::fromJson( QByteArray::fromStdString( json ) );
+  if ( !document.isObject() )
+    return json;
+
+  QJsonObject object = document.object();
+  if ( value.empty() )
+    object.remove( key );
+  else
+    object.insert( key, QString::fromStdString( value ) );
+
+  return QJsonDocument( object ).toJson( QJsonDocument::Compact ).toStdString();
+}
 
 // helper function to convert GPU info to JSON
 std::string dgpuInfoToJSON( const DGpuInfo &info )
@@ -1960,6 +2062,7 @@ UccDBusService::UccDBusService()
   m_systemInfo.projectId = driverInfo.projectId;
   m_systemInfo.moduleId = driverInfo.moduleId;
   m_systemInfo.romId = driverInfo.romId;
+  m_systemInfo.gpuPlatformState = readFormattedDgpuPlatformState();
   m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
 
   // Check device whitelist - unsupported machines get a functional D-Bus
@@ -2075,9 +2178,16 @@ UccDBusService::UccDBusService()
   m_hardwareMonitorWorker = std::make_unique< HardwareMonitorWorker >(
     m_nvml,
     [this]( const std::string &json, double cpuPowerWatts ) {
+      const std::string gpuPlatformState = readFormattedDgpuPlatformState();
+      const std::string liveJson = withJsonStringField(
+        json,
+        QStringLiteral( "gpuPlatformState" ),
+        gpuPlatformState );
       {
         std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-        m_dbusData.cpuPowerValuesJSON = json;
+        m_systemInfo.gpuPlatformState = gpuPlatformState;
+        m_dbusData.systemInfoJSON = m_systemInfo.toJSON();
+        m_dbusData.cpuPowerValuesJSON = liveJson;
       }
       // Push CPU power to history store
       if ( cpuPowerWatts > -1.0 )

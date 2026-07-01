@@ -45,6 +45,7 @@ namespace ucc
                           const QString &cpuModel = {},
                           const QString &dGpuModel = {},
                           const QString &iGpuModel = {},
+                          const QString &gpuPlatformState = {},
                           const QString &ramSummary = {},
                           const QString &ramModules = {},
                           const QString &storageDevicesJSON = {},
@@ -76,6 +77,7 @@ namespace ucc
     void onGpuTempChanged();
     void onGpuFrequencyChanged();
     void onGpuPowerChanged();
+    void onGpuPlatformStateChanged();
     void onIGpuFrequencyChanged();
     void onIGpuPowerChanged();
     void onIGpuTempChanged();
@@ -152,12 +154,14 @@ namespace ucc
     QString m_cpuModel;
     QString m_dGpuModel;
     QString m_iGpuModel;
+    QString m_gpuPlatformState;
     QString m_ramSummary;
     QString m_ramModules;
     QString m_storageDevicesJSON;
 
     // GPU section header label (updated when toggling dGPU / iGPU)
     QLabel *m_gpuHeaderLabel = nullptr;
+    QLabel *m_gpuPlatformStateLabel = nullptr;
 
     // GPU view toggle (dGPU / iGPU)
     QPushButton *m_gpuToggleButton = nullptr;

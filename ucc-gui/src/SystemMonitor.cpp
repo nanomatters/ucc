@@ -264,6 +264,20 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get platform-level dGPU power/MUX state from uniwill sysfs telemetry.
+  {
+    QString gpuPlatformState;
+
+    if ( auto state = m_client->getGpuPlatformState(); state && !state->empty() )
+      gpuPlatformState = QString::fromStdString( *state );
+
+    if ( m_gpuPlatformState != gpuPlatformState )
+    {
+      m_gpuPlatformState = gpuPlatformState;
+      emit gpuPlatformStateChanged();
+    }
+  }
+
   // Get iGPU Frequency
   {
     QString iGpuFreq = "--";
@@ -631,6 +645,7 @@ void SystemMonitor::setMonitoringActive( bool active )
       m_gpuTemp = "";
       m_gpuFrequency = "";
       m_gpuPower = "";
+      m_gpuPlatformState = "";
       m_fanSpeed = "";
       m_gpuFanSpeed = "";
       m_waterCoolerFanSpeed = "";

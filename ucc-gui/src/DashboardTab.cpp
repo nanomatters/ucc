@@ -119,6 +119,7 @@ namespace ucc
 DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profileManager, bool waterCoolerSupported,
                             const QString &laptopModel, const QString &driverInfo, const QString &cpuModel,
                             const QString &dGpuModel, const QString &iGpuModel,
+                            const QString &gpuPlatformState,
                             const QString &ramSummary, const QString &ramModules,
                             const QString &storageDevicesJSON,
                             QWidget *parent )
@@ -131,6 +132,7 @@ DashboardTab::DashboardTab( SystemMonitor *systemMonitor, ProfileManager *profil
   , m_cpuModel( cpuModel )
   , m_dGpuModel( dGpuModel )
   , m_iGpuModel( iGpuModel )
+  , m_gpuPlatformState( gpuPlatformState )
   , m_ramSummary( ramSummary )
   , m_ramModules( ramModules )
   , m_storageDevicesJSON( storageDevicesJSON )
@@ -442,12 +444,27 @@ void DashboardTab::setupUI()
             "QPushButton:hover { background-color: %2; }").arg(midHex, highlightHex) );
   m_gpuToggleButton->setVisible( false );  // Hidden until both GPUs detected
 
+  QWidget *gpuHeaderBlock = new QWidget();
+  QVBoxLayout *gpuHeaderBlockLayout = new QVBoxLayout( gpuHeaderBlock );
+  gpuHeaderBlockLayout->setContentsMargins( 0, 0, 0, 0 );
+  gpuHeaderBlockLayout->setSpacing( 4 );
+
   // Same grid trick as title row: both share cell (0,0) — label centered, button right-aligned
   QGridLayout *gpuHeaderLayout = new QGridLayout();
   gpuHeaderLayout->setContentsMargins( 0, 0, 0, 0 );
   gpuHeaderLayout->addWidget( m_gpuHeaderLabel,  0, 0, Qt::AlignCenter );
   gpuHeaderLayout->addWidget( m_gpuToggleButton, 0, 0, Qt::AlignRight | Qt::AlignVCenter );
-  layout->addLayout( gpuHeaderLayout );
+  gpuHeaderBlockLayout->addLayout( gpuHeaderLayout );
+
+  m_gpuPlatformStateLabel = new QLabel( m_gpuPlatformState );
+  m_gpuPlatformStateLabel->setStyleSheet( QString( "font-size: 12px; font-weight: 600; color: %1;" ).arg( textHex ) );
+  m_gpuPlatformStateLabel->setAlignment( Qt::AlignCenter );
+  m_gpuPlatformStateLabel->setWordWrap( true );
+  m_gpuPlatformStateLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
+  m_gpuPlatformStateLabel->setVisible( !m_gpuPlatformState.isEmpty() );
+  gpuHeaderBlockLayout->addWidget( m_gpuPlatformStateLabel );
+
+  layout->addWidget( gpuHeaderBlock );
 
   // dGPU panel (default view) — two-row box: main metrics + NVIDIA extended row (hidden until data)
   m_dGpuGaugeContainer = new QWidget();
@@ -611,6 +628,8 @@ void DashboardTab::connectSignals()
            this, &DashboardTab::onGpuFrequencyChanged );
   connect( m_systemMonitor, &SystemMonitor::gpuPowerChanged,
            this, &DashboardTab::onGpuPowerChanged );
+  connect( m_systemMonitor, &SystemMonitor::gpuPlatformStateChanged,
+           this, &DashboardTab::onGpuPlatformStateChanged );
   connect( m_systemMonitor, &SystemMonitor::iGpuFrequencyChanged,
            this, &DashboardTab::onIGpuFrequencyChanged );
   connect( m_systemMonitor, &SystemMonitor::iGpuPowerChanged,
@@ -1031,6 +1050,17 @@ void DashboardTab::onGpuPowerChanged()
   m_gpuPowerLabel->setText( "--" );
 }
 
+void DashboardTab::onGpuPlatformStateChanged()
+{
+  m_gpuPlatformState = m_systemMonitor->gpuPlatformState();
+
+  if ( !m_gpuPlatformStateLabel )
+    return;
+
+  m_gpuPlatformStateLabel->setText( m_gpuPlatformState );
+  m_gpuPlatformStateLabel->setVisible( !m_showingIGpu && !m_gpuPlatformState.isEmpty() );
+}
+
 void DashboardTab::onIGpuFrequencyChanged()
 {
   QString freq = m_systemMonitor->iGpuFrequency();
@@ -1224,6 +1254,9 @@ void DashboardTab::switchGpuView( bool showIGpu )
       : ( m_dGpuModel.isEmpty() ? QStringLiteral( "Discrete GPU" )   : m_dGpuModel );
     m_gpuHeaderLabel->setText( headerText );
   }
+
+  if ( m_gpuPlatformStateLabel )
+    m_gpuPlatformStateLabel->setVisible( !showIGpu && !m_gpuPlatformState.isEmpty() );
 }
 
 void DashboardTab::updateGpuSwitchVisibility()

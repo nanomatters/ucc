@@ -181,7 +181,7 @@ void MainWindow::setupUI()
   connect( m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged );
 
   // Fetch system hardware info from daemon and pass to DashboardTab
-  QString laptopModel, driverInfoText, cpuModel, dGpuModel, iGpuModel;
+  QString laptopModel, driverInfoText, cpuModel, dGpuModel, iGpuModel, gpuPlatformState;
   QString ramSummaryText, ramModulesText, storageDevicesJSON;
   if ( auto sysInfoJson = m_UccdClient->getSystemInfoJSON() )
   {
@@ -193,6 +193,7 @@ void MainWindow::setupUI()
       cpuModel    = obj.value( "cpuModel" ).toString();
       dGpuModel   = obj.value( "dGpuModel" ).toString();
       iGpuModel   = obj.value( "iGpuModel" ).toString();
+      gpuPlatformState = obj.value( "gpuPlatformState" ).toString();
 
       QStringList driverInfoParts;
       const QString biosVersion = obj.value( "biosVersion" ).toString();
@@ -272,7 +273,7 @@ void MainWindow::setupUI()
   // Now create DashboardTab (daemon-backed water cooler; no controller pointer)
   m_dashboardTab = new DashboardTab( m_systemMonitor.get(), m_profileManager.get(), m_waterCoolerSupported,
                                      laptopModel, driverInfoText, cpuModel, dGpuModel, iGpuModel,
-                                     ramSummaryText, ramModulesText, storageDevicesJSON, this );
+                                     gpuPlatformState, ramSummaryText, ramModulesText, storageDevicesJSON, this );
   m_tabs->addTab( m_dashboardTab, "Dashboard" );
   setupProfilesPage();
 

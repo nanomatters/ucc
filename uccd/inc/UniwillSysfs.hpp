@@ -104,6 +104,22 @@ struct CtgpInfo
   }
 };
 
+struct DgpuPlatformState
+{
+  std::optional< int32_t > tgpBase;
+  std::optional< int32_t > currentCtgpOffset;
+  std::optional< int32_t > maxDynamicBoostOffset;
+  std::optional< bool > dynamicBoostEnabled;
+  std::string muxMode;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return tgpBase.has_value() or currentCtgpOffset.has_value()
+           or maxDynamicBoostOffset.has_value() or dynamicBoostEnabled.has_value()
+           or not muxMode.empty();
+  }
+};
+
 struct FanCurvePoint
 {
   int32_t tempCelsius = 0;
@@ -884,6 +900,37 @@ inline SysfsWriteResult writeWaterCoolerBridgeEnable(
   info.tgpBase = readInt32( info.tgpBasePath ).value_or( 0 );
 
   return info;
+}
+
+[[nodiscard]] inline DgpuPlatformState readDgpuPlatformState( const std::string &sysfsRoot = "/sys" )
+{
+  DgpuPlatformState state;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return state;
+
+  const fs::path dgpuPath = *platformDevice / "dgpu";
+
+  const auto readOptionalInt32 = []( const fs::path &path ) -> std::optional< int32_t > {
+    if ( not Sysfs::exists( path ) )
+      return std::nullopt;
+    return readInt32( path );
+  };
+
+  const auto readOptionalBool = []( const fs::path &path ) -> std::optional< bool > {
+    if ( not Sysfs::exists( path ) )
+      return std::nullopt;
+    return SysfsNode< bool >( path ).read();
+  };
+
+  state.tgpBase = readOptionalInt32( dgpuPath / "tgp_base" );
+  state.currentCtgpOffset = readOptionalInt32( dgpuPath / "ctgp_offset" );
+  state.maxDynamicBoostOffset = readOptionalInt32( dgpuPath / "db_offset_max" );
+  state.dynamicBoostEnabled = readOptionalBool( dgpuPath / "dynamic_boost_enable" );
+  state.muxMode = readFirstLine( dgpuPath / "mux_mode" ).value_or( "" );
+
+  return state;
 }
 
 [[nodiscard]] inline std::string translatePlatformProfileName(

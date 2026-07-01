@@ -47,6 +47,7 @@ class SystemMonitor : public QObject
   Q_PROPERTY( QString gpuTemp READ gpuTemp NOTIFY gpuTempChanged )
   Q_PROPERTY( QString gpuFrequency READ gpuFrequency NOTIFY gpuFrequencyChanged )
   Q_PROPERTY( QString gpuPower READ gpuPower NOTIFY gpuPowerChanged )
+  Q_PROPERTY( QString gpuPlatformState READ gpuPlatformState NOTIFY gpuPlatformStateChanged )
   Q_PROPERTY( QString iGpuFrequency READ iGpuFrequency NOTIFY iGpuFrequencyChanged )
   Q_PROPERTY( QString iGpuPower READ iGpuPower NOTIFY iGpuPowerChanged )
   Q_PROPERTY( QString iGpuTemp READ iGpuTemp NOTIFY iGpuTempChanged )
@@ -93,6 +94,7 @@ public:
   QString gpuTemp() const { return m_gpuTemp; }
   QString gpuFrequency() const { return m_gpuFrequency; }
   QString gpuPower() const { return m_gpuPower; }
+  QString gpuPlatformState() const { return m_gpuPlatformState; }
   QString iGpuFrequency() const { return m_iGpuFrequency; }
   QString iGpuPower() const { return m_iGpuPower; }
   QString iGpuTemp() const { return m_iGpuTemp; }
@@ -150,6 +152,7 @@ signals:
   void gpuTempChanged();
   void gpuFrequencyChanged();
   void gpuPowerChanged();
+  void gpuPlatformStateChanged();
   void iGpuFrequencyChanged();
   void iGpuPowerChanged();
   void iGpuTempChanged();
@@ -201,6 +204,7 @@ private:
   QString m_gpuTemp = "0°C";
   QString m_gpuFrequency = "0 MHz";
   QString m_gpuPower = "0 W";
+  QString m_gpuPlatformState;
   QString m_iGpuFrequency = "0 MHz";
   QString m_iGpuPower = "0 W";
   QString m_iGpuTemp = "0\u00b0C";
