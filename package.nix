@@ -13,8 +13,8 @@
   nlohmann_json,
   pkg-config,
   libxrandr,
+  libxcb-cursor,
   systemd,
-  xorg,
   makeWrapper,
   tuxedo-drivers ? null,
   src ? ./., # default to the source tree containing this file
@@ -50,8 +50,8 @@ stdenv.mkDerivation {
     kdePackages.libplasma
     nlohmann_json
     libxrandr
+    libxcb-cursor
     systemd
-    xorg.xcbutilcursor
   ]
   ++ lib.optionals (tuxedo-drivers != null) [
     tuxedo-drivers
