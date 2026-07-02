@@ -283,6 +283,16 @@ private:
     return std::ranges::find( *available, epp ) != available->end();
   }
 
+  bool intelPstatePerformanceOwnsEPP( const LogicalCpuController &core,
+                                      const std::string &requestedEPP,
+                                      const std::string &currentEPP )
+  {
+    return requestedEPP == "performance"
+           and currentEPP == "default"
+           and core.scalingDriver.read().value_or( "" ) == "intel_pstate"
+           and core.scalingGovernor.read().value_or( "" ) == "performance";
+  }
+
   /**
    * @brief Apply CPU settings from profile
    */
@@ -323,7 +333,9 @@ private:
         {
           auto currentEPP = m_cpuCtrl.cores[ 0 ].energyPerformancePreference.read();
 
-          if ( currentEPP.has_value() and *currentEPP != profile.cpu.energyPerformancePreference )
+          if ( currentEPP.has_value() and *currentEPP != profile.cpu.energyPerformancePreference
+               and not intelPstatePerformanceOwnsEPP(
+                 m_cpuCtrl.cores[ 0 ], profile.cpu.energyPerformancePreference, *currentEPP ) )
           {
             m_noEPPWriteQuirk = true;
             logLine( "CpuWorker: EPP write to sysfs was rejected by the kernel "
@@ -331,6 +343,14 @@ private:
                      + "', got '" + *currentEPP + "'). "
                      "Disabling sysfs EPP management — the hardware EPP may "
                      "already be correct at the MSR level.", LOG_WARNING );
+          }
+          else if ( currentEPP.has_value()
+                    and intelPstatePerformanceOwnsEPP(
+                      m_cpuCtrl.cores[ 0 ], profile.cpu.energyPerformancePreference, *currentEPP ) )
+          {
+            logLine( "CpuWorker: intel_pstate performance governor owns EPP; "
+                     "sysfs reports 'default' while hardware is performance-biased",
+                     LOG_INFO );
           }
         }
       }
@@ -458,7 +478,9 @@ private:
           {
             auto currentEPP = core.energyPerformancePreference.read();
 
-            if ( currentEPP.has_value() and *currentEPP != profile.cpu.energyPerformancePreference )
+            if ( currentEPP.has_value() and *currentEPP != profile.cpu.energyPerformancePreference
+                 and not intelPstatePerformanceOwnsEPP(
+                   core, profile.cpu.energyPerformancePreference, *currentEPP ) )
             {
               logLine( "CpuWorker: Unexpected value core" + std::to_string( core.coreIndex )
                        + " energy performance preference => '" + *currentEPP
