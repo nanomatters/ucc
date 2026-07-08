@@ -42,3 +42,4 @@ target_sources( test_profile_manager PRIVATE
 ucc_add_test( test_settings_manager test_settings_manager.cpp )
 ucc_add_test( test_metrics_history  test_metrics_history.cpp )
 ucc_add_test( test_uniwill_sysfs    test_uniwill_sysfs.cpp )
+ucc_add_test( test_utils            test_utils.cpp )

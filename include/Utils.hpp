@@ -50,21 +50,46 @@ inline constexpr std::array kSupportedDeviceSKUs = {
   "IBP14A10MK1 / IBP15A10MK1",
 };
 
+struct SupportedDmiBoard
+{
+  const char *vendor;
+  const char *name;
+};
+
+/// DMI baseboard identities for devices whose product_sku is not useful.
+inline constexpr std::array kSupportedDmiBoards = {
+  SupportedDmiBoard{ "AiStone", "X6FR559Y" },
+};
+
 /**
  * @brief Check whether the current machine is a supported (whitelisted) device.
  *
- * Reads /sys/class/dmi/id/product_sku and compares it against the
- * built-in whitelist. Returns true if the SKU matches.
+ * Reads DMI strings and compares them against the built-in whitelist. Product
+ * SKU is preferred, with a baseboard vendor/name fallback for systems that
+ * expose a generic SKU.
  */
-inline bool isDeviceSupported()
+inline bool isDeviceSupported( const std::filesystem::path &dmiBasePath = "/sys/class/dmi/id" )
 {
-  const auto sku = SysfsNode< std::string >( "/sys/class/dmi/id/product_sku" ).read();
-  if ( !sku.has_value() )
+  const auto sku = SysfsNode< std::string >( dmiBasePath / "product_sku" ).read();
+  if ( sku.has_value()
+       && std::find( kSupportedDeviceSKUs.begin(),
+                     kSupportedDeviceSKUs.end(),
+                     *sku ) != kSupportedDeviceSKUs.end() )
+  {
+    return true;
+  }
+
+  const auto boardVendor = SysfsNode< std::string >( dmiBasePath / "board_vendor" ).read();
+  const auto boardName = SysfsNode< std::string >( dmiBasePath / "board_name" ).read();
+  if ( !boardVendor.has_value() || !boardName.has_value() )
     return false;
 
-  return std::find( kSupportedDeviceSKUs.begin(),
-                    kSupportedDeviceSKUs.end(),
-                    *sku ) != kSupportedDeviceSKUs.end();
+  return std::any_of( kSupportedDmiBoards.begin(),
+                      kSupportedDmiBoards.end(),
+                      [&]( const SupportedDmiBoard &board )
+                      {
+                        return *boardVendor == board.vendor && *boardName == board.name;
+                      } );
 }
 
 /**
