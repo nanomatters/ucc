@@ -643,6 +643,34 @@ bool ProfileSettingsWorker::applyNVIDIADynamicBoost( bool enable )
   return true;
 }
 
+bool ProfileSettingsWorker::applyNVIDIAMuxMode( const std::string &mode )
+{
+  if ( !ucc::uniwill::isDgpuMuxModeValid( mode ) )
+  {
+    std::cout << "[NVIDIAPowerCTRL] Invalid GPU MUX mode: " << mode << std::endl;
+    return false;
+  }
+
+  const auto control = ucc::uniwill::readDgpuMuxControl( m_sysfsRoot );
+  if ( !control.isAvailable() )
+  {
+    std::cout << "[NVIDIAPowerCTRL] GPU MUX sysfs node not available" << std::endl;
+    return false;
+  }
+
+  const SysfsWriteResult writeResult = ucc::uniwill::writeDgpuMuxMode( control, mode );
+  if ( !writeResult )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Failed to write GPU MUX mode to "
+              << control.modePath << " (errno " << writeResult.error << ")" << std::endl;
+    return false;
+  }
+
+  std::cout << "[NVIDIAPowerCTRL] Set GPU MUX mode to " << mode
+            << " (reboot required)" << std::endl;
+  return true;
+}
+
 bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
 {
   if ( !m_cTGPAdjustmentSupported )

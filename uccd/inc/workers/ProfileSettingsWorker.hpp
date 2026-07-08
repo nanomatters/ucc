@@ -130,6 +130,7 @@ public:
    */
   bool applyNVIDIAPowerOffset( int32_t offset );
   bool applyNVIDIADynamicBoost( bool enable );
+  bool applyNVIDIAMuxMode( const std::string &mode );
 
   /**
    * @brief Periodic validation - checks if an external process changed the cTGP offset

@@ -49,6 +49,7 @@ private:
       "odmPowerLimits": { "tdpValues": [45, 80] },
       "nvidiaCTGPOffset": 15,
       "nvidiaDynamicBoostEnabled": true,
+      "nvidiaMuxMode": "dgpu_direct",
       "keyboard": { "keyboardProfileName": "Rainbow" },
       "selectedKeyboardProfile": "kb-uuid-001",
       "chargingProfile": "balanced",
@@ -130,6 +131,7 @@ private slots:
     QCOMPARE( *p.nvidiaCTGPOffset, 15 );
     QVERIFY( p.nvidiaDynamicBoostEnabled.has_value() );
     QVERIFY( *p.nvidiaDynamicBoostEnabled );
+    QCOMPARE( p.nvidiaMuxMode, std::string( "dgpu_direct" ) );
   }
 
   void parseProfile_keyboard()
@@ -171,6 +173,7 @@ private slots:
     QCOMPARE( reparsed.chargeEndThreshold,    original.chargeEndThreshold );
     QCOMPARE( reparsed.nvidiaCTGPOffset,      original.nvidiaCTGPOffset );
     QCOMPARE( reparsed.nvidiaDynamicBoostEnabled, original.nvidiaDynamicBoostEnabled );
+    QCOMPARE( reparsed.nvidiaMuxMode,         original.nvidiaMuxMode );
 
     // Fan tables survive the trip
     QCOMPARE( static_cast< int >( reparsed.fan.tableCPU.size() ),

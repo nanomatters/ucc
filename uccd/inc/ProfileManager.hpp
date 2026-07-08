@@ -19,6 +19,7 @@
 #include "profiles/DefaultProfiles.hpp"
 #include "CommonTypes.hpp"
 #include "StateUtils.hpp"
+#include "UniwillSysfs.hpp"
 #include <string>
 #include <vector>
 #include <sstream>
@@ -331,6 +332,12 @@ public:
 
     if ( json.find( "\"nvidiaDynamicBoostEnabled\"" ) != std::string::npos )
       profile.nvidiaDynamicBoostEnabled = extractBool( json, "nvidiaDynamicBoostEnabled", false );
+
+    {
+      const std::string muxMode = extractString( json, "nvidiaMuxMode", "" );
+      if ( ucc::uniwill::isDgpuMuxModeValid( muxMode ) )
+        profile.nvidiaMuxMode = muxMode;
+    }
 
     // Parse charging profile (firmware-level charging mode stored per-profile)
     profile.chargingProfile = extractString( json, "chargingProfile", "" );
@@ -710,6 +717,10 @@ public:
     {
       oss << ",\"nvidiaDynamicBoostEnabled\":"
           << ( *profile.nvidiaDynamicBoostEnabled ? "true" : "false" );
+    }
+    if ( !profile.nvidiaMuxMode.empty() )
+    {
+      oss << ",\"nvidiaMuxMode\":\"" << jsonEscape( profile.nvidiaMuxMode ) << "\"";
     }
 
     // Keyboard section

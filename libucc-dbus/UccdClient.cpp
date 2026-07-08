@@ -409,6 +409,18 @@ std::optional< bool > UccdClient::getNVIDIADynamicBoostSupported()
   return callMethod< bool >( "GetNVIDIADynamicBoostSupported" );
 }
 
+std::optional< bool > UccdClient::getNVIDIAMuxModeSupported()
+{
+  return callMethod< bool >( "GetNVIDIAMuxModeSupported" );
+}
+
+std::optional< std::string > UccdClient::getNVIDIAMuxMode()
+{
+  if ( auto mode = callMethod< QString >( "GetNVIDIAMuxMode" ) )
+    return mode->toStdString();
+  return std::nullopt;
+}
+
 std::optional< bool > UccdClient::getHwpDynamicBoostSupported()
 {
   return callMethod< bool >( "GetHwpDynamicBoostSupported" );

@@ -205,6 +205,8 @@ namespace ucc
     QWidget *m_ctgpWidget = nullptr;
     QLabel *m_nvidiaDynamicBoostLabel = nullptr;
     QCheckBox *m_nvidiaDynamicBoostCheckBox = nullptr;
+    QLabel *m_nvidiaMuxModeLabel = nullptr;
+    QComboBox *m_nvidiaMuxModeCombo = nullptr;
 
     // CPU frequency control widgets
     QSlider *m_cpuCoresSlider = nullptr;
@@ -257,6 +259,7 @@ namespace ucc
     bool m_waterCoolerSupported = false;
     bool m_cTGPAdjustmentSupported = false;
     bool m_nvidiaDynamicBoostSupported = false;
+    bool m_nvidiaMuxModeSupported = false;
     bool m_hwpDynamicBoostSupported = false;
     int m_gpuDefaultPowerLimit = 0;  // Default GPU power limit in watts, queried from daemon
 

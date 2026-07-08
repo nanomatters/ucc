@@ -314,6 +314,10 @@ static std::string profileToJSON( const UccProfile &profile,
     oss << ",\"nvidiaDynamicBoostEnabled\":"
         << ( *profile.nvidiaDynamicBoostEnabled ? "true" : "false" );
   }
+  if ( !profile.nvidiaMuxMode.empty() )
+  {
+    oss << ",\"nvidiaMuxMode\":\"" << jsonEscape( profile.nvidiaMuxMode ) << "\"";
+  }
 
   // Keyboard section - only store the reference, not the full state data
   // Full per-key states live in customKeyboardProfiles in /etc/ucc/settings.
@@ -1963,6 +1967,20 @@ bool UccDBusInterfaceAdaptor::GetCTGPAdjustmentSupported()
 bool UccDBusInterfaceAdaptor::GetNVIDIADynamicBoostSupported()
 {
   return m_data.nvidiaDynamicBoostSupported;
+}
+
+bool UccDBusInterfaceAdaptor::GetNVIDIAMuxModeSupported()
+{
+  return m_data.nvidiaMuxModeSupported;
+}
+
+QString UccDBusInterfaceAdaptor::GetNVIDIAMuxMode()
+{
+  const auto control = ucc::uniwill::readDgpuMuxControl();
+  if ( !control.isAvailable() )
+    return QString();
+
+  return QString::fromStdString( control.mode );
 }
 
 bool UccDBusInterfaceAdaptor::GetHwpDynamicBoostSupported()
@@ -3863,6 +3881,7 @@ void UccDBusService::computeDeviceCapabilities()
   const bool ctgpHardwareExists = ucc::uniwill::readCtgpInfo().isAvailable();
   const bool dynamicBoostHardwareExists =
     ucc::uniwill::readDgpuDynamicBoostControl().isAvailable();
+  const bool muxModeHardwareExists = ucc::uniwill::readDgpuMuxControl().isAvailable();
 
   if ( m_deviceId.has_value() )
   {
@@ -3870,6 +3889,7 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.cTGPAdjustmentSupported =
       ctgpHardwareExists && cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
     m_dbusData.nvidiaDynamicBoostSupported = dynamicBoostHardwareExists;
+    m_dbusData.nvidiaMuxModeSupported = muxModeHardwareExists;
   }
   else
   {
@@ -3877,6 +3897,7 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.waterCoolerSupported = false;
     m_dbusData.cTGPAdjustmentSupported = ctgpHardwareExists;
     m_dbusData.nvidiaDynamicBoostSupported = dynamicBoostHardwareExists;
+    m_dbusData.nvidiaMuxModeSupported = muxModeHardwareExists;
   }
 
   // Detect HWP Dynamic Boost support
@@ -3885,10 +3906,11 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.hwpDynamicBoostSupported = SysfsNode< bool >( hwpBoostPath ).isAvailable();
   }
 
-  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, nvidiaDynamicBoost=%s, hwpDynamicBoost=%s",
+  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, nvidiaDynamicBoost=%s, nvidiaMux=%s, hwpDynamicBoost=%s",
           m_dbusData.waterCoolerSupported.load() ? "supported" : "not supported",
           m_dbusData.cTGPAdjustmentSupported.load() ? "supported" : "hidden",
           m_dbusData.nvidiaDynamicBoostSupported.load() ? "supported" : "not supported",
+          m_dbusData.nvidiaMuxModeSupported.load() ? "supported" : "not supported",
           m_dbusData.hwpDynamicBoostSupported.load() ? "supported" : "not supported" );
 }
 
@@ -4212,16 +4234,24 @@ void UccDBusService::applyGpuPowerFromProfile( const UccProfile &profile )
   if ( profile.nvidiaDynamicBoostEnabled.has_value()
        && m_dbusData.nvidiaDynamicBoostSupported.load() )
   {
-    std::cout << "[GPU Power] Applying NVIDIA Dynamic Boost from profile: "
+    std::cout << "[GPU Settings] Applying NVIDIA Dynamic Boost from profile: "
               << ( *profile.nvidiaDynamicBoostEnabled ? "enabled" : "disabled" )
               << std::endl;
     m_profileSettingsWorker->applyNVIDIADynamicBoost( *profile.nvidiaDynamicBoostEnabled );
   }
 
+  if ( !profile.nvidiaMuxMode.empty()
+       && m_dbusData.nvidiaMuxModeSupported.load() )
+  {
+    std::cout << "[GPU Settings] Applying GPU MUX mode from profile: "
+              << profile.nvidiaMuxMode << std::endl;
+    m_profileSettingsWorker->applyNVIDIAMuxMode( profile.nvidiaMuxMode );
+  }
+
   if ( profile.nvidiaCTGPOffset.has_value()
        && m_dbusData.nvidiaPowerCTRLAvailable.load() )
   {
-    std::cout << "[GPU Power] Applying cTGP offset from profile: "
+    std::cout << "[GPU Settings] Applying cTGP offset from profile: "
               << *profile.nvidiaCTGPOffset << std::endl;
     m_profileSettingsWorker->applyNVIDIAPowerOffset( *profile.nvidiaCTGPOffset );
   }

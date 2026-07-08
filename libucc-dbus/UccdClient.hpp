@@ -140,6 +140,8 @@ public:
   std::optional< bool > getCTGPAdjustmentSupported();
   std::optional< bool > getKeyboardBacklightControlSupported();
   std::optional< bool > getNVIDIADynamicBoostSupported();
+  std::optional< bool > getNVIDIAMuxModeSupported();
+  std::optional< std::string > getNVIDIAMuxMode();
   std::optional< bool > getHwpDynamicBoostSupported();
 
   // Keyboard Control

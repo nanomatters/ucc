@@ -118,6 +118,8 @@ MainWindow::MainWindow( QWidget *parent )
     m_cTGPAdjustmentSupported = *ctgp;
   if ( auto gpuBoost = m_UccdClient->getNVIDIADynamicBoostSupported() )
     m_nvidiaDynamicBoostSupported = *gpuBoost;
+  if ( auto gpuMux = m_UccdClient->getNVIDIAMuxModeSupported() )
+    m_nvidiaMuxModeSupported = *gpuMux;
   if ( auto hwpBoost = m_UccdClient->getHwpDynamicBoostSupported() )
     m_hwpDynamicBoostSupported = *hwpBoost;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
@@ -662,8 +664,8 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
   row++;
 
-  // === GPU POWER (cTGP) SECTION ===
-  m_ctgpHeader = new QLabel( "GPU Power" );
+  // === GPU SETTINGS SECTION ===
+  m_ctgpHeader = new QLabel( "GPU Settings" );
   m_ctgpHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
   detailsLayout->addWidget( m_ctgpHeader, row, 0, 1, 2 );
   row++;
@@ -690,6 +692,16 @@ void MainWindow::setupProfilesPage()
   m_nvidiaDynamicBoostCheckBox->setChecked( true );
   detailsLayout->addWidget( m_nvidiaDynamicBoostLabel, row, 0 );
   detailsLayout->addWidget( m_nvidiaDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
+  row++;
+
+  m_nvidiaMuxModeLabel = new QLabel( "MUX mode" );
+  m_nvidiaMuxModeCombo = new QComboBox();
+  m_nvidiaMuxModeCombo->addItem( "Hybrid", "hybrid" );
+  m_nvidiaMuxModeCombo->addItem( "dGPU direct", "dgpu_direct" );
+  m_nvidiaMuxModeCombo->addItem( "iGPU only", "igpu_only" );
+  m_nvidiaMuxModeCombo->setToolTip( "Requires reboot to take effect" );
+  detailsLayout->addWidget( m_nvidiaMuxModeLabel, row, 0 );
+  detailsLayout->addWidget( m_nvidiaMuxModeCombo, row, 1 );
   row++;
 
   updateCtgpVisibility();
@@ -1077,6 +1089,9 @@ void MainWindow::connectSignals()
   }
   if ( m_nvidiaDynamicBoostCheckBox )
     connect( m_nvidiaDynamicBoostCheckBox, &QCheckBox::toggled,
+             this, &MainWindow::markChanged );
+  if ( m_nvidiaMuxModeCombo )
+    connect( m_nvidiaMuxModeCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
              this, &MainWindow::markChanged );
 
   connect( m_profileKeyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
@@ -1900,7 +1915,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
       }
     }
   }
-  // Load GPU Power (cTGP) setting
+  // Load GPU settings
   if ( m_ctgpSlider && m_cTGPAdjustmentSupported )
   {
     int ctgpOffset = obj.value( "nvidiaCTGPOffset" ).toInt( 0 );
@@ -1923,6 +1938,24 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     m_nvidiaDynamicBoostCheckBox->setChecked(
       obj.value( "nvidiaDynamicBoostEnabled" ).toBool( true ) );
     m_nvidiaDynamicBoostCheckBox->blockSignals( false );
+  }
+  if ( m_nvidiaMuxModeCombo && m_nvidiaMuxModeSupported )
+  {
+    QString muxMode = obj.value( "nvidiaMuxMode" ).toString();
+    if ( muxMode.isEmpty() )
+    {
+      if ( auto currentMode = m_UccdClient->getNVIDIAMuxMode() )
+        muxMode = QString::fromStdString( *currentMode );
+    }
+
+    int index = muxMode.isEmpty() ? -1 : m_nvidiaMuxModeCombo->findData( muxMode );
+    if ( index < 0 )
+      index = m_nvidiaMuxModeCombo->findData( "hybrid" );
+
+    m_nvidiaMuxModeCombo->blockSignals( true );
+    if ( index >= 0 )
+      m_nvidiaMuxModeCombo->setCurrentIndex( index );
+    m_nvidiaMuxModeCombo->blockSignals( false );
   }
 
   // Load Charging priority setting
@@ -2077,9 +2110,10 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   updateCpuPowerLimitEditability( isCustom );
 
-  // GPU Power (cTGP) slider
+  // GPU settings
   if ( m_ctgpSlider ) m_ctgpSlider->setEnabled( isCustom );
   if ( m_nvidiaDynamicBoostCheckBox ) m_nvidiaDynamicBoostCheckBox->setEnabled( isCustom );
+  if ( m_nvidiaMuxModeCombo ) m_nvidiaMuxModeCombo->setEnabled( isCustom );
   // Charging
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->setEnabled( isCustom );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->setEnabled( isCustom );
@@ -2158,10 +2192,11 @@ void MainWindow::setCpuPowerLimitSlidersToMaximum()
 void MainWindow::updateCtgpVisibility()
 {
   const bool ctgpVisible = m_cTGPAdjustmentSupported;
-  const bool gpuPowerVisible = ctgpVisible || m_nvidiaDynamicBoostSupported;
+  const bool gpuSettingsVisible =
+    ctgpVisible || m_nvidiaDynamicBoostSupported || m_nvidiaMuxModeSupported;
 
   if ( m_ctgpHeader )
-    m_ctgpHeader->setVisible( gpuPowerVisible );
+    m_ctgpHeader->setVisible( gpuSettingsVisible );
   if ( m_ctgpLabel )
     m_ctgpLabel->setVisible( ctgpVisible );
   if ( m_ctgpWidget )
@@ -2170,6 +2205,10 @@ void MainWindow::updateCtgpVisibility()
     m_nvidiaDynamicBoostLabel->setVisible( m_nvidiaDynamicBoostSupported );
   if ( m_nvidiaDynamicBoostCheckBox )
     m_nvidiaDynamicBoostCheckBox->setVisible( m_nvidiaDynamicBoostSupported );
+  if ( m_nvidiaMuxModeLabel )
+    m_nvidiaMuxModeLabel->setVisible( m_nvidiaMuxModeSupported );
+  if ( m_nvidiaMuxModeCombo )
+    m_nvidiaMuxModeCombo->setVisible( m_nvidiaMuxModeSupported );
 }
 
 void MainWindow::markChanged()
@@ -2256,7 +2295,7 @@ QString MainWindow::buildProfileJSON() const
   odmObj["tdpValues"] = tdpArray;
   profileObj["odmPowerLimits"] = odmObj;
 
-  // GPU Power (cTGP) - embed cTGP offset directly in the profile
+  // GPU settings - embed GPU controls directly in the profile
   if ( m_ctgpSlider && m_cTGPAdjustmentSupported )
   {
     int sliderValue = m_ctgpSlider->value();
@@ -2266,6 +2305,8 @@ QString MainWindow::buildProfileJSON() const
   }
   if ( m_nvidiaDynamicBoostCheckBox && m_nvidiaDynamicBoostSupported )
     profileObj["nvidiaDynamicBoostEnabled"] = m_nvidiaDynamicBoostCheckBox->isChecked();
+  if ( m_nvidiaMuxModeCombo && m_nvidiaMuxModeSupported )
+    profileObj["nvidiaMuxMode"] = m_nvidiaMuxModeCombo->currentData().toString();
 
   // Charging
   if ( m_profileChargingPriorityCombo )
@@ -2769,6 +2810,8 @@ void MainWindow::onUccdConnectionChanged( bool connected )
     m_cTGPAdjustmentSupported = *ctgp;
   if ( auto gpuBoost = m_UccdClient->getNVIDIADynamicBoostSupported() )
     m_nvidiaDynamicBoostSupported = *gpuBoost;
+  if ( auto gpuMux = m_UccdClient->getNVIDIAMuxModeSupported() )
+    m_nvidiaMuxModeSupported = *gpuMux;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     m_gpuDefaultPowerLimit = *gpuDefault;
 

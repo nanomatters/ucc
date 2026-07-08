@@ -180,6 +180,7 @@ struct UccProfile
   UccODMPowerLimits odmPowerLimits;
   std::optional< int32_t > nvidiaCTGPOffset; ///< Configurable graphics TGP offset in watts
   std::optional< bool > nvidiaDynamicBoostEnabled; ///< NVIDIA Dynamic Boost enable state
+  std::string nvidiaMuxMode; ///< GPU MUX mode: hybrid/dgpu_direct/igpu_only
   std::string chargingProfile;  ///< firmware-level charging profile descriptor (e.g. "balanced")
   std::string chargingPriority; ///< USB-C PD charging priority (e.g. "charge_battery", "performance")
   std::string chargeType;       ///< charge type: "Standard" or "Custom"
@@ -208,6 +209,7 @@ struct UccProfile
       odmPowerLimits( other.odmPowerLimits ),
       nvidiaCTGPOffset( other.nvidiaCTGPOffset ),
       nvidiaDynamicBoostEnabled( other.nvidiaDynamicBoostEnabled ),
+      nvidiaMuxMode( other.nvidiaMuxMode ),
       chargingProfile( other.chargingProfile ),
       chargingPriority( other.chargingPriority ),
       chargeType( other.chargeType ),
@@ -233,6 +235,7 @@ struct UccProfile
       odmPowerLimits = other.odmPowerLimits;
       nvidiaCTGPOffset = other.nvidiaCTGPOffset;
       nvidiaDynamicBoostEnabled = other.nvidiaDynamicBoostEnabled;
+      nvidiaMuxMode = other.nvidiaMuxMode;
       chargingProfile = other.chargingProfile;
       chargingPriority = other.chargingPriority;
       chargeType = other.chargeType;

@@ -473,6 +473,37 @@ private slots:
     QVERIFY( !*updated.enabled );
   }
 
+  void readsAndWritesDgpuMuxMode()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path modePath =
+      root / "bus/platform/devices/INOU0000:00/dgpu/mux_mode";
+
+    writeFile( modePath, "hybrid\n" );
+
+    auto control = ucc::uniwill::readDgpuMuxControl( root.string() );
+    QVERIFY( control.isAvailable() );
+    QCOMPARE( control.modePath, modePath.string() );
+    QCOMPARE( control.mode, std::string( "hybrid" ) );
+
+    const SysfsWriteResult result =
+      ucc::uniwill::writeDgpuMuxMode( control, "dgpu_direct" );
+
+    QVERIFY( result );
+    QCOMPARE( ucc::uniwill::readFirstLine( modePath ).value_or( "" ),
+              std::string( "dgpu_direct" ) );
+
+    control = ucc::uniwill::readDgpuMuxControl( root.string() );
+    QCOMPARE( control.mode, std::string( "dgpu_direct" ) );
+
+    const SysfsWriteResult invalid =
+      ucc::uniwill::writeDgpuMuxMode( control, "discrete" );
+    QVERIFY( !invalid );
+    QCOMPARE( invalid.error, EINVAL );
+  }
+
   void chargeEndThresholdAvailabilityRequiresWritableNode()
   {
     QTemporaryDir dir;

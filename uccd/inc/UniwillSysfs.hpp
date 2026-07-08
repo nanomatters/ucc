@@ -125,6 +125,22 @@ struct DgpuDynamicBoostControl
   }
 };
 
+struct DgpuMuxControl
+{
+  std::string modePath;
+  std::string mode;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not modePath.empty();
+  }
+};
+
+inline bool isDgpuMuxModeValid( const std::string &mode ) noexcept
+{
+  return mode == "hybrid" || mode == "dgpu_direct" || mode == "igpu_only";
+}
+
 struct FanChannel
 {
   size_t index = 0;
@@ -925,6 +941,44 @@ inline SysfsWriteResult writeDgpuDynamicBoostEnable(
   const std::string &sysfsRoot = "/sys" )
 {
   return writeDgpuDynamicBoostEnable( readDgpuDynamicBoostControl( sysfsRoot ), enable );
+}
+
+[[nodiscard]] inline DgpuMuxControl readDgpuMuxControl(
+  const std::string &sysfsRoot = "/sys" )
+{
+  DgpuMuxControl control;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return control;
+
+  const fs::path modePath = *platformDevice / "dgpu" / "mux_mode";
+  if ( not Sysfs::exists( modePath ) )
+    return control;
+
+  control.modePath = modePath.string();
+  control.mode = readFirstLine( modePath ).value_or( "" );
+
+  return control;
+}
+
+inline SysfsWriteResult writeDgpuMuxMode(
+  const DgpuMuxControl &control,
+  const std::string &mode )
+{
+  if ( not control.isAvailable() )
+    return { false, ENOENT, 0 };
+  if ( not isDgpuMuxModeValid( mode ) )
+    return { false, EINVAL, 0 };
+
+  return SysfsNode< std::string >( control.modePath ).writeDetailed( mode );
+}
+
+inline SysfsWriteResult writeDgpuMuxMode(
+  const std::string &mode,
+  const std::string &sysfsRoot = "/sys" )
+{
+  return writeDgpuMuxMode( readDgpuMuxControl( sysfsRoot ), mode );
 }
 
 }

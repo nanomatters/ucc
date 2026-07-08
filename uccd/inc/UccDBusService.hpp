@@ -152,6 +152,7 @@ public:
   std::atomic< bool > waterCoolerSupported;
   std::atomic< bool > cTGPAdjustmentSupported;
   std::atomic< bool > nvidiaDynamicBoostSupported;
+  std::atomic< bool > nvidiaMuxModeSupported;
   std::atomic< bool > hwpDynamicBoostSupported;
   std::atomic< bool > deviceSupported{ false };
   std::atomic< int32_t > cpuFrequencyMHz;
@@ -211,6 +212,7 @@ public:
         waterCoolerSupported( false ),
         cTGPAdjustmentSupported( false ),
         nvidiaDynamicBoostSupported( false ),
+        nvidiaMuxModeSupported( false ),
         hwpDynamicBoostSupported( false ),
         cpuFrequencyMHz( -1 )
   {
@@ -397,6 +399,8 @@ public slots:
   bool GetWaterCoolerSupported();
   bool GetCTGPAdjustmentSupported();
   bool GetNVIDIADynamicBoostSupported();
+  bool GetNVIDIAMuxModeSupported();
+  QString GetNVIDIAMuxMode();
   bool GetHwpDynamicBoostSupported();
 
   // monitoring history methods
