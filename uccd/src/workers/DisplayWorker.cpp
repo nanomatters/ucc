@@ -231,8 +231,7 @@ void DisplayWorker::applyBacklightFromProfile()
 
   const UccProfile activeProfile = m_getActiveProfile();
 
-  // Only apply brightness if the profile explicitly enables it
-  if ( activeProfile.display.useBrightness and activeProfile.display.brightness >= 0 )
+  if ( activeProfile.display.brightness >= 0 )
   {
     m_backlightController->setBrightness( activeProfile.display.brightness );
     syslog( LOG_INFO, "DisplayWorker: Applied profile brightness %d%%",

@@ -116,6 +116,8 @@ MainWindow::MainWindow( QWidget *parent )
     m_waterCoolerSupported = *waterCooler;
   if ( auto ctgp = m_UccdClient->getCTGPAdjustmentSupported() )
     m_cTGPAdjustmentSupported = *ctgp;
+  if ( auto gpuBoost = m_UccdClient->getNVIDIADynamicBoostSupported() )
+    m_nvidiaDynamicBoostSupported = *gpuBoost;
   if ( auto hwpBoost = m_UccdClient->getHwpDynamicBoostSupported() )
     m_hwpDynamicBoostSupported = *hwpBoost;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
@@ -427,7 +429,7 @@ void MainWindow::setupProfilesPage()
   row++;
 
   // === ACTIVATE PROFILE AUTOMATICALLY ON ===
-  QLabel *autoActivateLabel = new QLabel( "Activate profile automatically on" );
+  QLabel *autoActivateLabel = new QLabel( "Activate automatically on" );
   autoActivateLabel->setStyleSheet( "font-weight: bold;" );
   QHBoxLayout *buttonLayout = new QHBoxLayout();
   m_mainsButton = new QPushButton( "Mains" );
@@ -466,12 +468,148 @@ void MainWindow::setupProfilesPage()
 
   QLabel *platformProfileLabel = new QLabel( "Platform profile" );
   m_platformProfileCombo = new QComboBox();
-  detailsLayout->addWidget( platformProfileLabel, row, 0 );
-  detailsLayout->addWidget( m_platformProfileCombo, row, 1 );
+  m_platformProfileCombo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+  m_platformProfileCombo->setMinimumContentsLength( 10 );
+  m_platformProfileCombo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+  QLabel *governorLabel = new QLabel( "Governor" );
+  m_governorCombo = new QComboBox();
+  m_governorCombo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+  m_governorCombo->setMinimumContentsLength( 10 );
+  m_governorCombo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+  QLabel *eppLabel = new QLabel( "EPP" );
+  m_eppCombo = new QComboBox();
+  m_eppCombo->setSizeAdjustPolicy( QComboBox::AdjustToMinimumContentsLengthWithIcon );
+  m_eppCombo->setMinimumContentsLength( 10 );
+  m_eppCombo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
+
+  QHBoxLayout *platformProfileFieldLayout = new QHBoxLayout();
+  platformProfileFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+  platformProfileFieldLayout->setSpacing( 8 );
+  platformProfileFieldLayout->addWidget( platformProfileLabel );
+  platformProfileFieldLayout->addWidget( m_platformProfileCombo, 1 );
+
+  QHBoxLayout *governorFieldLayout = new QHBoxLayout();
+  governorFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+  governorFieldLayout->setSpacing( 8 );
+  governorFieldLayout->addWidget( governorLabel );
+  governorFieldLayout->addWidget( m_governorCombo, 1 );
+
+  QHBoxLayout *eppFieldLayout = new QHBoxLayout();
+  eppFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+  eppFieldLayout->setSpacing( 8 );
+  eppFieldLayout->addWidget( eppLabel );
+  eppFieldLayout->addWidget( m_eppCombo, 1 );
+
+  QHBoxLayout *platformProfileLayout = new QHBoxLayout();
+  platformProfileLayout->setContentsMargins( 0, 0, 0, 0 );
+  platformProfileLayout->setSpacing( 16 );
+  platformProfileLayout->addLayout( platformProfileFieldLayout, 1 );
+  platformProfileLayout->addLayout( governorFieldLayout, 1 );
+  platformProfileLayout->addLayout( eppFieldLayout, 1 );
+  detailsLayout->addLayout( platformProfileLayout, row, 0, 1, 2 );
   row++;
   reloadPlatformProfileChoices();
 
+  QLabel *minFreqLabel = new QLabel( "Min frequency" );
+  QHBoxLayout *minFreqLayout = new QHBoxLayout();
+  m_minFrequencySlider = new QSlider( Qt::Horizontal );
+  m_minFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
+
+  // Get hardware frequency limits and initialize slider with actual values
+  int minFreqKHz = 400000;  // fallback
+  int maxFreqKHz = 6000000; // fallback
+  if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
+    if ( doc.isObject() )
+    {
+      QJsonObject limitsObj = doc.object();
+      minFreqKHz = limitsObj["min"].toInt( 400000 );
+      maxFreqKHz = limitsObj["max"].toInt( 6000000 );
+      m_cpuMinFreqKHz = minFreqKHz;
+      m_cpuMaxFreqKHz = maxFreqKHz;
+    }
+  }
+  m_minFrequencySlider->setMinimum( minFreqKHz );
+  m_minFrequencySlider->setMaximum( maxFreqKHz );
+  m_minFrequencySlider->setValue( minFreqKHz );
+
+  m_minFrequencyValue = new QLabel();
+  m_minFrequencyValue->setMinimumWidth( 60 );
+  double freqGHz = minFreqKHz / 1000000.0;
+  m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+
+  minFreqLayout->addWidget( m_minFrequencySlider, 1 );
+  minFreqLayout->addWidget( m_minFrequencyValue );
+
+  QLabel *maxFreqLabel = new QLabel( "Max frequency" );
+  QHBoxLayout *maxFreqLayout = new QHBoxLayout();
+  m_maxFrequencySlider = new QSlider( Qt::Horizontal );
+  m_maxFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
+  m_maxFrequencySlider->setMinimum( minFreqKHz );
+  m_maxFrequencySlider->setMaximum( maxFreqKHz );
+  m_maxFrequencySlider->setValue( maxFreqKHz );
+
+  m_maxFrequencyValue = new QLabel();
+  m_maxFrequencyValue->setMinimumWidth( 60 );
+  freqGHz = maxFreqKHz / 1000000.0;
+  m_maxFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+  maxFreqLayout->addWidget( m_maxFrequencySlider, 1 );
+  maxFreqLayout->addWidget( m_maxFrequencyValue );
+
+  QHBoxLayout *minFreqFieldLayout = new QHBoxLayout();
+  minFreqFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+  minFreqFieldLayout->setSpacing( 8 );
+  minFreqFieldLayout->addWidget( minFreqLabel );
+  minFreqFieldLayout->addLayout( minFreqLayout, 1 );
+
+  QHBoxLayout *maxFreqFieldLayout = new QHBoxLayout();
+  maxFreqFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+  maxFreqFieldLayout->setSpacing( 8 );
+  maxFreqFieldLayout->addWidget( maxFreqLabel );
+  maxFreqFieldLayout->addLayout( maxFreqLayout, 1 );
+
+  QHBoxLayout *cpuFrequencyLayout = new QHBoxLayout();
+  cpuFrequencyLayout->setContentsMargins( 0, 0, 0, 0 );
+  cpuFrequencyLayout->setSpacing( 16 );
+  cpuFrequencyLayout->addLayout( minFreqFieldLayout, 1 );
+  cpuFrequencyLayout->addLayout( maxFreqFieldLayout, 1 );
+
+  detailsLayout->addLayout( cpuFrequencyLayout, row, 0, 1, 2 );
+  row++;
+
+  QLabel *coresLabel = new QLabel( "Number of logical cores" );
+  QHBoxLayout *coresLayout = new QHBoxLayout();
+  const int nCores = m_UccdClient->getCpuCoreCount().value_or( 1 );
+  m_cpuCoresSlider = new QSlider( Qt::Horizontal );
+  m_cpuCoresSlider->setMinimum( 1 );
+  m_cpuCoresSlider->setMaximum( nCores > 0 ? nCores : 1 );
+  m_cpuCoresSlider->setValue( nCores > 0 ? nCores : 1 );
+  m_cpuCoresValue = new QLabel( QString::number( nCores > 0 ? nCores : 1 ) );
+  m_cpuCoresValue->setMinimumWidth( 35 );
+  coresLayout->addWidget( m_cpuCoresSlider, 1 );
+  coresLayout->addWidget( m_cpuCoresValue );
+  detailsLayout->addWidget( coresLabel, row, 0 );
+  detailsLayout->addLayout( coresLayout, row, 1 );
+  row++;
+
+  m_hwpDynamicBoostLabel = new QLabel( "HWP Dynamic Boost" );
+  m_hwpDynamicBoostCheckBox = new QCheckBox( "Enable" );
+  m_hwpDynamicBoostLabel->setVisible( m_hwpDynamicBoostSupported );
+  m_hwpDynamicBoostCheckBox->setVisible( m_hwpDynamicBoostSupported );
+  if ( m_hwpDynamicBoostSupported )
+  {
+    detailsLayout->addWidget( m_hwpDynamicBoostLabel, row, 0 );
+    detailsLayout->addWidget( m_hwpDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
+    row++;
+  }
+
+  // Add spacer
+  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
+  row++;
+
   QLabel *odmPowerHeader = new QLabel( "CPU power limit control" );
+  odmPowerHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
   detailsLayout->addWidget( odmPowerHeader, row, 0, 1, 2 );
   row++;
 
@@ -521,101 +659,6 @@ void MainWindow::setupProfilesPage()
   row++;
 
   // Add spacer
-  detailsLayout->addItem( new QSpacerItem( 0, 5 ), row, 0, 1, 2 );
-  row++;
-
-  QLabel *coresLabel = new QLabel( "Number of logical cores" );
-  QHBoxLayout *coresLayout = new QHBoxLayout();
-  const int nCores = m_UccdClient->getCpuCoreCount().value_or( 1 );
-  m_cpuCoresSlider = new QSlider( Qt::Horizontal );
-  m_cpuCoresSlider->setMinimum( 1 );
-  m_cpuCoresSlider->setMaximum( nCores > 0 ? nCores : 1 );
-  m_cpuCoresSlider->setValue( nCores > 0 ? nCores : 1 );
-  m_cpuCoresValue = new QLabel( QString::number( nCores > 0 ? nCores : 1 ) );
-  m_cpuCoresValue->setMinimumWidth( 35 );
-  coresLayout->addWidget( m_cpuCoresSlider, 1 );
-  coresLayout->addWidget( m_cpuCoresValue );
-  detailsLayout->addWidget( coresLabel, row, 0 );
-  detailsLayout->addLayout( coresLayout, row, 1 );
-  row++;
-
-  QLabel *maxPerfLabel = new QLabel( "CPU Governor" );
-  m_governorCombo = new QComboBox();
-  detailsLayout->addWidget( maxPerfLabel, row, 0 );
-  detailsLayout->addWidget( m_governorCombo, row, 1, Qt::AlignLeft );
-  row++;
-
-  QLabel *eppLabel = new QLabel( "Energy Performance Preference" );
-  m_eppCombo = new QComboBox();
-  detailsLayout->addWidget( eppLabel, row, 0 );
-  detailsLayout->addWidget( m_eppCombo, row, 1, Qt::AlignLeft );
-  row++;
-
-  QLabel *minFreqLabel = new QLabel( "Minimum frequency" );
-  QHBoxLayout *minFreqLayout = new QHBoxLayout();
-  m_minFrequencySlider = new QSlider( Qt::Horizontal );
-  m_minFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
-
-  // Get hardware frequency limits and initialize slider with actual values
-  int minFreqKHz = 400000;  // fallback
-  int maxFreqKHz = 6000000; // fallback
-  if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
-    if ( doc.isObject() )
-    {
-      QJsonObject limitsObj = doc.object();
-      minFreqKHz = limitsObj["min"].toInt( 400000 );
-      maxFreqKHz = limitsObj["max"].toInt( 6000000 );
-      m_cpuMinFreqKHz = minFreqKHz;
-      m_cpuMaxFreqKHz = maxFreqKHz;
-    }
-  }
-  m_minFrequencySlider->setMinimum( minFreqKHz );
-  m_minFrequencySlider->setMaximum( maxFreqKHz );
-  m_minFrequencySlider->setValue( minFreqKHz );
-
-  m_minFrequencyValue = new QLabel();
-  m_minFrequencyValue->setMinimumWidth( 60 );
-  double freqGHz = minFreqKHz / 1000000.0;
-  m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
-
-  minFreqLayout->addWidget( m_minFrequencySlider, 1 );
-  minFreqLayout->addWidget( m_minFrequencyValue );
-  detailsLayout->addWidget( minFreqLabel, row, 0 );
-  detailsLayout->addLayout( minFreqLayout, row, 1 );
-  row++;
-
-  QLabel *maxFreqLabel = new QLabel( "Maximum frequency" );
-  QHBoxLayout *maxFreqLayout = new QHBoxLayout();
-  m_maxFrequencySlider = new QSlider( Qt::Horizontal );
-  m_maxFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
-  m_maxFrequencySlider->setMinimum( minFreqKHz );
-  m_maxFrequencySlider->setMaximum( maxFreqKHz );
-  m_maxFrequencySlider->setValue( maxFreqKHz );
-
-  m_maxFrequencyValue = new QLabel();
-  m_maxFrequencyValue->setMinimumWidth( 60 );
-  freqGHz = maxFreqKHz / 1000000.0;
-  m_maxFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
-  maxFreqLayout->addWidget( m_maxFrequencySlider, 1 );
-  maxFreqLayout->addWidget( m_maxFrequencyValue );
-  detailsLayout->addWidget( maxFreqLabel, row, 0 );
-  detailsLayout->addLayout( maxFreqLayout, row, 1 );
-  row++;
-
-  m_hwpDynamicBoostLabel = new QLabel( "HWP Dynamic Boost" );
-  m_hwpDynamicBoostCheckBox = new QCheckBox( "Enable" );
-  m_hwpDynamicBoostLabel->setVisible( m_hwpDynamicBoostSupported );
-  m_hwpDynamicBoostCheckBox->setVisible( m_hwpDynamicBoostSupported );
-  if ( m_hwpDynamicBoostSupported )
-  {
-    detailsLayout->addWidget( m_hwpDynamicBoostLabel, row, 0 );
-    detailsLayout->addWidget( m_hwpDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
-    row++;
-  }
-
-  // Add spacer
   detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
   row++;
 
@@ -640,6 +683,13 @@ void MainWindow::setupProfilesPage()
   ctgpLayout->addWidget( m_ctgpValueLabel );
   detailsLayout->addWidget( m_ctgpLabel, row, 0 );
   detailsLayout->addWidget( m_ctgpWidget, row, 1 );
+  row++;
+
+  m_nvidiaDynamicBoostLabel = new QLabel( "Dynamic Boost" );
+  m_nvidiaDynamicBoostCheckBox = new QCheckBox( "Enable" );
+  m_nvidiaDynamicBoostCheckBox->setChecked( true );
+  detailsLayout->addWidget( m_nvidiaDynamicBoostLabel, row, 0 );
+  detailsLayout->addWidget( m_nvidiaDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
   row++;
 
   updateCtgpVisibility();
@@ -766,13 +816,6 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addLayout( backlightLayout, row, 1 );
   row++;
 
-  QLabel *setBrightnessLabel = new QLabel( "Set brightness on profile activation" );
-  m_setBrightnessCheckBox = new QCheckBox();
-  m_setBrightnessCheckBox->setChecked( false );
-  detailsLayout->addWidget( setBrightnessLabel, row, 0 );
-  detailsLayout->addWidget( m_setBrightnessCheckBox, row, 1, Qt::AlignLeft );
-  row++;
-
   // Add spacer
   detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
   row++;
@@ -809,7 +852,7 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( m_profileFanProfileCombo, row, 1 );
   row++;
 
-  QLabel *sameSpeedLabel = new QLabel( "Same fan speed for all fans" );
+  QLabel *sameSpeedLabel = new QLabel( "Same speed for all fans" );
   detailsLayout->addWidget( sameSpeedLabel, row, 0 );
   // Reuse the shared checkbox created in the dashboard (create if not present)
   if ( !m_sameFanSpeedCheckBox ) {
@@ -968,9 +1011,6 @@ void MainWindow::connectSignals()
   connect( m_profileCombo->lineEdit(), &QLineEdit::editingFinished,
            this, &MainWindow::onProfileComboRenamed );
 
-  connect( m_setBrightnessCheckBox, &QCheckBox::toggled,
-           this, &MainWindow::markChanged );
-
   connect( m_brightnessSlider, &QSlider::valueChanged,
            this, [this]() { markChanged(); } );
 
@@ -1035,6 +1075,9 @@ void MainWindow::connectSignals()
     connect( m_ctgpSlider, &QSlider::valueChanged,
              this, [this]() { markChanged(); } );
   }
+  if ( m_nvidiaDynamicBoostCheckBox )
+    connect( m_nvidiaDynamicBoostCheckBox, &QCheckBox::toggled,
+             this, &MainWindow::markChanged );
 
   connect( m_profileKeyboardProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this](int index) {
@@ -1603,7 +1646,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   QJsonObject obj = doc.object();
   // Block signals while updating to avoid triggering slot updates
   m_brightnessSlider->blockSignals( true );
-  m_setBrightnessCheckBox->blockSignals( true );
   m_profileFanProfileCombo->blockSignals( true );
   m_fanControlTab->fanProfileCombo()->blockSignals( true );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( true );
@@ -1638,11 +1680,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     }
 
 
-    if ( displayObj.contains( "useBrightness" ) )
-    {
-      bool useBrightness = displayObj["useBrightness"].toBool( false );
-      m_setBrightnessCheckBox->setChecked( useBrightness );
-    }
   }
 
   // Load Fan Control settings (nested in fan object)
@@ -1880,6 +1917,13 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     m_ctgpSlider->blockSignals( false );
     m_ctgpValueLabel->setText( QString::number( m_ctgpSlider->value() ) + " W" );
   }
+  if ( m_nvidiaDynamicBoostCheckBox && m_nvidiaDynamicBoostSupported )
+  {
+    m_nvidiaDynamicBoostCheckBox->blockSignals( true );
+    m_nvidiaDynamicBoostCheckBox->setChecked(
+      obj.value( "nvidiaDynamicBoostEnabled" ).toBool( true ) );
+    m_nvidiaDynamicBoostCheckBox->blockSignals( false );
+  }
 
   // Load Charging priority setting
   if ( m_profileChargingPriorityCombo && obj.contains( "chargingPriority" ) )
@@ -1937,7 +1981,6 @@ void MainWindow::loadProfileDetails( const QString &profileId )
 
   // Unblock signals
   m_brightnessSlider->blockSignals( false );
-  m_setBrightnessCheckBox->blockSignals( false );
   m_profileFanProfileCombo->blockSignals( false );
   m_fanControlTab->fanProfileCombo()->blockSignals( false );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( false );
@@ -2014,7 +2057,6 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
   if ( m_batteryButton ) m_batteryButton->setEnabled( true );
 
   // Display controls
-  if ( m_setBrightnessCheckBox ) m_setBrightnessCheckBox->setEnabled( isCustom );
   if ( m_brightnessSlider ) m_brightnessSlider->setEnabled( isCustom );
 
   // Fan controls
@@ -2037,6 +2079,7 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   // GPU Power (cTGP) slider
   if ( m_ctgpSlider ) m_ctgpSlider->setEnabled( isCustom );
+  if ( m_nvidiaDynamicBoostCheckBox ) m_nvidiaDynamicBoostCheckBox->setEnabled( isCustom );
   // Charging
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->setEnabled( isCustom );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->setEnabled( isCustom );
@@ -2114,14 +2157,19 @@ void MainWindow::setCpuPowerLimitSlidersToMaximum()
 
 void MainWindow::updateCtgpVisibility()
 {
-  const bool visible = m_cTGPAdjustmentSupported;
+  const bool ctgpVisible = m_cTGPAdjustmentSupported;
+  const bool gpuPowerVisible = ctgpVisible || m_nvidiaDynamicBoostSupported;
 
   if ( m_ctgpHeader )
-    m_ctgpHeader->setVisible( visible );
+    m_ctgpHeader->setVisible( gpuPowerVisible );
   if ( m_ctgpLabel )
-    m_ctgpLabel->setVisible( visible );
+    m_ctgpLabel->setVisible( ctgpVisible );
   if ( m_ctgpWidget )
-    m_ctgpWidget->setVisible( visible );
+    m_ctgpWidget->setVisible( ctgpVisible );
+  if ( m_nvidiaDynamicBoostLabel )
+    m_nvidiaDynamicBoostLabel->setVisible( m_nvidiaDynamicBoostSupported );
+  if ( m_nvidiaDynamicBoostCheckBox )
+    m_nvidiaDynamicBoostCheckBox->setVisible( m_nvidiaDynamicBoostSupported );
 }
 
 void MainWindow::markChanged()
@@ -2155,10 +2203,8 @@ QString MainWindow::buildProfileJSON() const
 
   // Brightness
   QJsonObject displayObj;
-  const bool useBrightness = m_setBrightnessCheckBox->isChecked();
-  displayObj["useBrightness"] = useBrightness;
-  if ( useBrightness )
-    displayObj["brightness"] = m_brightnessSlider->value();
+  displayObj["useBrightness"] = true;
+  displayObj["brightness"] = m_brightnessSlider->value();
   profileObj["display"] = displayObj;
 
   // Fan - embed complete fan profile tables
@@ -2218,6 +2264,8 @@ QString MainWindow::buildProfileJSON() const
     int ctgpOffset = sliderValue - defaultPower;
     profileObj["nvidiaCTGPOffset"] = ctgpOffset;
   }
+  if ( m_nvidiaDynamicBoostCheckBox && m_nvidiaDynamicBoostSupported )
+    profileObj["nvidiaDynamicBoostEnabled"] = m_nvidiaDynamicBoostCheckBox->isChecked();
 
   // Charging
   if ( m_profileChargingPriorityCombo )
@@ -2719,6 +2767,8 @@ void MainWindow::onUccdConnectionChanged( bool connected )
     m_waterCoolerSupported = *waterCooler;
   if ( auto ctgp = m_UccdClient->getCTGPAdjustmentSupported() )
     m_cTGPAdjustmentSupported = *ctgp;
+  if ( auto gpuBoost = m_UccdClient->getNVIDIADynamicBoostSupported() )
+    m_nvidiaDynamicBoostSupported = *gpuBoost;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     m_gpuDefaultPowerLimit = *gpuDefault;
 

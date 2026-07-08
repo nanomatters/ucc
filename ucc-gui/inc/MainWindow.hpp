@@ -179,7 +179,6 @@ namespace ucc
     { return m_applyButton && m_saveButton && m_copyProfileButton && m_removeProfileButton && m_profileCombo; }
 
     // Display controls
-    QCheckBox *m_setBrightnessCheckBox = nullptr;
     QSlider *m_brightnessSlider = nullptr;
     QLabel *m_brightnessValueLabel = nullptr;
     QComboBox *m_profileKeyboardProfileCombo = nullptr;
@@ -204,6 +203,8 @@ namespace ucc
     QLabel *m_ctgpValueLabel = nullptr;
     QLabel *m_ctgpLabel = nullptr;
     QWidget *m_ctgpWidget = nullptr;
+    QLabel *m_nvidiaDynamicBoostLabel = nullptr;
+    QCheckBox *m_nvidiaDynamicBoostCheckBox = nullptr;
 
     // CPU frequency control widgets
     QSlider *m_cpuCoresSlider = nullptr;
@@ -255,6 +256,7 @@ namespace ucc
     // Device capability flags (queried from daemon at startup)
     bool m_waterCoolerSupported = false;
     bool m_cTGPAdjustmentSupported = false;
+    bool m_nvidiaDynamicBoostSupported = false;
     bool m_hwpDynamicBoostSupported = false;
     int m_gpuDefaultPowerLimit = 0;  // Default GPU power limit in watts, queried from daemon
 

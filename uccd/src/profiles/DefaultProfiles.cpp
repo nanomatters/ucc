@@ -119,7 +119,7 @@ const UccProfile defaultCustomProfile = []()
   profile.description = "Edit profile to change behaviour";
 
   profile.display.brightness = 100;
-  profile.display.useBrightness = false;
+  profile.display.useBrightness = true;
   profile.display.refreshRate = -1;
   profile.display.useRefRate = false;
 
@@ -144,7 +144,7 @@ const UccProfile defaultMobileCustomProfileTDP = []()
   profile.description = "Edit profile to change behaviour";
 
   profile.display.brightness = 100;
-  profile.display.useBrightness = false;
+  profile.display.useBrightness = true;
   profile.display.refreshRate = -1;
   profile.display.useRefRate = false;
 
@@ -170,7 +170,7 @@ const UccProfile defaultMobileCustomProfileCl = []()
   profile.description = "Edit profile to change behaviour";
 
   profile.display.brightness = 100;
-  profile.display.useBrightness = false;
+  profile.display.useBrightness = true;
   profile.display.refreshRate = -1;
   profile.display.useRefRate = false;
 
@@ -220,7 +220,7 @@ const UccProfile defaultCustomProfile25WcTGP = []()
   profile.description = "Edit profile to change behaviour";
 
   profile.display.brightness = 100;
-  profile.display.useBrightness = false;
+  profile.display.useBrightness = true;
   profile.display.refreshRate = -1;
   profile.display.useRefRate = false;
 

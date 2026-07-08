@@ -449,6 +449,30 @@ private slots:
     QCOMPARE( state.muxMode, std::string( "hybrid" ) );
   }
 
+  void writesDgpuDynamicBoostEnable()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path enablePath =
+      root / "bus/platform/devices/INOU0000:00/dgpu/dynamic_boost_enable";
+
+    writeFile( enablePath, "1\n" );
+
+    const auto control = ucc::uniwill::readDgpuDynamicBoostControl( root.string() );
+    QVERIFY( control.isAvailable() );
+    QVERIFY( control.enabled.value_or( false ) );
+
+    const SysfsWriteResult result =
+      ucc::uniwill::writeDgpuDynamicBoostEnable( control, false );
+
+    QVERIFY( result );
+
+    const auto updated = ucc::uniwill::readDgpuDynamicBoostControl( root.string() );
+    QVERIFY( updated.enabled.has_value() );
+    QVERIFY( !*updated.enabled );
+  }
+
   void chargeEndThresholdAvailabilityRequiresWritableNode()
   {
     QTemporaryDir dir;

@@ -309,6 +309,11 @@ static std::string profileToJSON( const UccProfile &profile,
   {
     oss << ",\"nvidiaCTGPOffset\":" << *profile.nvidiaCTGPOffset;
   }
+  if ( profile.nvidiaDynamicBoostEnabled.has_value() )
+  {
+    oss << ",\"nvidiaDynamicBoostEnabled\":"
+        << ( *profile.nvidiaDynamicBoostEnabled ? "true" : "false" );
+  }
 
   // Keyboard section - only store the reference, not the full state data
   // Full per-key states live in customKeyboardProfiles in /etc/ucc/settings.
@@ -1955,6 +1960,11 @@ bool UccDBusInterfaceAdaptor::GetCTGPAdjustmentSupported()
   return m_data.cTGPAdjustmentSupported;
 }
 
+bool UccDBusInterfaceAdaptor::GetNVIDIADynamicBoostSupported()
+{
+  return m_data.nvidiaDynamicBoostSupported;
+}
+
 bool UccDBusInterfaceAdaptor::GetHwpDynamicBoostSupported()
 {
   return m_data.hwpDynamicBoostSupported;
@@ -3438,8 +3448,8 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
       }
     }
 
-    // Apply cTGP offset from the profile
-    applyCTGPFromProfile( profile );
+    // Apply GPU power settings from the profile
+    applyGpuPowerFromProfile( profile );
 
     if ( m_displayWorker )
     {
@@ -3851,18 +3861,22 @@ void UccDBusService::computeDeviceCapabilities()
   };
 
   const bool ctgpHardwareExists = ucc::uniwill::readCtgpInfo().isAvailable();
+  const bool dynamicBoostHardwareExists =
+    ucc::uniwill::readDgpuDynamicBoostControl().isAvailable();
 
   if ( m_deviceId.has_value() )
   {
     m_dbusData.waterCoolerSupported = waterCoolerDevices.count( m_deviceId.value() ) > 0;
     m_dbusData.cTGPAdjustmentSupported =
       ctgpHardwareExists && cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
+    m_dbusData.nvidiaDynamicBoostSupported = dynamicBoostHardwareExists;
   }
   else
   {
     // Unknown device: water cooler not available, cTGP defers to hardware detection
     m_dbusData.waterCoolerSupported = false;
     m_dbusData.cTGPAdjustmentSupported = ctgpHardwareExists;
+    m_dbusData.nvidiaDynamicBoostSupported = dynamicBoostHardwareExists;
   }
 
   // Detect HWP Dynamic Boost support
@@ -3871,9 +3885,10 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.hwpDynamicBoostSupported = SysfsNode< bool >( hwpBoostPath ).isAvailable();
   }
 
-  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, hwpDynamicBoost=%s",
+  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, nvidiaDynamicBoost=%s, hwpDynamicBoost=%s",
           m_dbusData.waterCoolerSupported.load() ? "supported" : "not supported",
           m_dbusData.cTGPAdjustmentSupported.load() ? "supported" : "hidden",
+          m_dbusData.nvidiaDynamicBoostSupported.load() ? "supported" : "not supported",
           m_dbusData.hwpDynamicBoostSupported.load() ? "supported" : "not supported" );
 }
 
@@ -4189,14 +4204,24 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
   }
 }
 
-void UccDBusService::applyCTGPFromProfile( const UccProfile &profile )
+void UccDBusService::applyGpuPowerFromProfile( const UccProfile &profile )
 {
-  if ( !profile.nvidiaCTGPOffset.has_value() )
+  if ( !m_profileSettingsWorker )
     return;
 
-  if ( m_profileSettingsWorker && m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  if ( profile.nvidiaDynamicBoostEnabled.has_value()
+       && m_dbusData.nvidiaDynamicBoostSupported.load() )
   {
-    std::cout << "[cTGP] Applying cTGP offset from profile: "
+    std::cout << "[GPU Power] Applying NVIDIA Dynamic Boost from profile: "
+              << ( *profile.nvidiaDynamicBoostEnabled ? "enabled" : "disabled" )
+              << std::endl;
+    m_profileSettingsWorker->applyNVIDIADynamicBoost( *profile.nvidiaDynamicBoostEnabled );
+  }
+
+  if ( profile.nvidiaCTGPOffset.has_value()
+       && m_dbusData.nvidiaPowerCTRLAvailable.load() )
+  {
+    std::cout << "[GPU Power] Applying cTGP offset from profile: "
               << *profile.nvidiaCTGPOffset << std::endl;
     m_profileSettingsWorker->applyNVIDIAPowerOffset( *profile.nvidiaCTGPOffset );
   }

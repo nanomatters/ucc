@@ -114,6 +114,17 @@ struct DgpuPlatformState
   }
 };
 
+struct DgpuDynamicBoostControl
+{
+  std::string enablePath;
+  std::optional< bool > enabled;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not enablePath.empty();
+  }
+};
+
 struct FanChannel
 {
   size_t index = 0;
@@ -878,6 +889,42 @@ inline SysfsWriteResult writeWaterCoolerBridgeEnable(
   state.muxMode = readFirstLine( dgpuPath / "mux_mode" ).value_or( "" );
 
   return state;
+}
+
+[[nodiscard]] inline DgpuDynamicBoostControl readDgpuDynamicBoostControl(
+  const std::string &sysfsRoot = "/sys" )
+{
+  DgpuDynamicBoostControl control;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return control;
+
+  const fs::path enablePath = *platformDevice / "dgpu" / "dynamic_boost_enable";
+  if ( not Sysfs::exists( enablePath ) )
+    return control;
+
+  control.enablePath = enablePath.string();
+  control.enabled = SysfsNode< bool >( control.enablePath ).read();
+
+  return control;
+}
+
+inline SysfsWriteResult writeDgpuDynamicBoostEnable(
+  const DgpuDynamicBoostControl &control,
+  bool enable )
+{
+  if ( not control.isAvailable() )
+    return { false, ENOENT, 0 };
+
+  return SysfsNode< bool >( control.enablePath ).writeDetailed( enable );
+}
+
+inline SysfsWriteResult writeDgpuDynamicBoostEnable(
+  bool enable,
+  const std::string &sysfsRoot = "/sys" )
+{
+  return writeDgpuDynamicBoostEnable( readDgpuDynamicBoostControl( sysfsRoot ), enable );
 }
 
 }

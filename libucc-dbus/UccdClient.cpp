@@ -404,6 +404,11 @@ std::optional< bool > UccdClient::getKeyboardBacklightControlSupported()
   return callMethod< bool >( "GetKeyboardBacklightControlSupported" );
 }
 
+std::optional< bool > UccdClient::getNVIDIADynamicBoostSupported()
+{
+  return callMethod< bool >( "GetNVIDIADynamicBoostSupported" );
+}
+
 std::optional< bool > UccdClient::getHwpDynamicBoostSupported()
 {
   return callMethod< bool >( "GetHwpDynamicBoostSupported" );

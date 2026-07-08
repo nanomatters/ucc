@@ -215,7 +215,7 @@ public:
     if ( !displayJson.empty() )
     {
       profile.display.brightness = extractInt( displayJson, "brightness", 100 );
-      profile.display.useBrightness = extractBool( displayJson, "useBrightness", false );
+      profile.display.useBrightness = true;
       profile.display.refreshRate = extractInt( displayJson, "refreshRate", -1 );
       profile.display.useRefRate = extractBool( displayJson, "useRefRate", false );
       profile.display.xResolution = extractInt( displayJson, "xResolution", -1 );
@@ -328,6 +328,9 @@ public:
       if ( ctgpOffset != INT32_MIN )
         profile.nvidiaCTGPOffset = ctgpOffset;
     }
+
+    if ( json.find( "\"nvidiaDynamicBoostEnabled\"" ) != std::string::npos )
+      profile.nvidiaDynamicBoostEnabled = extractBool( json, "nvidiaDynamicBoostEnabled", false );
 
     // Parse charging profile (firmware-level charging mode stored per-profile)
     profile.chargingProfile = extractString( json, "chargingProfile", "" );
@@ -702,6 +705,11 @@ public:
     if ( profile.nvidiaCTGPOffset.has_value() )
     {
       oss << ",\"nvidiaCTGPOffset\":" << *profile.nvidiaCTGPOffset;
+    }
+    if ( profile.nvidiaDynamicBoostEnabled.has_value() )
+    {
+      oss << ",\"nvidiaDynamicBoostEnabled\":"
+          << ( *profile.nvidiaDynamicBoostEnabled ? "true" : "false" );
     }
 
     // Keyboard section

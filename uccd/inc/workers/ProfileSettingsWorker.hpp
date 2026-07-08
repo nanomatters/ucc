@@ -129,6 +129,7 @@ public:
    * @return true if successfully applied and verified.
    */
   bool applyNVIDIAPowerOffset( int32_t offset );
+  bool applyNVIDIADynamicBoost( bool enable );
 
   /**
    * @brief Periodic validation - checks if an external process changed the cTGP offset

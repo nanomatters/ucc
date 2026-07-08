@@ -605,6 +605,44 @@ bool ProfileSettingsWorker::applyNVIDIAPowerOffset( int32_t offset )
   return applyNVIDIACTGPOffset( offset );
 }
 
+bool ProfileSettingsWorker::applyNVIDIADynamicBoost( bool enable )
+{
+  const auto control = ucc::uniwill::readDgpuDynamicBoostControl( m_sysfsRoot );
+  if ( !control.isAvailable() )
+  {
+    std::cout << "[NVIDIAPowerCTRL] Dynamic Boost sysfs node not available" << std::endl;
+    return false;
+  }
+
+  const SysfsWriteResult writeResult = ucc::uniwill::writeDgpuDynamicBoostEnable( control, enable );
+  if ( !writeResult )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Failed to write Dynamic Boost state to "
+              << control.enablePath << " (errno " << writeResult.error << ")" << std::endl;
+    return false;
+  }
+
+  const auto verifiedControl = ucc::uniwill::readDgpuDynamicBoostControl( m_sysfsRoot );
+  if ( !verifiedControl.enabled.has_value() )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Dynamic Boost verification failed: read-back unavailable"
+              << std::endl;
+    return false;
+  }
+
+  if ( *verifiedControl.enabled != enable )
+  {
+    std::cerr << "[NVIDIAPowerCTRL] Dynamic Boost verification failed: wrote "
+              << ( enable ? "enabled" : "disabled" ) << ", read back "
+              << ( *verifiedControl.enabled ? "enabled" : "disabled" ) << std::endl;
+    return false;
+  }
+
+  std::cout << "[NVIDIAPowerCTRL] Applied Dynamic Boost: "
+            << ( enable ? "enabled" : "disabled" ) << std::endl;
+  return true;
+}
+
 bool ProfileSettingsWorker::applyNVIDIACTGPOffset( int32_t ctgpOffset )
 {
   if ( !m_cTGPAdjustmentSupported )

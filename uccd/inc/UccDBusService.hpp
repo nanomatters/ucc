@@ -151,6 +151,7 @@ public:
   std::atomic< bool > waterCoolerScanningEnabled;
   std::atomic< bool > waterCoolerSupported;
   std::atomic< bool > cTGPAdjustmentSupported;
+  std::atomic< bool > nvidiaDynamicBoostSupported;
   std::atomic< bool > hwpDynamicBoostSupported;
   std::atomic< bool > deviceSupported{ false };
   std::atomic< int32_t > cpuFrequencyMHz;
@@ -209,6 +210,7 @@ public:
         waterCoolerScanningEnabled( ucc::WATER_COOLER_INITIAL_STATE ),
         waterCoolerSupported( false ),
         cTGPAdjustmentSupported( false ),
+        nvidiaDynamicBoostSupported( false ),
         hwpDynamicBoostSupported( false ),
         cpuFrequencyMHz( -1 )
   {
@@ -394,6 +396,7 @@ public slots:
   // device capability methods
   bool GetWaterCoolerSupported();
   bool GetCTGPAdjustmentSupported();
+  bool GetNVIDIADynamicBoostSupported();
   bool GetHwpDynamicBoostSupported();
 
   // monitoring history methods
@@ -595,7 +598,7 @@ private:
   void serializeProfilesJSON();
   void applyProfileForCurrentState();
   void applyFanAndPumpSettings( const UccProfile &profile );
-  void applyCTGPFromProfile( const UccProfile &profile );
+  void applyGpuPowerFromProfile( const UccProfile &profile );
   void fillDeviceSpecificDefaults( std::vector< UccProfile > &profiles );
   void snapProfileFrequencies( UccProfile &profile );
   std::optional< UniwillDeviceID > identifyDevice();

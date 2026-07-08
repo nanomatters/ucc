@@ -38,7 +38,7 @@ struct UccProfileDisplay
 
   UccProfileDisplay()
     : brightness( 100 ),
-      useBrightness( false ),
+      useBrightness( true ),
       refreshRate( -1 ),
       useRefRate( false ),
       xResolution( -1 ),
@@ -179,6 +179,7 @@ struct UccProfile
   std::string platformProfile; ///< kernel platform_profile value (quiet/balanced/performance)
   UccODMPowerLimits odmPowerLimits;
   std::optional< int32_t > nvidiaCTGPOffset; ///< Configurable graphics TGP offset in watts
+  std::optional< bool > nvidiaDynamicBoostEnabled; ///< NVIDIA Dynamic Boost enable state
   std::string chargingProfile;  ///< firmware-level charging profile descriptor (e.g. "balanced")
   std::string chargingPriority; ///< USB-C PD charging priority (e.g. "charge_battery", "performance")
   std::string chargeType;       ///< charge type: "Standard" or "Custom"
@@ -206,6 +207,7 @@ struct UccProfile
       platformProfile( other.platformProfile ),
       odmPowerLimits( other.odmPowerLimits ),
       nvidiaCTGPOffset( other.nvidiaCTGPOffset ),
+      nvidiaDynamicBoostEnabled( other.nvidiaDynamicBoostEnabled ),
       chargingProfile( other.chargingProfile ),
       chargingPriority( other.chargingPriority ),
       chargeType( other.chargeType ),
@@ -230,6 +232,7 @@ struct UccProfile
       platformProfile = other.platformProfile;
       odmPowerLimits = other.odmPowerLimits;
       nvidiaCTGPOffset = other.nvidiaCTGPOffset;
+      nvidiaDynamicBoostEnabled = other.nvidiaDynamicBoostEnabled;
       chargingProfile = other.chargingProfile;
       chargingPriority = other.chargingPriority;
       chargeType = other.chargeType;
