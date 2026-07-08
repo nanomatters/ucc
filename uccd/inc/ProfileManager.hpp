@@ -151,6 +151,43 @@ public:
   }
 
   /**
+   * @brief Resolve a stored custom fan profile into its fan tables.
+   *
+   * Custom fan profiles are stored as {"id","name","json":{cpu:[],gpu:[],
+   * waterCoolerFan:[],pump:[]}} (see SaveCustomFanProfile). This lets the
+   * daemon apply the *live* curve a system profile references, so editing a
+   * fan profile changes what every system profile that references it applies.
+   *
+   * @return true if a CPU or GPU curve was parsed.
+   */
+  [[nodiscard]] static bool parseCustomFanProfile(
+    const std::string &stored,
+    std::vector< FanTableEntry > &cpu,
+    std::vector< FanTableEntry > &gpu,
+    std::vector< FanTableEntry > &wcFan,
+    std::vector< FanTableEntry > &pump )
+  {
+    const std::string inner = extractObject( stored, "json" );
+    const std::string &src = inner.empty() ? stored : inner;
+
+    // Saved fan profiles use tableCPU/tableGPU/... (saveFanPoints); the live
+    // "Apply" path uses cpu/gpu/... — accept either so both formats resolve.
+    const auto pick = [ &src ]( const char *primary, const char *alternate ) {
+      std::string arr = extractArray( src, primary );
+      if ( arr.empty() )
+        arr = extractArray( src, alternate );
+      return parseFanTable( arr );
+    };
+
+    cpu = pick( "tableCPU", "cpu" );
+    gpu = pick( "tableGPU", "gpu" );
+    wcFan = pick( "tableWaterCoolerFan", "waterCoolerFan" );
+    pump = pick( "tablePump", "pump" );
+
+    return not cpu.empty() or not gpu.empty();
+  }
+
+  /**
    * @brief Parse a single profile from JSON object
    * @param json JSON object string
    * @return Parsed profile

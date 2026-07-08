@@ -660,7 +660,7 @@ bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
   {
     auto table = ProfileManager::parseFanTableFromJSON( json );
     std::cerr << "[DBus] Parsed table size: " << table.size() << std::endl;
-    if ( table.size() != 17 )
+    if ( table.empty() )
       return false;
 
     UccProfile profile = m_service->getCurrentProfile();
@@ -677,10 +677,8 @@ bool UccDBusInterfaceAdaptor::SetFanProfileCPU( const QString &pointsJSON )
 
     // Apply as temporary table (do not persist in daemon profiles)
     if ( m_service->m_fanControlWorker )
-    {
-      m_service->m_fanControlWorker->applyTemporaryFanCurves( table, {} );
-      return true;
-    }
+      return m_service->m_fanControlWorker->applyTemporaryFanCurves( table, {} );
+
     return false;
   }
   catch ( ... )
@@ -702,7 +700,7 @@ bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const QString &pointsJSON )
   {
     auto table = ProfileManager::parseFanTableFromJSON( json );
     std::cerr << "[DBus] Parsed table size: " << table.size() << std::endl;
-    if ( table.size() != 17 )
+    if ( table.empty() )
       return false;
 
     UccProfile profile = m_service->getCurrentProfile();
@@ -719,10 +717,8 @@ bool UccDBusInterfaceAdaptor::SetFanProfileDGPU( const QString &pointsJSON )
 
     // Apply as temporary table (do not persist in daemon profiles)
     if ( m_service->m_fanControlWorker )
-    {
-      m_service->m_fanControlWorker->applyTemporaryFanCurves( {}, table );
-      return true;
-    }
+      return m_service->m_fanControlWorker->applyTemporaryFanCurves( {}, table );
+
     return false;
   }
   catch ( ... )
@@ -772,11 +768,20 @@ bool UccDBusInterfaceAdaptor::ApplyFanProfiles( const QString &fanProfilesJSONq 
     auto waterCoolerFanTable = parseTable( "waterCoolerFan" );
     auto pumpTable           = parseTable( "pump" );
 
-    // Apply the temporary fan curves
-    if ( m_service->m_fanControlWorker )
+    if ( !m_service->m_fanControlWorker )
+      return false;
+
+    // Apply the temporary fan curves immediately. A successful DBus return
+    // means the currently writable uniwill fan curve was written to sysfs.
+    if ( m_service->m_fanControlWorker->applyTemporaryFanCurves(
+           cpuTable, gpuTable, waterCoolerFanTable, pumpTable ) )
     {
-      m_service->m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, waterCoolerFanTable, pumpTable );
       std::cerr << "[DBus] Applied temporary fan profiles" << std::endl;
+    }
+    else
+    {
+      std::cerr << "[DBus] Failed to apply temporary fan profiles" << std::endl;
+      return false;
     }
 
     // If the caller provided a fan profile ID, update the active profile
@@ -3273,45 +3278,71 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
     }
     catch ( ... ) { /* ignore */ }
 
-    // Try to resolve and apply fan curves: prefer embedded tables, fallback to named fan profile
+    // Resolve and apply the fan curve. Precedence:
+    //   1. A referenced custom fan profile, resolved LIVE from settings, so that
+    //      editing that fan profile changes what every system profile that
+    //      references it applies. This is what "change the fan profile for a
+    //      profile" needs — otherwise a stale embedded snapshot wins.
+    //   2. The profile's embedded fan tables (snapshot).
+    //   3. A referenced built-in fan profile preset.
     try
     {
       std::vector< FanTableEntry > cpuTable;
       std::vector< FanTableEntry > gpuTable;
       std::vector< FanTableEntry > wcFanTable;
       std::vector< FanTableEntry > pumpTable;
+      const std::string fpName = profile.fan.fanProfile;
+      std::string fanSource = "none";
 
-      // First, try embedded tables from the profile itself
-      if ( profile.fan.hasEmbeddedTables() )
+      if ( auto it = m_settings.customFanProfiles.find( fpName );
+           !fpName.empty() && it != m_settings.customFanProfiles.end() &&
+           ProfileManager::parseCustomFanProfile( it->second, cpuTable, gpuTable, wcFanTable, pumpTable ) )
+      {
+        fanSource = "custom fan profile '" + fpName + "'";
+      }
+      else if ( profile.fan.hasEmbeddedTables() )
       {
         cpuTable = profile.fan.tableCPU;
         gpuTable = profile.fan.tableGPU;
         wcFanTable = profile.fan.tableWaterCoolerFan;
         pumpTable = profile.fan.tablePump;
-        std::cout << "[Profile] Using embedded fan tables from profile" << std::endl;
+        fanSource = "embedded profile tables";
       }
-      else
+      else if ( !fpName.empty() )
       {
-        // Fallback: resolve from named fan profile preset
-        const std::string fpName = profile.fan.fanProfile;
-        if ( !fpName.empty() )
+        FanProfile fp = getDefaultFanProfile( fpName );
+        if ( fp.isValid() )
         {
-          FanProfile fp = getDefaultFanProfile( fpName );
-          if ( fp.isValid() )
-          {
-            cpuTable = fp.tableCPU;
-            gpuTable = fp.tableGPU;
-            wcFanTable = fp.tableWaterCoolerFan;
-            pumpTable = fp.tablePump;
-            std::cout << "[Profile] Using fan tables from named profile '" << fpName << "'" << std::endl;
-          }
+          cpuTable = fp.tableCPU;
+          gpuTable = fp.tableGPU;
+          wcFanTable = fp.tableWaterCoolerFan;
+          pumpTable = fp.tablePump;
+          fanSource = "built-in fan profile '" + fpName + "'";
         }
       }
 
+      // Trace the exact CPU/GPU fan curves being applied and their source, so it
+      // is obvious which profile's curve actually reaches the hardware.
+      const auto logFanCurve = []( const char *label, const std::vector< FanTableEntry > &table ) {
+        std::ostringstream oss;
+        oss << "[Profile]   " << label << " (" << table.size() << " pts):";
+        for ( const auto &e : table )
+          oss << ' ' << e.temp << "C=" << e.speed << '%';
+        std::cout << oss.str() << std::endl;
+      };
+      std::cout << "[Profile] Fan curve for '" << profile.name << "' <- " << fanSource
+                << " (fanProfileId='" << fpName << "', embedded="
+                << ( profile.fan.hasEmbeddedTables() ? "yes" : "no" )
+                << ", sameSpeed=" << ( profile.fan.sameSpeed ? "yes" : "no" ) << ")" << std::endl;
+      logFanCurve( "CPU", cpuTable );
+      logFanCurve( "GPU", gpuTable );
+
       if ( m_fanControlWorker && !cpuTable.empty() )
       {
-        m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
-        std::cout << "[Profile] Applied fan curves (CPU=" << cpuTable.size()
+        const bool fanCurvesApplied =
+          m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
+        std::cout << "[Profile] " << ( fanCurvesApplied ? "Applied" : "Failed to apply" )
+                  << " fan curves (CPU=" << cpuTable.size()
                   << " GPU=" << gpuTable.size()
                   << " WCFan=" << wcFanTable.size()
                   << " Pump=" << pumpTable.size() << ")" << std::endl;
@@ -4116,8 +4147,10 @@ void UccDBusService::applyFanAndPumpSettings( const UccProfile &profile )
 
     if ( m_fanControlWorker && !cpuTable.empty() )
     {
-      m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
-      std::cout << "[FanPump] Applied fan curves (CPU=" << cpuTable.size()
+      const bool fanCurvesApplied =
+        m_fanControlWorker->applyTemporaryFanCurves( cpuTable, gpuTable, wcFanTable, pumpTable );
+      std::cout << "[FanPump] " << ( fanCurvesApplied ? "Applied" : "Failed to apply" )
+                << " fan curves (CPU=" << cpuTable.size()
                 << " GPU=" << gpuTable.size()
                 << " WCFan=" << wcFanTable.size()
                 << " Pump=" << pumpTable.size() << ")" << std::endl;

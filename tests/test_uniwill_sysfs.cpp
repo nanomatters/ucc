@@ -35,19 +35,6 @@ private:
     return fs::path( dir.path().toStdString() );
   }
 
-  static void createFanAutoPointFiles( const fs::path &hwmonPath, int fanNumber )
-  {
-    for ( int point = 1; point <= ucc::uniwill::FAN_AUTO_POINT_COUNT; ++point )
-    {
-      const std::string prefix =
-        "pwm" + std::to_string( fanNumber ) + "_auto_point" + std::to_string( point );
-
-      writeFile( hwmonPath / ( prefix + "_pwm" ), "0\n" );
-      writeFile( hwmonPath / ( prefix + "_temp" ), "0\n" );
-      writeFile( hwmonPath / ( prefix + "_temp_hyst" ), "0\n" );
-    }
-  }
-
 private slots:
 
   void discoveryFindsUniwillRoots()
@@ -203,7 +190,6 @@ private slots:
     writeFile( hwmonPath / "temp1_input", "55000\n" );
     writeFile( hwmonPath / "pwm1", "128\n" );
     writeFile( hwmonPath / "pwm1_enable", "2\n" );
-    createFanAutoPointFiles( hwmonPath, 1 );
 
     const auto info = ucc::uniwill::readFanInfo( root.string() );
 
@@ -211,14 +197,16 @@ private slots:
     QCOMPARE( info.hwmonPath, hwmonPath.string() );
     QCOMPARE( info.channels.size(), static_cast< size_t >( 1 ) );
     QCOMPARE( info.channels[ 0 ].label, std::string( "Main" ) );
-    QVERIFY( info.channels[ 0 ].supportsCustomAuto );
-    QVERIFY( ucc::uniwill::fanCustomAutoAvailable( info ) );
+    QVERIFY( info.channels[ 0 ].canWritePwm() );
+    QVERIFY( info.channels[ 0 ].canWritePwmMode() );
+    QVERIFY( info.channels[ 0 ].canUseManualControl() );
+    QVERIFY( ucc::uniwill::fanManualControlAvailable( info ) );
     QVERIFY( ucc::uniwill::fanOffAvailable( info ) );
     QCOMPARE( ucc::uniwill::fanMinimumSpeedPercent( info ),
               ucc::uniwill::FAN_MIN_SPEED_PERCENT );
   }
 
-  void fanCapabilitiesRequireCustomAutoControl()
+  void fanCapabilitiesRequireManualControl()
   {
     QTemporaryDir dir;
     QVERIFY( dir.isValid() );
@@ -229,13 +217,14 @@ private slots:
     writeFile( hwmonPath / "fan1_input", "2400\n" );
     writeFile( hwmonPath / "temp1_input", "55000\n" );
     writeFile( hwmonPath / "pwm1", "128\n" );
-    writeFile( hwmonPath / "pwm1_enable", "2\n" );
 
     const auto info = ucc::uniwill::readFanInfo( root.string() );
 
     QVERIFY( info.isAvailable() );
-    QVERIFY( !info.channels[ 0 ].supportsCustomAuto );
-    QVERIFY( !ucc::uniwill::fanCustomAutoAvailable( info ) );
+    QVERIFY( info.channels[ 0 ].canWritePwm() );
+    QVERIFY( !info.channels[ 0 ].canWritePwmMode() );
+    QVERIFY( !info.channels[ 0 ].canUseManualControl() );
+    QVERIFY( !ucc::uniwill::fanManualControlAvailable( info ) );
     QVERIFY( !ucc::uniwill::fanOffAvailable( info ) );
     QCOMPARE( ucc::uniwill::fanMinimumSpeedPercent( info ), static_cast< int32_t >( 0 ) );
   }
@@ -380,7 +369,7 @@ private slots:
     QCOMPARE( temps[ 1 ].temperatureCelsius, 36 );
   }
 
-  void writesFanCurveAndMode()
+  void writesFanManualPwmAndMode()
   {
     QTemporaryDir dir;
     QVERIFY( dir.isValid() );
@@ -392,26 +381,17 @@ private slots:
     writeFile( hwmonPath / "temp1_input", "55000\n" );
     writeFile( hwmonPath / "pwm1", "0\n" );
     writeFile( hwmonPath / "pwm1_enable", "2\n" );
-    createFanAutoPointFiles( hwmonPath, 1 );
 
     const auto info = ucc::uniwill::readFanInfo( root.string() );
     QVERIFY( info.isAvailable() );
 
-    std::vector< ucc::uniwill::FanCurvePoint > points;
-    for ( const int32_t temp : ucc::uniwill::FAN_AUTO_POINT_TEMPERATURES_C )
-      points.push_back( { temp, temp - 20 } );
+    QVERIFY( ucc::uniwill::writeFanMode( info, 1 ) );
+    QVERIFY( ucc::uniwill::writeFanPwm( info.channels[ 0 ], 80 ) );
 
-    QVERIFY( ucc::uniwill::writeFanCurve( info.channels[ 0 ], points ) );
-    QVERIFY( ucc::uniwill::writeFanMode( info, 3 ) );
-
-    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_auto_point1_temp" ).value_or( -1 ),
-              static_cast< int32_t >( 25000 ) );
-    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_auto_point1_temp_hyst" ).value_or( -1 ),
-              static_cast< int32_t >( 22000 ) );
-    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_auto_point16_pwm" ).value_or( -1 ),
-              static_cast< int32_t >( 204 ) );
     QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1_enable" ).value_or( -1 ),
-              static_cast< int32_t >( 3 ) );
+              static_cast< int32_t >( 1 ) );
+    QCOMPARE( ucc::uniwill::readInt32( hwmonPath / "pwm1" ).value_or( -1 ),
+              static_cast< int32_t >( 204 ) );
   }
 
   void readsAndWritesUsbCPowerPriority()

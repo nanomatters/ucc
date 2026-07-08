@@ -29,12 +29,6 @@ using Sysfs = SysfsNode< std::string >;
 
 inline constexpr uint32_t TDP_MIN_WATTS = 25;
 inline constexpr int32_t FAN_MIN_SPEED_PERCENT = 25;
-inline constexpr int32_t FAN_AUTO_POINT_COUNT = 16;
-inline constexpr int32_t FAN_AUTO_POINT_HYSTERESIS_C = 3;
-
-inline constexpr std::array< int32_t, FAN_AUTO_POINT_COUNT > FAN_AUTO_POINT_TEMPERATURES_C = {
-  25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100
-};
 
 struct PlatformProfileSink
 {
@@ -120,12 +114,6 @@ struct DgpuPlatformState
   }
 };
 
-struct FanCurvePoint
-{
-  int32_t tempCelsius = 0;
-  int32_t speedPercent = 0;
-};
-
 struct FanChannel
 {
   size_t index = 0;
@@ -134,7 +122,6 @@ struct FanChannel
   std::string tempInputPath;
   std::string pwmPath;
   std::string pwmEnablePath;
-  bool supportsCustomAuto = false;
 
   [[nodiscard]] bool isAvailable() const noexcept
   {
@@ -146,9 +133,14 @@ struct FanChannel
     return not pwmEnablePath.empty();
   }
 
-  [[nodiscard]] bool canUseCustomAuto() const noexcept
+  [[nodiscard]] bool canWritePwm() const noexcept
   {
-    return supportsCustomAuto and canWritePwmMode();
+    return not pwmPath.empty();
+  }
+
+  [[nodiscard]] bool canUseManualControl() const noexcept
+  {
+    return canWritePwm() and canWritePwmMode();
   }
 };
 
@@ -163,21 +155,21 @@ struct FanInfo
   }
 };
 
-[[nodiscard]] inline bool fanCustomAutoAvailable( const FanInfo &info )
+[[nodiscard]] inline bool fanManualControlAvailable( const FanInfo &info )
 {
   return std::ranges::any_of( info.channels, []( const FanChannel &channel ) {
-    return channel.canUseCustomAuto();
+    return channel.canUseManualControl();
   } );
 }
 
 [[nodiscard]] inline bool fanOffAvailable( const FanInfo &info )
 {
-  return fanCustomAutoAvailable( info );
+  return fanManualControlAvailable( info );
 }
 
 [[nodiscard]] inline int32_t fanMinimumSpeedPercent( const FanInfo &info )
 {
-  return fanCustomAutoAvailable( info ) ? FAN_MIN_SPEED_PERCENT : 0;
+  return fanManualControlAvailable( info ) ? FAN_MIN_SPEED_PERCENT : 0;
 }
 
 struct FanReading
@@ -643,24 +635,6 @@ struct DramTemperature
   return temps;
 }
 
-[[nodiscard]] inline bool hasFanAutoPointFiles( const fs::path &hwmonPath, size_t channelIndex )
-{
-  const size_t number = channelIndex + 1;
-
-  for ( const int point : { 1, FAN_AUTO_POINT_COUNT } )
-  {
-    const std::string prefix =
-      "pwm" + std::to_string( number ) + "_auto_point" + std::to_string( point );
-
-    if ( not Sysfs::exists( hwmonPath / ( prefix + "_pwm" ) ) or
-         not Sysfs::exists( hwmonPath / ( prefix + "_temp" ) ) or
-         not Sysfs::exists( hwmonPath / ( prefix + "_temp_hyst" ) ) )
-      return false;
-  }
-
-  return true;
-}
-
 [[nodiscard]] inline FanInfo readFanInfo( const std::string &sysfsRoot = "/sys" )
 {
   FanInfo info;
@@ -686,8 +660,7 @@ struct DramTemperature
       Sysfs::exists( fanInputPath ) ? fanInputPath.string() : "",
       Sysfs::exists( tempInputPath ) ? tempInputPath.string() : "",
       Sysfs::exists( pwmPath ) ? pwmPath.string() : "",
-      Sysfs::exists( pwmEnablePath ) ? pwmEnablePath.string() : "",
-      hasFanAutoPointFiles( *hwmon, channelIndex )
+      Sysfs::exists( pwmEnablePath ) ? pwmEnablePath.string() : ""
     };
 
     if ( channel.isAvailable() )
@@ -735,38 +708,12 @@ inline bool writeFanMode( const FanInfo &info, int32_t mode )
   return wroteAny;
 }
 
-inline bool writeFanCurve( const FanChannel &channel, const std::vector< FanCurvePoint > &points )
+inline bool writeFanPwm( const FanChannel &channel, int32_t speedPercent )
 {
-  if ( not channel.supportsCustomAuto or points.size() < FAN_AUTO_POINT_COUNT )
+  if ( not channel.canWritePwm() )
     return false;
 
-  const size_t number = channel.index + 1;
-  const fs::path hwmonPath = fs::path( channel.pwmPath ).parent_path();
-
-  for ( size_t i = 0; i < static_cast< size_t >( FAN_AUTO_POINT_COUNT ); ++i )
-  {
-    const int point = static_cast< int >( i + 1 );
-    const std::string prefix =
-      "pwm" + std::to_string( number ) + "_auto_point" + std::to_string( point );
-
-    const int32_t tempCelsius = std::clamp< int32_t >( points[ i ].tempCelsius, 0, 255 );
-    const int32_t hystCelsius =
-      std::max< int32_t >( 0, tempCelsius - FAN_AUTO_POINT_HYSTERESIS_C );
-    const int32_t pwm = percentToPwm( points[ i ].speedPercent );
-
-    if ( not SysfsNode< int32_t >( ( hwmonPath / ( prefix + "_temp" ) ).string() )
-               .write( tempCelsius * 1000 ) )
-      return false;
-
-    if ( not SysfsNode< int32_t >( ( hwmonPath / ( prefix + "_temp_hyst" ) ).string() )
-               .write( hystCelsius * 1000 ) )
-      return false;
-
-    if ( not SysfsNode< int32_t >( ( hwmonPath / ( prefix + "_pwm" ) ).string() ).write( pwm ) )
-      return false;
-  }
-
-  return true;
+  return SysfsNode< int32_t >( channel.pwmPath ).write( percentToPwm( speedPercent ) );
 }
 
 [[nodiscard]] inline std::string translateUsbCPowerPriority( const std::string &value )
