@@ -458,6 +458,196 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addItem( new QSpacerItem( 0, 15 ), row, 0, 1, 2 );
   row++;
 
+  // === SYSTEM PERFORMANCE SECTION ===
+  QLabel *sysHeader = new QLabel( "System performance" );
+  sysHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
+  detailsLayout->addWidget( sysHeader, row, 0, 1, 2 );
+  row++;
+
+  QLabel *platformProfileLabel = new QLabel( "Platform profile" );
+  m_platformProfileCombo = new QComboBox();
+  detailsLayout->addWidget( platformProfileLabel, row, 0 );
+  detailsLayout->addWidget( m_platformProfileCombo, row, 1 );
+  row++;
+  reloadPlatformProfileChoices();
+
+  QLabel *odmPowerHeader = new QLabel( "CPU power limit control" );
+  detailsLayout->addWidget( odmPowerHeader, row, 0, 1, 2 );
+  row++;
+
+  // TDP Limit 1
+  QLabel *tdp1Label = new QLabel( "Sustained TDP" );  // Sustained Power Limit
+  QHBoxLayout *tdp1Layout = new QHBoxLayout();
+  m_odmPowerLimit1Slider = new QSlider( Qt::Horizontal );
+  m_odmPowerLimit1Slider->setMinimum( 0 );
+  m_odmPowerLimit1Slider->setMaximum( 250 );  // Will be updated from hardware limits in loadProfileDetails
+  m_odmPowerLimit1Slider->setValue( 0 );
+  m_odmPowerLimit1Value = new QLabel( "0 W" );
+  m_odmPowerLimit1Value->setMinimumWidth( 50 );
+  tdp1Layout->addWidget( m_odmPowerLimit1Slider, 1 );
+  tdp1Layout->addWidget( m_odmPowerLimit1Value );
+  detailsLayout->addWidget( tdp1Label, row, 0 );
+  detailsLayout->addLayout( tdp1Layout, row, 1 );
+  row++;
+
+  // TDP Limit 2
+  QLabel *tdp2Label = new QLabel( "Boost TDP" );
+  QHBoxLayout *tdp2Layout = new QHBoxLayout();
+  m_odmPowerLimit2Slider = new QSlider( Qt::Horizontal );
+  m_odmPowerLimit2Slider->setMinimum( 0 );
+  m_odmPowerLimit2Slider->setMaximum( 250 );  // Will be updated from hardware limits in loadProfileDetails
+  m_odmPowerLimit2Slider->setValue( 0 );
+  m_odmPowerLimit2Value = new QLabel( "0 W" );
+  m_odmPowerLimit2Value->setMinimumWidth( 50 );
+  tdp2Layout->addWidget( m_odmPowerLimit2Slider, 1 );
+  tdp2Layout->addWidget( m_odmPowerLimit2Value );
+  detailsLayout->addWidget( tdp2Label, row, 0 );
+  detailsLayout->addLayout( tdp2Layout, row, 1 );
+  row++;
+
+  // TDP Limit 3
+  QLabel *tdp3Label = new QLabel( "Peak TDP" );
+  QHBoxLayout *tdp3Layout = new QHBoxLayout();
+  m_odmPowerLimit3Slider = new QSlider( Qt::Horizontal );
+  m_odmPowerLimit3Slider->setMinimum( 0 );
+  m_odmPowerLimit3Slider->setMaximum( 250 );  // Will be updated from hardware limits in loadProfileDetails
+  m_odmPowerLimit3Slider->setValue( 0 );
+  m_odmPowerLimit3Value = new QLabel( "0 W" );
+  m_odmPowerLimit3Value->setMinimumWidth( 50 );
+  tdp3Layout->addWidget( m_odmPowerLimit3Slider, 1 );
+  tdp3Layout->addWidget( m_odmPowerLimit3Value );
+  detailsLayout->addWidget( tdp3Label, row, 0 );
+  detailsLayout->addLayout( tdp3Layout, row, 1 );
+  row++;
+
+  // Add spacer
+  detailsLayout->addItem( new QSpacerItem( 0, 5 ), row, 0, 1, 2 );
+  row++;
+
+  QLabel *coresLabel = new QLabel( "Number of logical cores" );
+  QHBoxLayout *coresLayout = new QHBoxLayout();
+  const int nCores = m_UccdClient->getCpuCoreCount().value_or( 1 );
+  m_cpuCoresSlider = new QSlider( Qt::Horizontal );
+  m_cpuCoresSlider->setMinimum( 1 );
+  m_cpuCoresSlider->setMaximum( nCores > 0 ? nCores : 1 );
+  m_cpuCoresSlider->setValue( nCores > 0 ? nCores : 1 );
+  m_cpuCoresValue = new QLabel( QString::number( nCores > 0 ? nCores : 1 ) );
+  m_cpuCoresValue->setMinimumWidth( 35 );
+  coresLayout->addWidget( m_cpuCoresSlider, 1 );
+  coresLayout->addWidget( m_cpuCoresValue );
+  detailsLayout->addWidget( coresLabel, row, 0 );
+  detailsLayout->addLayout( coresLayout, row, 1 );
+  row++;
+
+  QLabel *maxPerfLabel = new QLabel( "CPU Governor" );
+  m_governorCombo = new QComboBox();
+  detailsLayout->addWidget( maxPerfLabel, row, 0 );
+  detailsLayout->addWidget( m_governorCombo, row, 1, Qt::AlignLeft );
+  row++;
+
+  QLabel *eppLabel = new QLabel( "Energy Performance Preference" );
+  m_eppCombo = new QComboBox();
+  detailsLayout->addWidget( eppLabel, row, 0 );
+  detailsLayout->addWidget( m_eppCombo, row, 1, Qt::AlignLeft );
+  row++;
+
+  QLabel *minFreqLabel = new QLabel( "Minimum frequency" );
+  QHBoxLayout *minFreqLayout = new QHBoxLayout();
+  m_minFrequencySlider = new QSlider( Qt::Horizontal );
+  m_minFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
+
+  // Get hardware frequency limits and initialize slider with actual values
+  int minFreqKHz = 400000;  // fallback
+  int maxFreqKHz = 6000000; // fallback
+  if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
+  {
+    QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
+    if ( doc.isObject() )
+    {
+      QJsonObject limitsObj = doc.object();
+      minFreqKHz = limitsObj["min"].toInt( 400000 );
+      maxFreqKHz = limitsObj["max"].toInt( 6000000 );
+      m_cpuMinFreqKHz = minFreqKHz;
+      m_cpuMaxFreqKHz = maxFreqKHz;
+    }
+  }
+  m_minFrequencySlider->setMinimum( minFreqKHz );
+  m_minFrequencySlider->setMaximum( maxFreqKHz );
+  m_minFrequencySlider->setValue( minFreqKHz );
+
+  m_minFrequencyValue = new QLabel();
+  m_minFrequencyValue->setMinimumWidth( 60 );
+  double freqGHz = minFreqKHz / 1000000.0;
+  m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+
+  minFreqLayout->addWidget( m_minFrequencySlider, 1 );
+  minFreqLayout->addWidget( m_minFrequencyValue );
+  detailsLayout->addWidget( minFreqLabel, row, 0 );
+  detailsLayout->addLayout( minFreqLayout, row, 1 );
+  row++;
+
+  QLabel *maxFreqLabel = new QLabel( "Maximum frequency" );
+  QHBoxLayout *maxFreqLayout = new QHBoxLayout();
+  m_maxFrequencySlider = new QSlider( Qt::Horizontal );
+  m_maxFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
+  m_maxFrequencySlider->setMinimum( minFreqKHz );
+  m_maxFrequencySlider->setMaximum( maxFreqKHz );
+  m_maxFrequencySlider->setValue( maxFreqKHz );
+
+  m_maxFrequencyValue = new QLabel();
+  m_maxFrequencyValue->setMinimumWidth( 60 );
+  freqGHz = maxFreqKHz / 1000000.0;
+  m_maxFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
+  maxFreqLayout->addWidget( m_maxFrequencySlider, 1 );
+  maxFreqLayout->addWidget( m_maxFrequencyValue );
+  detailsLayout->addWidget( maxFreqLabel, row, 0 );
+  detailsLayout->addLayout( maxFreqLayout, row, 1 );
+  row++;
+
+  m_hwpDynamicBoostLabel = new QLabel( "HWP Dynamic Boost" );
+  m_hwpDynamicBoostCheckBox = new QCheckBox( "Enable" );
+  m_hwpDynamicBoostLabel->setVisible( m_hwpDynamicBoostSupported );
+  m_hwpDynamicBoostCheckBox->setVisible( m_hwpDynamicBoostSupported );
+  if ( m_hwpDynamicBoostSupported )
+  {
+    detailsLayout->addWidget( m_hwpDynamicBoostLabel, row, 0 );
+    detailsLayout->addWidget( m_hwpDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
+    row++;
+  }
+
+  // Add spacer
+  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
+  row++;
+
+  // === GPU POWER (cTGP) SECTION ===
+  m_ctgpHeader = new QLabel( "GPU Power" );
+  m_ctgpHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
+  detailsLayout->addWidget( m_ctgpHeader, row, 0, 1, 2 );
+  row++;
+
+  // cTGP slider widget (hidden when not supported)
+  m_ctgpWidget = new QWidget();
+  QHBoxLayout *ctgpLayout = new QHBoxLayout( m_ctgpWidget );
+  ctgpLayout->setContentsMargins( 0, 0, 0, 0 );
+  m_ctgpLabel = new QLabel( "Configurable TGP" );
+  m_ctgpSlider = new QSlider( Qt::Horizontal );
+  m_ctgpSlider->setMinimum( 0 );
+  m_ctgpSlider->setMaximum( 175 );
+  m_ctgpSlider->setValue( 0 );
+  m_ctgpValueLabel = new QLabel( "0 W" );
+  m_ctgpValueLabel->setMinimumWidth( 50 );
+  ctgpLayout->addWidget( m_ctgpSlider, 1 );
+  ctgpLayout->addWidget( m_ctgpValueLabel );
+  detailsLayout->addWidget( m_ctgpLabel, row, 0 );
+  detailsLayout->addWidget( m_ctgpWidget, row, 1 );
+  row++;
+
+  updateCtgpVisibility();
+
+  // Add spacer
+  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
+  row++;
+
   // === CHARGING SECTION (visible only when hardware supports it) ===
   QLabel *chargingHeader = new QLabel( "Charging" );
   chargingHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
@@ -643,204 +833,6 @@ void MainWindow::setupProfilesPage()
     autoWaterLabel->setVisible( false );
     m_autoWaterControlCheckBox->setVisible( false );
   }
-
-  // Add spacer
-  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
-  row++;
-
-  // === GPU POWER (cTGP) SECTION ===
-  m_ctgpHeader = new QLabel( "GPU Power" );
-  m_ctgpHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
-  detailsLayout->addWidget( m_ctgpHeader, row, 0, 1, 2 );
-  row++;
-
-  // cTGP slider widget (hidden when not supported)
-  m_ctgpWidget = new QWidget();
-  QHBoxLayout *ctgpLayout = new QHBoxLayout( m_ctgpWidget );
-  ctgpLayout->setContentsMargins( 0, 0, 0, 0 );
-  m_ctgpLabel = new QLabel( "Configurable TGP" );
-  m_ctgpSlider = new QSlider( Qt::Horizontal );
-  m_ctgpSlider->setMinimum( 0 );
-  m_ctgpSlider->setMaximum( 175 );
-  m_ctgpSlider->setValue( 0 );
-  m_ctgpValueLabel = new QLabel( "0 W" );
-  m_ctgpValueLabel->setMinimumWidth( 50 );
-  ctgpLayout->addWidget( m_ctgpSlider, 1 );
-  ctgpLayout->addWidget( m_ctgpValueLabel );
-  detailsLayout->addWidget( m_ctgpLabel, row, 0 );
-  detailsLayout->addWidget( m_ctgpWidget, row, 1 );
-  row++;
-
-  updateCtgpVisibility();
-
-  // Add spacer
-  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
-  row++;
-
-  // === SYSTEM PERFORMANCE SECTION ===
-  QLabel *sysHeader = new QLabel( "System performance" );
-  sysHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
-  detailsLayout->addWidget( sysHeader, row, 0, 1, 2 );
-  row++;
-
-  QLabel *platformProfileLabel = new QLabel( "Platform profile" );
-  m_platformProfileCombo = new QComboBox();
-  detailsLayout->addWidget( platformProfileLabel, row, 0 );
-  detailsLayout->addWidget( m_platformProfileCombo, row, 1 );
-  row++;
-  reloadPlatformProfileChoices();
-
-  QLabel *odmPowerHeader = new QLabel( "CPU power limit control" );
-  detailsLayout->addWidget( odmPowerHeader, row, 0, 1, 2 );
-  row++;
-
-  // TDP Limit 1
-  QLabel *tdp1Label = new QLabel( "Sustained TDP" );  // Sustained Power Limit
-  QHBoxLayout *tdp1Layout = new QHBoxLayout();
-  m_odmPowerLimit1Slider = new QSlider( Qt::Horizontal );
-  m_odmPowerLimit1Slider->setMinimum( 0 );
-  m_odmPowerLimit1Slider->setMaximum( 250 );  // Will be updated from hardware limits in loadProfileDetails
-  m_odmPowerLimit1Slider->setValue( 0 );
-  m_odmPowerLimit1Value = new QLabel( "0 W" );
-  m_odmPowerLimit1Value->setMinimumWidth( 50 );
-  tdp1Layout->addWidget( m_odmPowerLimit1Slider, 1 );
-  tdp1Layout->addWidget( m_odmPowerLimit1Value );
-  detailsLayout->addWidget( tdp1Label, row, 0 );
-  detailsLayout->addLayout( tdp1Layout, row, 1 );
-  row++;
-
-  // TDP Limit 2
-  QLabel *tdp2Label = new QLabel( "Boost TDP" );
-  QHBoxLayout *tdp2Layout = new QHBoxLayout();
-  m_odmPowerLimit2Slider = new QSlider( Qt::Horizontal );
-  m_odmPowerLimit2Slider->setMinimum( 0 );
-  m_odmPowerLimit2Slider->setMaximum( 250 );  // Will be updated from hardware limits in loadProfileDetails
-  m_odmPowerLimit2Slider->setValue( 0 );
-  m_odmPowerLimit2Value = new QLabel( "0 W" );
-  m_odmPowerLimit2Value->setMinimumWidth( 50 );
-  tdp2Layout->addWidget( m_odmPowerLimit2Slider, 1 );
-  tdp2Layout->addWidget( m_odmPowerLimit2Value );
-  detailsLayout->addWidget( tdp2Label, row, 0 );
-  detailsLayout->addLayout( tdp2Layout, row, 1 );
-  row++;
-
-  // TDP Limit 3
-  QLabel *tdp3Label = new QLabel( "Peak TDP" );
-  QHBoxLayout *tdp3Layout = new QHBoxLayout();
-  m_odmPowerLimit3Slider = new QSlider( Qt::Horizontal );
-  m_odmPowerLimit3Slider->setMinimum( 0 );
-  m_odmPowerLimit3Slider->setMaximum( 250 );  // Will be updated from hardware limits in loadProfileDetails
-  m_odmPowerLimit3Slider->setValue( 0 );
-  m_odmPowerLimit3Value = new QLabel( "0 W" );
-  m_odmPowerLimit3Value->setMinimumWidth( 50 );
-  tdp3Layout->addWidget( m_odmPowerLimit3Slider, 1 );
-  tdp3Layout->addWidget( m_odmPowerLimit3Value );
-  detailsLayout->addWidget( tdp3Label, row, 0 );
-  detailsLayout->addLayout( tdp3Layout, row, 1 );
-  row++;
-
-  // Add spacer
-  detailsLayout->addItem( new QSpacerItem( 0, 5 ), row, 0, 1, 2 );
-  row++;
-
-  QLabel *cpuFreqHeader = new QLabel( "CPU frequency control" );
-  detailsLayout->addWidget( cpuFreqHeader, row, 0, 1, 2 );
-  row++;
-
-  QLabel *coresLabel = new QLabel( "Number of logical cores" );
-  QHBoxLayout *coresLayout = new QHBoxLayout();
-  const int nCores = m_UccdClient->getCpuCoreCount().value_or( 1 );
-  m_cpuCoresSlider = new QSlider( Qt::Horizontal );
-  m_cpuCoresSlider->setMinimum( 1 );
-  m_cpuCoresSlider->setMaximum( nCores > 0 ? nCores : 1 );
-  m_cpuCoresSlider->setValue( nCores > 0 ? nCores : 1 );
-  m_cpuCoresValue = new QLabel( QString::number( nCores > 0 ? nCores : 1 ) );
-  m_cpuCoresValue->setMinimumWidth( 35 );
-  coresLayout->addWidget( m_cpuCoresSlider, 1 );
-  coresLayout->addWidget( m_cpuCoresValue );
-  detailsLayout->addWidget( coresLabel, row, 0 );
-  detailsLayout->addLayout( coresLayout, row, 1 );
-  row++;
-
-  QLabel *maxPerfLabel = new QLabel( "CPU Governor" );
-  m_governorCombo = new QComboBox();
-  detailsLayout->addWidget( maxPerfLabel, row, 0 );
-  detailsLayout->addWidget( m_governorCombo, row, 1, Qt::AlignLeft );
-  row++;
-
-  QLabel *eppLabel = new QLabel( "Energy Performance Preference" );
-  m_eppCombo = new QComboBox();
-  detailsLayout->addWidget( eppLabel, row, 0 );
-  detailsLayout->addWidget( m_eppCombo, row, 1, Qt::AlignLeft );
-  row++;
-
-  QLabel *minFreqLabel = new QLabel( "Minimum frequency" );
-  QHBoxLayout *minFreqLayout = new QHBoxLayout();
-  m_minFrequencySlider = new QSlider( Qt::Horizontal );
-  m_minFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
-
-  // Get hardware frequency limits and initialize slider with actual values
-  int minFreqKHz = 400000;  // fallback
-  int maxFreqKHz = 6000000; // fallback
-  if ( auto limitsJson = m_UccdClient->getCpuFrequencyLimitsJSON() )
-  {
-    QJsonDocument doc = QJsonDocument::fromJson( limitsJson->c_str() );
-    if ( doc.isObject() )
-    {
-      QJsonObject limitsObj = doc.object();
-      minFreqKHz = limitsObj["min"].toInt( 400000 );
-      maxFreqKHz = limitsObj["max"].toInt( 6000000 );
-      m_cpuMinFreqKHz = minFreqKHz;
-      m_cpuMaxFreqKHz = maxFreqKHz;
-    }
-  }
-  m_minFrequencySlider->setMinimum( minFreqKHz );
-  m_minFrequencySlider->setMaximum( maxFreqKHz );
-  m_minFrequencySlider->setValue( minFreqKHz );
-
-  m_minFrequencyValue = new QLabel();
-  m_minFrequencyValue->setMinimumWidth( 60 );
-  double freqGHz = minFreqKHz / 1000000.0;
-  m_minFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
-
-  minFreqLayout->addWidget( m_minFrequencySlider, 1 );
-  minFreqLayout->addWidget( m_minFrequencyValue );
-  detailsLayout->addWidget( minFreqLabel, row, 0 );
-  detailsLayout->addLayout( minFreqLayout, row, 1 );
-  row++;
-
-  QLabel *maxFreqLabel = new QLabel( "Maximum frequency" );
-  QHBoxLayout *maxFreqLayout = new QHBoxLayout();
-  m_maxFrequencySlider = new QSlider( Qt::Horizontal );
-  m_maxFrequencySlider->setSingleStep( 100000 ); // 100 MHz steps (in kHz)
-  m_maxFrequencySlider->setMinimum( minFreqKHz );
-  m_maxFrequencySlider->setMaximum( maxFreqKHz );
-  m_maxFrequencySlider->setValue( maxFreqKHz );
-
-  m_maxFrequencyValue = new QLabel();
-  m_maxFrequencyValue->setMinimumWidth( 60 );
-  freqGHz = maxFreqKHz / 1000000.0;
-  m_maxFrequencyValue->setText( QString::number( freqGHz, 'f', 2 ) + " GHz" );
-  maxFreqLayout->addWidget( m_maxFrequencySlider, 1 );
-  maxFreqLayout->addWidget( m_maxFrequencyValue );
-  detailsLayout->addWidget( maxFreqLabel, row, 0 );
-  detailsLayout->addLayout( maxFreqLayout, row, 1 );
-  row++;
-
-  m_hwpDynamicBoostLabel = new QLabel( "HWP Dynamic Boost" );
-  m_hwpDynamicBoostCheckBox = new QCheckBox( "Enable" );
-  m_hwpDynamicBoostLabel->setVisible( m_hwpDynamicBoostSupported );
-  m_hwpDynamicBoostCheckBox->setVisible( m_hwpDynamicBoostSupported );
-  if ( m_hwpDynamicBoostSupported )
-  {
-    detailsLayout->addWidget( m_hwpDynamicBoostLabel, row, 0 );
-    detailsLayout->addWidget( m_hwpDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
-    row++;
-  }
-
-  // Add spacer
-  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
-  row++;
 
   detailsLayout->addItem( new QSpacerItem( 0, 20, QSizePolicy::Minimum, QSizePolicy::Expanding ), row, 0, 1, 2 );
 
