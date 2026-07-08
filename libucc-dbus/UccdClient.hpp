@@ -17,6 +17,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QDBusInterface>
 #include <QDBusConnection>
 #include <QDBusReply>
@@ -99,6 +100,7 @@ public:
   // Power Management
   bool setODMPowerLimits( const std::vector< int > &limits );
   std::optional< std::vector< int > > getODMPowerLimits();
+  std::optional< std::vector< std::string > > getPlatformProfilesAvailable();
 
   // Charging Profile (firmware-level charging modes)
   std::optional< std::string > getChargingProfilesAvailable();
@@ -161,7 +163,7 @@ public:
   bool setWebcamEnabled( bool enabled );
   std::optional< bool > getWebcamEnabled();
 
-  // ODM Profile
+  // Legacy profile stubs
   bool setODMPerformanceProfile( const std::string &profile );
   std::optional< std::string > getODMPerformanceProfile();
   std::optional< std::vector< std::string > > getAvailableODMProfiles();

@@ -61,7 +61,8 @@ ProfileManager::ProfileManager( QObject *parent )
     if ( connected && !wasConnected )
     {
       qInfo() << "[ProfileManager] uccd reconnected — reloading data";
-      m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
+      refreshHardwarePowerLimits();
+      loadPlatformProfileChoices();
       loadBuiltinFanProfiles();
       loadCustomFanProfilesFromSettings();
       loadCustomProfilesFromSettings();
@@ -73,7 +74,8 @@ ProfileManager::ProfileManager( QObject *parent )
   if ( m_connected )
   {
     // Fetch hardware power limits immediately
-    m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
+    refreshHardwarePowerLimits();
+    loadPlatformProfileChoices();
 
     // Fetch built-in fan profiles from daemon (id + name)
     loadBuiltinFanProfiles();
@@ -94,6 +96,9 @@ void ProfileManager::refresh()
 
 void ProfileManager::updateProfiles()
 {
+  refreshHardwarePowerLimits();
+  loadPlatformProfileChoices();
+
   // Fetch default profiles if not already loaded
   if ( m_defaultProfilesData.isEmpty() )
   {
@@ -295,6 +300,9 @@ void ProfileManager::setActiveProfile( const QString &profileId )
     qDebug() << "Default profile activated:" << profileId;
   }
 
+  if ( success )
+    refreshHardwarePowerLimits();
+
   if ( m_activeProfileId != profileId )
   {
     m_activeProfileId = profileId;
@@ -338,6 +346,7 @@ void ProfileManager::saveProfile( const QString &profileJSON )
 
   loadCustomProfilesFromSettings();
   updateAllProfiles();
+  refreshHardwarePowerLimits();
   qDebug() << "Profile saved:" << profileName;
 }
 
@@ -420,6 +429,8 @@ void ProfileManager::onProfileChanged( const std::string &profileId,
                                        const std::string &fanProfileId )
 {
   const QString qId = QString::fromStdString( profileId );
+
+  refreshHardwarePowerLimits();
 
   if ( !qId.isEmpty() && m_activeProfileId != qId )
   {
@@ -530,6 +541,31 @@ void ProfileManager::setActiveProfileByIndex( int index )
 std::vector< int > ProfileManager::getHardwarePowerLimits()
 {
   return m_hardwarePowerLimits;
+}
+
+void ProfileManager::refreshHardwarePowerLimits()
+{
+  if ( !m_client || !m_client->isConnected() )
+  {
+    m_hardwarePowerLimits.clear();
+    return;
+  }
+
+  m_hardwarePowerLimits = m_client->getODMPowerLimits().value_or( std::vector< int >() );
+}
+
+void ProfileManager::loadPlatformProfileChoices()
+{
+  m_platformProfileChoices.clear();
+
+  if ( !m_client || !m_client->isConnected() )
+    return;
+
+  if ( auto profiles = m_client->getPlatformProfilesAvailable() )
+  {
+    for ( const std::string &profile : *profiles )
+      m_platformProfileChoices.append( QString::fromStdString( profile ) );
+  }
 }
 
 bool ProfileManager::isCustomProfile( const QString &profileId ) const

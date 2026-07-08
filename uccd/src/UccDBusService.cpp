@@ -288,10 +288,10 @@ static std::string profileToJSON( const UccProfile &profile,
   if ( !profile.fan.tableWaterCoolerFan.empty() )
     oss << ",\"tableWaterCoolerFan\":" << ProfileManager::fanTableToJSON( profile.fan.tableWaterCoolerFan );
 
+  const std::string platformProfile = getPlatformProfileName( profile );
+
   oss << "},"
-      << "\"odmProfile\":{"
-      << "\"name\":\"" << jsonEscape( profile.odmProfile.name.value_or( "" ) ) << "\""
-      << "},"
+      << "\"platformProfile\":\"" << jsonEscape( platformProfile ) << "\","
       << "\"odmPowerLimits\":{"
       << "\"tdpValues\":[";
 
@@ -1429,15 +1429,22 @@ bool UccDBusInterfaceAdaptor::SetBatchStateMap( const QString &stateMapJSON )
   return wrote;
 }
 
-// odm methods
+// platform/power methods
 
-QStringList UccDBusInterfaceAdaptor::ODMProfilesAvailable()
+QStringList UccDBusInterfaceAdaptor::PlatformProfilesAvailable()
 {
   std::lock_guard< std::mutex > lock( m_data.dataMutex );
   QStringList result;
-  for ( const auto &s : m_data.odmProfilesAvailable )
+  for ( const auto &s : m_data.platformProfilesAvailable )
     result.append( QString::fromStdString( s ) );
   return result;
+}
+
+QStringList UccDBusInterfaceAdaptor::ODMProfilesAvailable()
+{
+  // Compatibility alias for older clients; the returned values are raw
+  // kernel platform_profile choices.
+  return PlatformProfilesAvailable();
 }
 
 QString UccDBusInterfaceAdaptor::ODMPowerLimitsJSON()
@@ -2145,7 +2152,7 @@ UccDBusService::UccDBusService()
   );
 
   // Initialize profile settings worker. This replaces the old ODM power,
-  // ODM profile, charging and YCbCr420 worker classes.
+  // platform profile, charging and YCbCr420 worker classes.
   // Quirk: some devices (e.g. IBP Gen10 AMD) have a non-functional ACPI platform_profile -
   // skip it instead of advertising a profile sink that cannot control hardware.
   const bool skipAcpiPlatformProfile =
@@ -2158,7 +2165,7 @@ UccDBusService::UccDBusService()
     [this]() -> UccProfile { return m_activeProfile; },
     [this]( const std::vector< std::string > &profiles ) {
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
-      m_dbusData.odmProfilesAvailable = profiles;
+      m_dbusData.platformProfilesAvailable = profiles;
     },
     [this]( const std::string &json ) {
       std::lock_guard< std::mutex > lock( m_dbusData.dataMutex );
@@ -2381,7 +2388,7 @@ UccDBusService::UccDBusService()
   serializeProfilesJSON();
 
   // start worker threads after all callbacks and data are ready
-  m_profileSettingsWorker->start();  // synchronous: detects ODM profile type + inits charging state
+  m_profileSettingsWorker->start();  // synchronous: detects platform profile type + inits charging state
   m_hardwareMonitorWorker->start();
   m_displayWorker->start();
   m_cpuWorker->start();
@@ -4340,97 +4347,30 @@ void UccDBusService::fillDeviceSpecificDefaults( std::vector< UccProfile > &prof
   const int32_t cpuMinFreq = getCpuMinFrequency();
   const int32_t cpuMaxFreq = getCpuMaxFrequency();
 
-  // Get TDP info from uniwill-laptop sysfs.
-  std::vector< TDPInfo > tdpInfo;
-  {
-    const auto limits = ucc::uniwill::readCpuPowerLimits();
-
-    if ( not limits.empty() )
-    {
-      for ( const auto &limit : limits )
-      {
-        TDPInfo info;
-        info.current = limit.current;
-        info.min = limit.min;
-        info.max = limit.max;
-        info.descriptor = limit.descriptor;
-
-        tdpInfo.push_back( info );
-      }
-
-      std::cout << "[fillDeviceSpecificDefaults] TDP info available: " << tdpInfo.size() << " entries" << std::endl;
-      for ( size_t i = 0; i < tdpInfo.size(); ++i )
-      {
-        std::cout << "[fillDeviceSpecificDefaults]   TDP[" << i << "]: min=" << tdpInfo[i].min
-                  << ", max=" << tdpInfo[i].max << ", current=" << tdpInfo[i].current << std::endl;
-      }
-    }
-    else
-    {
-      std::cout << "[fillDeviceSpecificDefaults] No TDP hardware available" << std::endl;
-    }
-  }
-
   for ( auto &profile : profiles )
   {
     std::cout << "[fillDeviceSpecificDefaults] Filling profile: " << profile.id
               << ", current TDP values: " << profile.odmPowerLimits.tdpValues.size() << std::endl;
 
-    // Fill CPU frequency defaults
-    if ( !profile.cpu.scalingMinFrequency.has_value() || profile.cpu.scalingMinFrequency.value() < cpuMinFreq )
+    // Keep missing CPU frequency limits unset. CpuWorker interprets missing
+    // min/max as the current hardware min/max, so profile endpoint values do
+    // not become stale literal caps after kernel/firmware changes.
+    if ( profile.cpu.scalingMinFrequency.has_value() && profile.cpu.scalingMinFrequency.value() < cpuMinFreq )
     {
       profile.cpu.scalingMinFrequency = cpuMinFreq;
     }
 
-    if ( !profile.cpu.scalingMaxFrequency.has_value() )
+    if ( profile.cpu.scalingMaxFrequency.has_value() )
     {
-      profile.cpu.scalingMaxFrequency = cpuMaxFreq;
-    }
-    else if ( profile.cpu.scalingMaxFrequency.value() < profile.cpu.scalingMinFrequency.value() )
-    {
-      profile.cpu.scalingMaxFrequency = profile.cpu.scalingMinFrequency;
-    }
-    else if ( profile.cpu.scalingMaxFrequency.value() > cpuMaxFreq )
-    {
-      profile.cpu.scalingMaxFrequency = cpuMaxFreq;
-    }
+      const int32_t effectiveMin = profile.cpu.scalingMinFrequency.value_or( cpuMinFreq );
 
-    // Fill TDP values if missing and hardware TDP info is available
-    if ( !tdpInfo.empty() && tdpInfo.size() > profile.odmPowerLimits.tdpValues.size() )
-    {
-      const size_t nrMissingValues = tdpInfo.size() - profile.odmPowerLimits.tdpValues.size();
-      std::cout << "[fillDeviceSpecificDefaults]   Adding " << nrMissingValues << " TDP values" << std::endl;
-      // Add missing TDP values with max values from hardware
-      for ( size_t i = profile.odmPowerLimits.tdpValues.size(); i < tdpInfo.size(); ++i )
+      if ( profile.cpu.scalingMaxFrequency.value() < effectiveMin )
       {
-        profile.odmPowerLimits.tdpValues.push_back( static_cast< int >( tdpInfo[i].max ) );
-        std::cout << "[fillDeviceSpecificDefaults]     Added TDP[" << i << "] = " << tdpInfo[i].max << std::endl;
+        profile.cpu.scalingMaxFrequency = effectiveMin;
       }
-    }
-
-    // Clamp existing TDP values to hardware min/max range.
-    // Default profiles have hardcoded placeholders (e.g. {5,10,15}) that
-    // may lie outside the actual hardware capabilities.
-    if ( !tdpInfo.empty() )
-    {
-      for ( size_t i = 0; i < profile.odmPowerLimits.tdpValues.size() && i < tdpInfo.size(); ++i )
+      else if ( profile.cpu.scalingMaxFrequency.value() > cpuMaxFreq )
       {
-        int &val = profile.odmPowerLimits.tdpValues[ i ];
-        const int hwMin = static_cast< int >( tdpInfo[ i ].min );
-        const int hwMax = static_cast< int >( tdpInfo[ i ].max );
-
-        if ( val < hwMin )
-        {
-          std::cout << "[fillDeviceSpecificDefaults]   TDP[" << i << "] " << val
-                    << " below hw min " << hwMin << ", clamping" << std::endl;
-          val = hwMin;
-        }
-        else if ( val > hwMax )
-        {
-          std::cout << "[fillDeviceSpecificDefaults]   TDP[" << i << "] " << val
-                    << " above hw max " << hwMax << ", clamping" << std::endl;
-          val = hwMax;
-        }
+        profile.cpu.scalingMaxFrequency = cpuMaxFreq;
       }
     }
 

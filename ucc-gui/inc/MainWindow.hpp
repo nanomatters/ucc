@@ -71,6 +71,7 @@ namespace ucc
     void onCpuCoresChanged( int value );
     void onMaxFrequencyChanged( int value );
     void onCtgpSliderChanged( int value );
+    void onPlatformProfileChanged( int index );
     void onODMPowerLimit1Changed( int value );
     void onODMPowerLimit2Changed( int value );
     void onODMPowerLimit3Changed( int value );
@@ -124,6 +125,7 @@ namespace ucc
 
     // Update fan profile combo from daemon and custom store
     void reloadFanProfiles();
+    void reloadPlatformProfileChoices();
 
     // Slot: called when DBus connection status changes
     void onUccdConnectionChanged( bool connected );
@@ -136,6 +138,9 @@ namespace ucc
     void setupFanControlTab();
     void connectFanControlTab();
     void updateProfileEditingWidgets( bool isCustom );
+    void updateCpuPowerLimitEditability( bool isCustom );
+    void refreshCpuPowerLimitRanges();
+    void setCpuPowerLimitSlidersToMaximum();
     void updateCtgpVisibility();
     void updateFanCrosshairs();
 
@@ -213,6 +218,7 @@ namespace ucc
     QLabel *m_hwpDynamicBoostLabel = nullptr;
     int m_cpuMinFreqKHz = 400000;   // hardware min frequency in kHz
     int m_cpuMaxFreqKHz = 6000000;  // hardware max frequency in kHz
+    QComboBox *m_platformProfileCombo = nullptr;
     // ODM Power Limit (TDP) widgets
     QSlider *m_odmPowerLimit1Slider = nullptr;
     QLabel *m_odmPowerLimit1Value = nullptr;

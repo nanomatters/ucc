@@ -123,7 +123,7 @@ public:
   std::string defaultProfilesJSON;
   std::string defaultValuesProfileJSON;
   std::string settingsJSON;
-  std::vector< std::string > odmProfilesAvailable;
+  std::vector< std::string > platformProfilesAvailable;
   std::string odmPowerLimitsJSON;
   std::string keyboardBacklightCapabilitiesJSON;
   std::string keyboardBacklightStatesJSON;
@@ -181,7 +181,7 @@ public:
       defaultProfilesJSON( "[]" ),
       defaultValuesProfileJSON( "{}" ),
       settingsJSON( "{}" ),
-      odmProfilesAvailable(),
+      platformProfilesAvailable(),
       odmPowerLimitsJSON( "[]" ),
       keyboardBacklightCapabilitiesJSON( "{}" ),
       keyboardBacklightStatesJSON( "{}" ),
@@ -320,7 +320,8 @@ public slots:
   bool SetStateMap( const QString &state, const QString &profileId );
   bool SetBatchStateMap( const QString &stateMapJSON );
 
-  // odm methods
+  // platform/power methods
+  QStringList PlatformProfilesAvailable();
   QStringList ODMProfilesAvailable();
   QString ODMPowerLimitsJSON();
 

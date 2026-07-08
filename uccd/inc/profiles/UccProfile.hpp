@@ -122,21 +122,6 @@ struct UccProfileFanControl
 };
 
 /**
- * @brief ODM profile settings
- */
-struct UccODMProfile
-{
-  std::optional< std::string > name;
-
-  UccODMProfile() = default;
-
-  UccODMProfile( const std::string &profileName )
-    : name( profileName )
-  {
-  }
-};
-
-/**
  * @brief ODM power limits
  */
 struct UccODMPowerLimits
@@ -179,7 +164,7 @@ struct UccProfileKeyboard
  * @brief Complete TCC profile
  *
  * Contains all settings for a system profile including CPU, display,
- * fan control, webcam, ODM and keyboard settings.
+ * fan control, webcam, platform profile and keyboard settings.
  */
 struct UccProfile
 {
@@ -191,7 +176,7 @@ struct UccProfile
   UccProfileWebcam webcam;
   UccProfileFanControl fan;
   UccProfileKeyboard keyboard;
-  UccODMProfile odmProfile;
+  std::string platformProfile; ///< kernel platform_profile value (quiet/balanced/performance)
   UccODMPowerLimits odmPowerLimits;
   std::optional< int32_t > nvidiaCTGPOffset; ///< Configurable graphics TGP offset in watts
   std::string chargingProfile;  ///< firmware-level charging profile descriptor (e.g. "balanced")
@@ -218,7 +203,7 @@ struct UccProfile
       webcam( other.webcam ),
       fan( other.fan ),
       keyboard( other.keyboard ),
-      odmProfile( other.odmProfile ),
+      platformProfile( other.platformProfile ),
       odmPowerLimits( other.odmPowerLimits ),
       nvidiaCTGPOffset( other.nvidiaCTGPOffset ),
       chargingProfile( other.chargingProfile ),
@@ -242,7 +227,7 @@ struct UccProfile
       webcam = other.webcam;
       fan = other.fan;
       keyboard = other.keyboard;
-      odmProfile = other.odmProfile;
+      platformProfile = other.platformProfile;
       odmPowerLimits = other.odmPowerLimits;
       nvidiaCTGPOffset = other.nvidiaCTGPOffset;
       chargingProfile = other.chargingProfile;
@@ -254,6 +239,16 @@ struct UccProfile
     return *this;
   }
 };
+
+inline std::string getPlatformProfileName( const UccProfile &profile )
+{
+  return profile.platformProfile;
+}
+
+inline void setPlatformProfileName( UccProfile &profile, const std::string &name )
+{
+  profile.platformProfile = name;
+}
 
 /**
  * @brief Generate a unique profile ID

@@ -25,8 +25,7 @@
 
 void ProfileSettingsWorker::start()
 {
-  // Detect which ODM profile mechanism is available (needed by applyODMProfile())
-  detectODMProfileType();
+  detectPlatformProfileType();
 
   // Hardware capabilities (TDP limits, charging, YCbCr420, NVIDIA power limits)
   // are read directly by UccDBusService::readHardwareCapabilities() before this
@@ -218,22 +217,32 @@ void ProfileSettingsWorker::validateNVIDIACTGPOffset()
 }
 
 // =====================================================================
-//  Private methods - ODM Profile
+//  Private methods - Platform Profile
 // =====================================================================
 
-void ProfileSettingsWorker::detectODMProfileType()
+void ProfileSettingsWorker::detectPlatformProfileType()
 {
   m_platformProfile = ucc::uniwill::discover( m_sysfsRoot ).platformProfile;
 
   if ( m_platformProfile.isAvailable() )
   {
-    m_odmProfileType = ODMProfileType::UniwillPlatformProfile;
+    if ( m_skipAcpiPlatformProfile &&
+         m_platformProfile.description.find( "ACPI platform_profile" ) != std::string::npos )
+    {
+      m_setPlatformProfilesAvailable( {} );
+      m_platformProfileType = PlatformProfileType::None;
+      syslog( LOG_INFO, "ProfileSettingsWorker: Skipping ACPI platform_profile for this device" );
+      return;
+    }
+
+    m_platformProfileType = PlatformProfileType::UniwillPlatformProfile;
+    m_setPlatformProfilesAvailable( readPlatformProfileChoices( m_platformProfile.choicesPath ) );
     syslog( LOG_INFO, "ProfileSettingsWorker: Using %s",
             m_platformProfile.description.c_str() );
     return;
   }
 
-  m_odmProfileType = ODMProfileType::None;
+  m_platformProfileType = PlatformProfileType::None;
   syslog( LOG_INFO, "ProfileSettingsWorker: No uniwill platform_profile support available" );
 }
 
@@ -260,19 +269,23 @@ std::vector< std::string > ProfileSettingsWorker::readPlatformProfileChoices(
   return profiles;
 }
 
-void ProfileSettingsWorker::applyODMProfile()
+void ProfileSettingsWorker::applyConfiguredPlatformProfile()
 {
   const UccProfile profile = m_getActiveProfile();
-  const std::string chosenProfileName = profile.odmProfile.name.value_or( "" );
 
-  switch ( m_odmProfileType )
+  switch ( m_platformProfileType )
   {
-    case ODMProfileType::UniwillPlatformProfile:
-      applyPlatformProfile( m_platformProfile, chosenProfileName );
+    case PlatformProfileType::UniwillPlatformProfile:
+    {
+      const std::vector< std::string > availableProfiles =
+        readPlatformProfileChoices( m_platformProfile.choicesPath );
+      m_setPlatformProfilesAvailable( availableProfiles );
+      applyPlatformProfile( m_platformProfile, profile.platformProfile );
       break;
+    }
 
-    case ODMProfileType::None:
-      m_setOdmProfilesAvailable( {} );
+    case PlatformProfileType::None:
+      m_setPlatformProfilesAvailable( {} );
       break;
   }
 }
@@ -283,7 +296,7 @@ void ProfileSettingsWorker::applyPlatformProfile(
 {
   std::vector< std::string > availableProfiles = readPlatformProfileChoices( sink.choicesPath );
 
-  m_setOdmProfilesAvailable( availableProfiles );
+  m_setPlatformProfilesAvailable( availableProfiles );
 
   if ( chosenProfileName.empty() )
   {
@@ -291,14 +304,7 @@ void ProfileSettingsWorker::applyPlatformProfile(
     return;
   }
 
-  const std::string profileToApply =
-    ucc::uniwill::translatePlatformProfileName( chosenProfileName, availableProfiles );
-
-  if ( profileToApply != chosenProfileName )
-  {
-    syslog( LOG_INFO, "ProfileSettingsWorker: Translating ODM profile '%s' to '%s'",
-            chosenProfileName.c_str(), profileToApply.c_str() );
-  }
+  const std::string profileToApply = chosenProfileName;
 
   if ( auto it = std::ranges::find( availableProfiles, profileToApply );
        it == availableProfiles.end() )
@@ -311,12 +317,12 @@ void ProfileSettingsWorker::applyPlatformProfile(
   SysfsNode< std::string > profileNode( sink.profilePath );
   if ( profileNode.write( profileToApply ) )
   {
-    syslog( LOG_INFO, "ProfileSettingsWorker: Set ODM profile to '%s'",
+    syslog( LOG_INFO, "ProfileSettingsWorker: Set platform profile to '%s'",
             profileToApply.c_str() );
   }
   else
   {
-    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to set ODM profile to '%s'",
+    syslog( LOG_WARNING, "ProfileSettingsWorker: Failed to set platform profile to '%s'",
             profileToApply.c_str() );
   }
 }
@@ -378,6 +384,20 @@ void ProfileSettingsWorker::applyODMPowerLimits()
   logLine( "ProfileSettingsWorker: Found " + std::to_string( tdpInfo.size() ) +
            " TDP descriptors" );
 
+  if ( m_platformProfile.isAvailable() )
+  {
+    const std::string currentProfile =
+      SysfsNode< std::string >( m_platformProfile.profilePath ).read().value_or( "" );
+
+    if ( currentProfile != "performance" )
+    {
+      logLine( "ProfileSettingsWorker: CPU power limit writes disabled; current platform profile is '" +
+               ( currentProfile.empty() ? std::string( "unknown" ) : currentProfile ) + "'" );
+      publishODMPowerLimitsJSON( tdpInfo );
+      return;
+    }
+  }
+
   std::vector< uint32_t > newTDPValues;
 
   if ( not odmPowerLimits.tdpValues.empty() )
@@ -391,6 +411,30 @@ void ProfileSettingsWorker::applyODMPowerLimits()
     for ( const auto &tdp : tdpInfo )
     {
       newTDPValues.push_back( tdp.max );
+    }
+  }
+
+  for ( size_t i = 0; i < newTDPValues.size() && i < tdpInfo.size(); ++i )
+  {
+    const uint32_t minValue = tdpInfo[ i ].min;
+    const uint32_t maxValue = tdpInfo[ i ].max;
+
+    if ( minValue > maxValue )
+      continue;
+
+    if ( newTDPValues[ i ] < minValue )
+    {
+      logLine( "ProfileSettingsWorker: TDP[" + std::to_string( i ) + "] " +
+               std::to_string( newTDPValues[ i ] ) + " W is below current minimum " +
+               std::to_string( minValue ) + " W; clamping" );
+      newTDPValues[ i ] = minValue;
+    }
+    else if ( newTDPValues[ i ] > maxValue )
+    {
+      logLine( "ProfileSettingsWorker: TDP[" + std::to_string( i ) + "] " +
+               std::to_string( newTDPValues[ i ] ) + " W is above current profile maximum " +
+               std::to_string( maxValue ) + " W; clamping" );
+      newTDPValues[ i ] = maxValue;
     }
   }
 

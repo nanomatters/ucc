@@ -36,6 +36,9 @@ endfunction()
 ucc_add_test( test_state_utils      test_state_utils.cpp )
 ucc_add_test( test_fan_profile      test_fan_profile.cpp )
 ucc_add_test( test_profile_manager  test_profile_manager.cpp )
+target_sources( test_profile_manager PRIVATE
+  ${CMAKE_SOURCE_DIR}/uccd/src/profiles/DefaultProfiles.cpp
+)
 ucc_add_test( test_settings_manager test_settings_manager.cpp )
 ucc_add_test( test_metrics_history  test_metrics_history.cpp )
 ucc_add_test( test_uniwill_sysfs    test_uniwill_sysfs.cpp )

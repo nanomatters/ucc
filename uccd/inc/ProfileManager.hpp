@@ -208,6 +208,7 @@ public:
     profile.id = extractString( json, "id" );
     profile.name = extractString( json, "name" );
     profile.description = extractString( json, "description" );
+    setPlatformProfileName( profile, extractString( json, "platformProfile", "" ) );
 
     // Parse display settings
     std::string displayJson = extractObject( json, "display" );
@@ -296,17 +297,6 @@ public:
                   << " GPU=" << profile.fan.tableGPU.size()
                   << " Pump=" << profile.fan.tablePump.size()
                   << " WCFan=" << profile.fan.tableWaterCoolerFan.size() << std::endl;
-      }
-    }
-
-    // Parse ODM profile
-    std::string odmProfileJson = extractObject( json, "odmProfile" );
-    if ( !odmProfileJson.empty() )
-    {
-      std::string odmName = extractString( odmProfileJson, "name" );
-      if ( !odmName.empty() )
-      {
-        profile.odmProfile.name = odmName;
       }
     }
 
@@ -557,10 +547,10 @@ private:
       modified = true;
     }
 
-    // fill ODM profile name
-    if ( not profile.odmProfile.name.has_value() and defaultProfile.odmProfile.name.has_value() )
+    // Fill platform profile value.
+    if ( getPlatformProfileName( profile ).empty() and not getPlatformProfileName( defaultProfile ).empty() )
     {
-      profile.odmProfile.name = defaultProfile.odmProfile.name;
+      setPlatformProfileName( profile, getPlatformProfileName( defaultProfile ) );
       modified = true;
     }
 
@@ -693,10 +683,10 @@ public:
       oss << ",\"tableWaterCoolerFan\":" << fanTableToJSON( profile.fan.tableWaterCoolerFan );
     }
 
+    const std::string platformProfile = getPlatformProfileName( profile );
+
     oss << "},"
-        << "\"odmProfile\":{"
-        << "\"name\":\"" << jsonEscape( profile.odmProfile.name.value_or( "" ) ) << "\""
-        << "},"
+        << "\"platformProfile\":\"" << jsonEscape( platformProfile ) << "\","
         << "\"odmPowerLimits\":{"
         << "\"tdpValues\":[";
 

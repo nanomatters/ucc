@@ -499,6 +499,13 @@ static void printProfileSummary( const QJsonObject &obj, bool showHeader = true 
     }
   }
 
+  if ( obj.contains( "platformProfile" ) )
+  {
+    QString platformProfile = obj[ "platformProfile" ].toString();
+    if ( !platformProfile.isEmpty() )
+      std::printf( "  %-24s %s\n", "Platform profile:", platformProfile.toStdString().c_str() );
+  }
+
   // ODM power limits
   if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
   {
@@ -524,14 +531,6 @@ static void printProfileSummary( const QJsonObject &obj, bool showHeader = true 
   {
     int ctgp = obj["nvidiaCTGPOffset"].toInt();
     std::printf( "  %-24s %d W\n", "cTGP offset:", ctgp );
-  }
-
-  // ODM profile
-  if ( obj.contains( "odmProfile" ) && obj["odmProfile"].isObject() )
-  {
-    QString odmName = obj["odmProfile"].toObject()["name"].toString();
-    if ( !odmName.isEmpty() )
-      std::printf( "  %-24s %s\n", "ODM profile:", odmName.toStdString().c_str() );
   }
 
 }

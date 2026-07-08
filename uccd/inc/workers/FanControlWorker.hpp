@@ -553,15 +553,8 @@ private:
       if ( ucc::uniwill::writeFanPwm( channel, pct ) )
       {
         wroteAny = true;
-        const int32_t pwm = ucc::uniwill::percentToPwm( pct );
         int32_t &last = ( channel.index == 0 ) ? m_lastManualPctCpu : m_lastManualPctGpu;
-        if ( pct != last )
-        {
-          std::cout << "[Fan]   channel " << channel.index << " ("
-                    << ( sameSpeed ? "sameSpeed" : ( channel.index == 0 ? "CPU" : "GPU" ) )
-                    << ") -> " << pct << "% (pwm=" << pwm << ")" << std::endl;
-          last = pct;
-        }
+        last = pct;
       }
     }
 

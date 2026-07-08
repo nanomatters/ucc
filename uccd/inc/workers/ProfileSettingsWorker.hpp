@@ -59,7 +59,7 @@ public:
   ProfileSettingsWorker(
     std::shared_ptr< NvmlWrapper > nvml,
     std::function< UccProfile() > getActiveProfileCallback,
-    std::function< void( const std::vector< std::string > & ) > setOdmProfilesAvailableCallback,
+    std::function< void( const std::vector< std::string > & ) > setPlatformProfilesAvailableCallback,
     std::function< void( const std::string & ) > setOdmPowerLimitsJSON,
     std::function< void( const std::string & ) > logFunction,
     TccSettings &settings,
@@ -72,7 +72,7 @@ public:
     std::string sysfsRoot = "/sys" )
     : m_nvml( std::move( nvml ) ),
       m_getActiveProfile( std::move( getActiveProfileCallback ) ),
-      m_setOdmProfilesAvailable( std::move( setOdmProfilesAvailableCallback ) ),
+      m_setPlatformProfilesAvailable( std::move( setPlatformProfilesAvailableCallback ) ),
       m_setOdmPowerLimitsJSON( std::move( setOdmPowerLimitsJSON ) ),
       m_logFunction( std::move( logFunction ) ),
       m_sysfsRoot( std::move( sysfsRoot ) ),
@@ -81,9 +81,9 @@ public:
       m_nvidiaPowerCTRLDefaultPowerLimit( nvidiaPowerCTRLDefaultPowerLimit ),
       m_nvidiaPowerCTRLMaxPowerLimit( nvidiaPowerCTRLMaxPowerLimit ),
       m_nvidiaPowerCTRLAvailable( nvidiaPowerCTRLAvailable ),
-      m_cTGPAdjustmentSupported( cTGPAdjustmentSupported )
+      m_cTGPAdjustmentSupported( cTGPAdjustmentSupported ),
+      m_skipAcpiPlatformProfile( skipAcpiPlatformProfile )
   {
-    (void) skipAcpiPlatformProfile;
   }
 
   /**
@@ -100,7 +100,7 @@ public:
   void reapplyProfile()
   {
     logLine( "ProfileSettingsWorker: reapplyProfile() called" );
-    applyODMProfile();
+    applyConfiguredPlatformProfile();
     applyODMPowerLimits();
   }
 
@@ -139,9 +139,9 @@ public:
   void validateNVIDIACTGPOffset();
 
 private:
-  // ODM Profile internals
+  // Platform profile internals
 
-  enum class ODMProfileType
+  enum class PlatformProfileType
   {
     None,
     UniwillPlatformProfile
@@ -149,17 +149,17 @@ private:
 
   std::shared_ptr< NvmlWrapper > m_nvml;
   std::function< UccProfile() > m_getActiveProfile;
-  std::function< void( const std::vector< std::string > & ) > m_setOdmProfilesAvailable;
+  std::function< void( const std::vector< std::string > & ) > m_setPlatformProfilesAvailable;
   std::function< void( const std::string & ) > m_setOdmPowerLimitsJSON;
   std::function< void( const std::string & ) > m_logFunction;
-  ODMProfileType m_odmProfileType = ODMProfileType::None;
+  PlatformProfileType m_platformProfileType = PlatformProfileType::None;
   std::string m_sysfsRoot;
   ucc::uniwill::PlatformProfileSink m_platformProfile;
 
-  void detectODMProfileType();
+  void detectPlatformProfileType();
   std::vector< std::string > readPlatformProfileChoices( const std::string &path );
 
-  void applyODMProfile();
+  void applyConfiguredPlatformProfile();
   void applyPlatformProfile(
     const ucc::uniwill::PlatformProfileSink &sink,
     const std::string &chosenProfileName );
@@ -219,6 +219,7 @@ private:
   std::atomic< int32_t > &m_nvidiaPowerCTRLMaxPowerLimit;
   std::atomic< bool > &m_nvidiaPowerCTRLAvailable;
   std::atomic< bool > &m_cTGPAdjustmentSupported;
+  bool m_skipAcpiPlatformProfile = false;
 
   bool fileExists( const std::string &path ) const
   {

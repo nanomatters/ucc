@@ -45,7 +45,7 @@ private:
         "tableCPU": [{"temp":30,"speed":20},{"temp":70,"speed":60}],
         "tableGPU": [{"temp":30,"speed":25},{"temp":70,"speed":65}]
       },
-      "odmProfile": { "name": "enthusiast" },
+      "platformProfile": "performance",
       "odmPowerLimits": { "tdpValues": [45, 80] },
       "nvidiaCTGPOffset": 15,
       "keyboard": { "keyboardProfileName": "Rainbow" },
@@ -122,8 +122,7 @@ private slots:
   void parseProfile_odmAndNvidia()
   {
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
-    QVERIFY( p.odmProfile.name.has_value() );
-    QCOMPARE( *p.odmProfile.name, std::string( "enthusiast" ) );
+    QCOMPARE( p.platformProfile, std::string( "performance" ) );
     QCOMPARE( static_cast< int >( p.odmPowerLimits.tdpValues.size() ), 2 );
     QCOMPARE( p.odmPowerLimits.tdpValues[0], 45 );
     QVERIFY( p.nvidiaCTGPOffset.has_value() );
@@ -164,6 +163,7 @@ private slots:
     QCOMPARE( reparsed.fan.fanProfile,        original.fan.fanProfile );
     QCOMPARE( reparsed.fan.sameSpeed,         original.fan.sameSpeed );
     QCOMPARE( reparsed.chargingProfile,       original.chargingProfile );
+    QCOMPARE( reparsed.platformProfile,       original.platformProfile );
     QCOMPARE( reparsed.chargeStartThreshold,  original.chargeStartThreshold );
     QCOMPARE( reparsed.chargeEndThreshold,    original.chargeEndThreshold );
     QCOMPARE( reparsed.nvidiaCTGPOffset,      original.nvidiaCTGPOffset );
@@ -195,6 +195,23 @@ private slots:
     std::string json = R"([])";
     auto table = ProfileManager::parseFanTableFromJSON( json );
     QVERIFY( table.empty() );
+  }
+
+  void tdpCustomDefaultsUsePerformancePlatformProfile()
+  {
+    const UccProfile *profiles[] = {
+      &defaultCustomProfile,
+      &defaultMobileCustomProfileTDP,
+      &defaultMobileCustomProfileCl,
+      &defaultCustomProfile25WcTGP
+    };
+
+    for ( const UccProfile *profile : profiles )
+    {
+      QVERIFY( profile != nullptr );
+      QVERIFY( !profile->odmPowerLimits.tdpValues.empty() );
+      QCOMPARE( profile->platformProfile, std::string( "performance" ) );
+    }
   }
 };
 

@@ -67,6 +67,7 @@ public:
   // Data accessors for combos (id + name)
   const QJsonArray& defaultProfilesData() const { return m_defaultProfilesData; }
   const QJsonArray& customProfilesData() const { return m_customProfilesData; }
+  QStringList platformProfileChoices() const { return m_platformProfileChoices; }
 
   // Fan profile data (built-in + custom, each with id + name)
   const QJsonArray& builtinFanProfilesData() const { return m_builtinFanProfilesData; }
@@ -81,6 +82,7 @@ public slots:
   void deleteProfile( const QString &profileId );
   QString getProfileDetails( const QString &profileId );
   QString createProfileFromDefault( const QString &name );
+  void refreshHardwarePowerLimits();
   std::vector< int > getHardwarePowerLimits();
   bool isCustomProfile( const QString &profileId ) const;
 
@@ -131,6 +133,7 @@ private:
   void updateActiveProfileIndex();
   void loadCustomProfilesFromSettings();
   void saveCustomProfilesToSettings();
+  void loadPlatformProfileChoices();
   void loadBuiltinFanProfiles();
   void loadCustomFanProfilesFromSettings();
   void saveCustomFanProfilesToSettings();
@@ -157,6 +160,7 @@ private:
   int m_activeProfileIndex = -1;
   bool m_connected = false;
   std::vector< int > m_hardwarePowerLimits;
+  QStringList m_platformProfileChoices;
 
   QJsonArray m_defaultProfilesData;
   QJsonArray m_customProfilesData;

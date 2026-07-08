@@ -115,23 +115,6 @@ private slots:
     QCOMPARE( info.ecFirmwareVersion, std::string( "1.09" ) );
   }
 
-  void profileTranslationKeepsUccProfilesCompatible()
-  {
-    const std::vector< std::string > uniwillProfiles = { "quiet", "balanced", "performance" };
-    const std::vector< std::string > reducedProfiles = { "quiet", "balanced" };
-
-    QCOMPARE( ucc::uniwill::translatePlatformProfileName( "power_save", uniwillProfiles ),
-              std::string( "quiet" ) );
-    QCOMPARE( ucc::uniwill::translatePlatformProfileName( "enthusiast", uniwillProfiles ),
-              std::string( "balanced" ) );
-    QCOMPARE( ucc::uniwill::translatePlatformProfileName( "overboost", uniwillProfiles ),
-              std::string( "performance" ) );
-    QCOMPARE( ucc::uniwill::translatePlatformProfileName( "overboost", reducedProfiles ),
-              std::string( "balanced" ) );
-    QCOMPARE( ucc::uniwill::translatePlatformProfileName( "balanced", uniwillProfiles ),
-              std::string( "balanced" ) );
-  }
-
   void readsCpuPowerLimitsFromPlatformDevice()
   {
     QTemporaryDir dir;

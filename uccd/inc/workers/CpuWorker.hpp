@@ -406,7 +406,6 @@ private:
           // check minimum frequency - compare against the per-core clamped+snapped value
           // that setGovernorScalingMinFrequency() actually wrote, not the raw profile target
           // (which would differ for E-cores / lower-binned P-cores)
-          if ( profile.cpu.scalingMinFrequency.has_value() )
           {
             auto currentMin = core.scalingMinFreq.read();
             auto expectedMin = CpuController::computeEffectiveMinFreq( core, profile.cpu.scalingMinFrequency );
@@ -424,7 +423,6 @@ private:
           // On heterogeneous CPUs (Intel Turbo Boost Max 3.0, P+E cores) every core type
           // has its own cpuinfo_max_freq ceiling; the profile stores the global requested
           // max but each core will have been written a different effective value.
-          if ( profile.cpu.scalingMaxFrequency.has_value() )
           {
             auto currentMax = core.scalingMaxFreq.read();
             auto expectedMax = CpuController::computeEffectiveMaxFreq( core, profile.cpu.scalingMaxFrequency, acpiFallback );

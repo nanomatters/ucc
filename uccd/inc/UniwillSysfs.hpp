@@ -880,28 +880,4 @@ inline SysfsWriteResult writeWaterCoolerBridgeEnable(
   return state;
 }
 
-[[nodiscard]] inline std::string translatePlatformProfileName(
-  const std::string &requestedName,
-  const std::vector< std::string > &availableProfiles )
-{
-  if ( requestedName.empty() or contains( availableProfiles, requestedName ) )
-    return requestedName;
-
-  if ( requestedName == "power_save" and contains( availableProfiles, "quiet" ) )
-    return "quiet";
-
-  if ( requestedName == "enthusiast" and contains( availableProfiles, "balanced" ) )
-    return "balanced";
-
-  if ( requestedName == "overboost" )
-  {
-    if ( contains( availableProfiles, "performance" ) )
-      return "performance";
-
-    if ( contains( availableProfiles, "balanced" ) )
-      return "balanced";
-  }
-
-  return requestedName;
-}
 }

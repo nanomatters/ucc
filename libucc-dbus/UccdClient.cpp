@@ -589,6 +589,21 @@ std::optional< std::vector< int > > UccdClient::getODMPowerLimits()
   return limits;
 }
 
+std::optional< std::vector< std::string > > UccdClient::getPlatformProfilesAvailable()
+{
+  auto profiles = callMethod< QStringList >( "PlatformProfilesAvailable" );
+  if ( !profiles )
+    return std::nullopt;
+
+  std::vector< std::string > result;
+  result.reserve( static_cast< size_t >( profiles->size() ) );
+
+  for ( const QString &profile : *profiles )
+    result.push_back( profile.toStdString() );
+
+  return result;
+}
+
 bool UccdClient::setChargingProfile( const std::string &profileDescriptor )
 {
   return callVoidMethod( "SetChargingProfile", QString::fromStdString( profileDescriptor ) );

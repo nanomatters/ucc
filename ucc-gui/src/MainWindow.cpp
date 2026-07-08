@@ -95,6 +95,15 @@ protected:
 namespace ucc
 {
 
+static QString platformProfileLabel( QString profile )
+{
+  profile.replace( '_', ' ' );
+  if ( !profile.isEmpty() )
+    profile[ 0 ] = profile[ 0 ].toUpper();
+
+  return profile;
+}
+
 MainWindow::MainWindow( QWidget *parent )
   : QMainWindow( parent )
   , m_profileManager( std::make_unique< ProfileManager >( this ) )
@@ -674,6 +683,13 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( sysHeader, row, 0, 1, 2 );
   row++;
 
+  QLabel *platformProfileLabel = new QLabel( "Platform profile" );
+  m_platformProfileCombo = new QComboBox();
+  detailsLayout->addWidget( platformProfileLabel, row, 0 );
+  detailsLayout->addWidget( m_platformProfileCombo, row, 1 );
+  row++;
+  reloadPlatformProfileChoices();
+
   QLabel *odmPowerHeader = new QLabel( "CPU power limit control" );
   detailsLayout->addWidget( odmPowerHeader, row, 0, 1, 2 );
   row++;
@@ -883,6 +899,12 @@ void MainWindow::connectSignals()
   connect( m_odmPowerLimit3Slider, &QSlider::valueChanged,
            this, &MainWindow::onODMPowerLimit3Changed );
 
+  if ( m_platformProfileCombo )
+  {
+    connect( m_platformProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
+             this, &MainWindow::onPlatformProfileChanged );
+  }
+
   // CPU frequency controls
 
   connect( m_cpuCoresSlider, &QSlider::valueChanged,
@@ -998,6 +1020,12 @@ void MainWindow::connectSignals()
   connect( m_maxFrequencySlider, &QSlider::valueChanged,
            this, [this]() { markChanged(); } );
 
+  if ( m_platformProfileCombo )
+  {
+    connect( m_platformProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
+             this, [this]() { markChanged(); } );
+  }
+
   connect( m_odmPowerLimit1Slider, &QSlider::valueChanged,
            this, [this]() { markChanged(); } );
 
@@ -1072,6 +1100,7 @@ void MainWindow::connectSignals()
 
   // Initial load of fan profiles (may be empty if service not yet available)
   reloadFanProfiles();
+  reloadPlatformProfileChoices();
 
   // Populate governor combo
   populateGovernorCombo();
@@ -1114,6 +1143,42 @@ void MainWindow::populateEppCombo()
     for ( const auto &epp : *epps )
       m_eppCombo->addItem( QString::fromStdString( epp ), QString::fromStdString( epp ) );
   }
+}
+
+void MainWindow::reloadPlatformProfileChoices()
+{
+  if ( !m_platformProfileCombo )
+    return;
+
+  const QString previous = m_platformProfileCombo->currentData().toString();
+  const QStringList choices = m_profileManager ? m_profileManager->platformProfileChoices() : QStringList();
+
+  m_platformProfileCombo->blockSignals( true );
+  m_platformProfileCombo->clear();
+
+  if ( choices.isEmpty() )
+  {
+    m_platformProfileCombo->addItem( "Unavailable", "" );
+  }
+  else
+  {
+    for ( const QString &choice : choices )
+      m_platformProfileCombo->addItem( platformProfileLabel( choice ), choice );
+  }
+
+  int index = previous.isEmpty() ? -1 : m_platformProfileCombo->findData( previous );
+  if ( index < 0 )
+    index = m_platformProfileCombo->findData( "performance" );
+  if ( index < 0 && m_platformProfileCombo->count() > 0 )
+    index = 0;
+
+  if ( index >= 0 )
+    m_platformProfileCombo->setCurrentIndex( index );
+
+  m_platformProfileCombo->blockSignals( false );
+
+  const QString profileId = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+  updateCpuPowerLimitEditability( m_profileManager && m_profileManager->isCustomProfile( profileId ) );
 }
 
 std::optional< double > MainWindow::parseMonitorValue( const QString &str )
@@ -1300,6 +1365,7 @@ void MainWindow::onAllProfilesChanged()
   m_profileCombo->setCurrentIndex( m_profileManager->activeProfileIndex() );
   m_profileCombo->blockSignals( false );
   m_selectedProfileIndex = m_profileManager->activeProfileIndex();
+  reloadPlatformProfileChoices();
 
   // Load the active profile details
   if ( QString activeProfileId = m_profileManager->activeProfileId(); !activeProfileId.isEmpty() )
@@ -1500,6 +1566,19 @@ void MainWindow::onCtgpSliderChanged( int value )
   m_ctgpValueLabel->setText( QString::number( value ) + " W" );
 }
 
+void MainWindow::onPlatformProfileChanged( int index )
+{
+  (void) index;
+  const QString profileId = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+  updateCpuPowerLimitEditability( m_profileManager && m_profileManager->isCustomProfile( profileId ) );
+
+  const QString platformProfile = m_platformProfileCombo
+    ? m_platformProfileCombo->currentData().toString()
+    : QString();
+  if ( platformProfile != "performance" )
+    setCpuPowerLimitSlidersToMaximum();
+}
+
 void MainWindow::loadProfileDetails( const QString &profileId )
 {
   // Reset change flag when loading a new profile
@@ -1540,6 +1619,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_governorCombo->blockSignals( true );
   m_minFrequencySlider->blockSignals( true );
   m_maxFrequencySlider->blockSignals( true );
+  if ( m_platformProfileCombo ) m_platformProfileCombo->blockSignals( true );
   m_odmPowerLimit1Slider->blockSignals( true );
   m_odmPowerLimit2Slider->blockSignals( true );
   m_odmPowerLimit3Slider->blockSignals( true );
@@ -1690,12 +1770,22 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     if ( cpuObj.contains( "scalingMinFrequency" ) )
     {
       int requestedKHz = cpuObj["scalingMinFrequency"].toInt( 1000000 );
+      if ( requestedKHz < m_cpuMinFreqKHz )
+        requestedKHz = m_cpuMinFreqKHz;
+      else if ( requestedKHz > m_cpuMaxFreqKHz )
+        requestedKHz = m_cpuMaxFreqKHz;
+
       m_minFrequencySlider->setValue( requestedKHz );
     }
 
     if ( cpuObj.contains( "scalingMaxFrequency" ) )
     {
       int requestedKHz = cpuObj["scalingMaxFrequency"].toInt( 5000000 );
+      if ( requestedKHz <= 0 || requestedKHz > m_cpuMaxFreqKHz )
+        requestedKHz = m_cpuMaxFreqKHz;
+      else if ( requestedKHz < m_cpuMinFreqKHz )
+        requestedKHz = m_cpuMinFreqKHz;
+
       m_maxFrequencySlider->setValue( requestedKHz );
     }
 
@@ -1721,27 +1811,35 @@ void MainWindow::loadProfileDetails( const QString &profileId )
     }
   }
 
+  if ( m_platformProfileCombo )
+  {
+    QString platformProfile = obj.value( "platformProfile" ).toString();
+
+    int index = platformProfile.isEmpty() ? -1 : m_platformProfileCombo->findData( platformProfile );
+    if ( index < 0 )
+      index = m_platformProfileCombo->findData( "performance" );
+    if ( index < 0 && m_platformProfileCombo->count() > 0 )
+      index = 0;
+
+    if ( index >= 0 )
+      m_platformProfileCombo->setCurrentIndex( index );
+  }
+
   // Load ODM Power Limits (TDP) settings (nested in odmPowerLimits object)
-  // First, set slider ranges from hardware limits
-  std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
-  if ( hardwareLimits.size() > 0 )
+  // First, refresh slider ranges from the daemon's current pl*_max values.
+  refreshCpuPowerLimitRanges();
+
+  // Then, set slider values from profile. Non-performance profiles ignore
+  // manual PL values in the driver, so show the current profile max/defaults.
+  const QString selectedPlatformProfile = m_platformProfileCombo
+    ? m_platformProfileCombo->currentData().toString()
+    : QString();
+
+  if ( selectedPlatformProfile != "performance" )
   {
-    m_odmPowerLimit1Slider->setMaximum( hardwareLimits[0] );
+    setCpuPowerLimitSlidersToMaximum();
   }
-
-  if ( hardwareLimits.size() > 1 )
-  {
-    m_odmPowerLimit2Slider->setMaximum( hardwareLimits[1] );
-  }
-
-  if ( hardwareLimits.size() > 2 )
-  {
-    m_odmPowerLimit3Slider->setMaximum( hardwareLimits[2] );
-  }
-
-  // Then, set slider values from profile
-
-  if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
+  else if ( obj.contains( "odmPowerLimits" ) && obj["odmPowerLimits"].isObject() )
   {
     QJsonObject odmLimitsObj = obj["odmPowerLimits"].toObject();
 
@@ -1859,6 +1957,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_governorCombo->blockSignals( false );
   m_minFrequencySlider->blockSignals( false );
   m_maxFrequencySlider->blockSignals( false );
+  if ( m_platformProfileCombo ) m_platformProfileCombo->blockSignals( false );
   m_odmPowerLimit1Slider->blockSignals( false );
   m_odmPowerLimit2Slider->blockSignals( false );
   m_odmPowerLimit3Slider->blockSignals( false );
@@ -1939,16 +2038,86 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
   if ( m_maxFrequencySlider ) m_maxFrequencySlider->setEnabled( isCustom );
   if ( m_hwpDynamicBoostCheckBox ) m_hwpDynamicBoostCheckBox->setEnabled( isCustom );
 
-  // ODM Power controls
-  if ( m_odmPowerLimit1Slider ) m_odmPowerLimit1Slider->setEnabled( isCustom );
-  if ( m_odmPowerLimit2Slider ) m_odmPowerLimit2Slider->setEnabled( isCustom );
-  if ( m_odmPowerLimit3Slider ) m_odmPowerLimit3Slider->setEnabled( isCustom );
+  if ( m_platformProfileCombo )
+    m_platformProfileCombo->setEnabled( isCustom && !m_platformProfileCombo->currentData().toString().isEmpty() );
+
+  updateCpuPowerLimitEditability( isCustom );
 
   // GPU Power (cTGP) slider
   if ( m_ctgpSlider ) m_ctgpSlider->setEnabled( isCustom );
   // Charging
   if ( m_profileChargingPriorityCombo ) m_profileChargingPriorityCombo->setEnabled( isCustom );
   if ( m_profileChargeLimitCombo ) m_profileChargeLimitCombo->setEnabled( isCustom );
+}
+
+void MainWindow::updateCpuPowerLimitEditability( bool isCustom )
+{
+  const QString platformProfile = m_platformProfileCombo
+    ? m_platformProfileCombo->currentData().toString()
+    : QString();
+  const bool canEdit = isCustom && platformProfile == "performance";
+
+  if ( m_odmPowerLimit1Slider ) m_odmPowerLimit1Slider->setEnabled( canEdit );
+  if ( m_odmPowerLimit2Slider ) m_odmPowerLimit2Slider->setEnabled( canEdit );
+  if ( m_odmPowerLimit3Slider ) m_odmPowerLimit3Slider->setEnabled( canEdit );
+}
+
+void MainWindow::refreshCpuPowerLimitRanges()
+{
+  if ( !m_profileManager )
+    return;
+
+  m_profileManager->refreshHardwarePowerLimits();
+  const std::vector< int > hardwareLimits = m_profileManager->getHardwarePowerLimits();
+
+  auto setSliderMaximum = []( QSlider *slider, int maximum ) {
+    if ( !slider || maximum <= 0 )
+      return;
+
+    const bool wasBlocked = slider->blockSignals( true );
+    slider->setMaximum( maximum );
+    slider->blockSignals( wasBlocked );
+  };
+
+  if ( hardwareLimits.size() > 0 )
+    setSliderMaximum( m_odmPowerLimit1Slider, hardwareLimits[0] );
+  if ( hardwareLimits.size() > 1 )
+    setSliderMaximum( m_odmPowerLimit2Slider, hardwareLimits[1] );
+  if ( hardwareLimits.size() > 2 )
+    setSliderMaximum( m_odmPowerLimit3Slider, hardwareLimits[2] );
+
+  if ( m_odmPowerLimit1Slider ) onODMPowerLimit1Changed( m_odmPowerLimit1Slider->value() );
+  if ( m_odmPowerLimit2Slider ) onODMPowerLimit2Changed( m_odmPowerLimit2Slider->value() );
+  if ( m_odmPowerLimit3Slider ) onODMPowerLimit3Changed( m_odmPowerLimit3Slider->value() );
+
+  const QString profileId = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+  updateCpuPowerLimitEditability( m_profileManager->isCustomProfile( profileId ) );
+
+  const QString platformProfile = m_platformProfileCombo
+    ? m_platformProfileCombo->currentData().toString()
+    : QString();
+  if ( platformProfile != "performance" )
+    setCpuPowerLimitSlidersToMaximum();
+}
+
+void MainWindow::setCpuPowerLimitSlidersToMaximum()
+{
+  const auto setToMaximum = []( QSlider *slider ) {
+    if ( !slider )
+      return;
+
+    const bool wasBlocked = slider->blockSignals( true );
+    slider->setValue( slider->maximum() );
+    slider->blockSignals( wasBlocked );
+  };
+
+  setToMaximum( m_odmPowerLimit1Slider );
+  setToMaximum( m_odmPowerLimit2Slider );
+  setToMaximum( m_odmPowerLimit3Slider );
+
+  if ( m_odmPowerLimit1Slider ) onODMPowerLimit1Changed( m_odmPowerLimit1Slider->value() );
+  if ( m_odmPowerLimit2Slider ) onODMPowerLimit2Changed( m_odmPowerLimit2Slider->value() );
+  if ( m_odmPowerLimit3Slider ) onODMPowerLimit3Changed( m_odmPowerLimit3Slider->value() );
 }
 
 void MainWindow::updateCtgpVisibility()
@@ -2027,11 +2196,18 @@ QString MainWindow::buildProfileJSON() const
   cpuObj["onlineCores"]                = m_cpuCoresSlider->value();
   cpuObj["governor"]                   = m_governorCombo->currentData().toString();
   cpuObj["energyPerformancePreference"] = m_eppCombo ? m_eppCombo->currentData().toString() : QString();
-  cpuObj["scalingMinFrequency"]         = std::clamp( m_minFrequencySlider->value(), m_cpuMinFreqKHz, m_cpuMaxFreqKHz );
-  cpuObj["scalingMaxFrequency"]         = std::clamp( m_maxFrequencySlider->value(), m_cpuMinFreqKHz, m_cpuMaxFreqKHz );
+  const int minFrequency = std::clamp( m_minFrequencySlider->value(), m_cpuMinFreqKHz, m_cpuMaxFreqKHz );
+  const int maxFrequency = std::clamp( m_maxFrequencySlider->value(), m_cpuMinFreqKHz, m_cpuMaxFreqKHz );
+  cpuObj["scalingMinFrequency"]         = minFrequency <= m_cpuMinFreqKHz ? -1 : minFrequency;
+  cpuObj["scalingMaxFrequency"]         = maxFrequency >= m_cpuMaxFreqKHz ? -1 : maxFrequency;
   if ( m_hwpDynamicBoostCheckBox && m_hwpDynamicBoostSupported )
     cpuObj["hwpDynamicBoost"]           = m_hwpDynamicBoostCheckBox->isChecked();
   profileObj["cpu"] = cpuObj;
+
+  const QString platformProfile = m_platformProfileCombo
+    ? m_platformProfileCombo->currentData().toString()
+    : QString();
+  profileObj["platformProfile"] = platformProfile;
 
   // ODM Power Limits (TDP)
   QJsonObject odmObj;
@@ -2090,13 +2266,18 @@ void MainWindow::onApplyClicked()
   }
 
   QString profileJSON = buildProfileJSON();
-  m_profileManager->getClient()->applyProfile( profileJSON.toStdString() );
+  if ( !m_profileManager->getClient()->applyProfile( profileJSON.toStdString() ) )
+  {
+    statusBar()->showMessage( "Failed to apply profile: " + m_profileCombo->currentText() );
+    return;
+  }
 
   // Re-send the current water cooler enable state so that
   // the profile apply doesn't override the user's checkbox state.
   if ( m_fanControlTab )
     m_fanControlTab->sendWaterCoolerEnable( m_fanControlTab->isWaterCoolerEnabled() );
 
+  refreshCpuPowerLimitRanges();
   statusBar()->showMessage( "Profile applied: " + m_profileCombo->currentText() );
 }
 
@@ -2123,6 +2304,8 @@ void MainWindow::onSaveClicked()
 
   if ( !stateMapUpdates.empty() )
     m_profileManager->setBatchStateMap( stateMapUpdates );
+
+  refreshCpuPowerLimitRanges();
 
   // Indicate saving; actual success will be reflected when ProfileManager signals
   m_saveInProgress = true;
@@ -2551,6 +2734,7 @@ void MainWindow::onUccdConnectionChanged( bool connected )
 
   // Repopulate driver-reported option lists
   reloadFanProfiles();
+  reloadPlatformProfileChoices();
   populateGovernorCombo();
   populateEppCombo();
 

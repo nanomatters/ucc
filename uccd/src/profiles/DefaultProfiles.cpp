@@ -35,7 +35,7 @@ const UccProfile maxEnergySave = []()
   profile.fan.useControl = true;
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
 
-  profile.odmProfile.name = "power_save";
+  profile.platformProfile = "quiet";
   profile.odmPowerLimits.tdpValues = { 5, 10, 15 };
 
   return profile;
@@ -59,7 +59,7 @@ const UccProfile silent = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Silent;
   profile.fan.autoControlWC = true;
 
-  profile.odmProfile.name = "power_save";
+  profile.platformProfile = "quiet";
   profile.odmPowerLimits.tdpValues = { 10, 15, 25 };
 
   return profile;
@@ -83,7 +83,7 @@ const UccProfile office = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Quiet;
   profile.fan.autoControlWC = true;
 
-  profile.odmProfile.name = "enthusiast";
+  profile.platformProfile = "balanced";
   profile.odmPowerLimits.tdpValues = { 25, 35, 35 };
 
   return profile;
@@ -107,7 +107,7 @@ const UccProfile highPerformance = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
 
-  profile.odmProfile.name = "overboost";
+  profile.platformProfile = "performance";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
 
   return profile;
@@ -132,6 +132,7 @@ const UccProfile defaultCustomProfile = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
 
+  profile.platformProfile = "performance";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
 
   return profile;
@@ -157,7 +158,7 @@ const UccProfile defaultMobileCustomProfileTDP = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
 
-  // odmProfile.name is optional, leave unset
+  profile.platformProfile = "performance";
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
 
   return profile;
@@ -183,6 +184,7 @@ const UccProfile defaultMobileCustomProfileCl = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
 
+  profile.platformProfile = "performance";
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
 
   return profile;
@@ -206,7 +208,7 @@ const UccProfile highPerformance25WcTGP = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
 
-  profile.odmProfile.name = "overboost";
+  profile.platformProfile = "performance";
   profile.odmPowerLimits.tdpValues = { 60, 60, 70 };
 
   return profile;
@@ -231,6 +233,7 @@ const UccProfile defaultCustomProfile25WcTGP = []()
   profile.fan.fanProfile = DefaultFanProfileIDs::Balanced;
   profile.fan.autoControlWC = true;
 
+  profile.platformProfile = "performance";
   profile.odmPowerLimits.tdpValues = { 15, 25, 50 };
 
   return profile;
