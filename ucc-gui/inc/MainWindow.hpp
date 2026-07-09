@@ -69,6 +69,7 @@ namespace ucc
     void onCustomKeyboardProfilesChanged();
     void onBrightnessSliderChanged( int value );
     void onCpuCoresChanged( int value );
+    void onCpuTccTargetChanged( int value );
     void onMaxFrequencyChanged( int value );
     void onCtgpSliderChanged( int value );
     void onPlatformProfileChanged( int index );
@@ -211,6 +212,8 @@ namespace ucc
     // CPU frequency control widgets
     QSlider *m_cpuCoresSlider = nullptr;
     QLabel *m_cpuCoresValue = nullptr;
+    QSlider *m_cpuTccTargetSlider = nullptr;
+    QLabel *m_cpuTccTargetValue = nullptr;
     QComboBox *m_governorCombo = nullptr;
     QComboBox *m_eppCombo = nullptr;
     QSlider *m_minFrequencySlider = nullptr;
@@ -221,6 +224,10 @@ namespace ucc
     QLabel *m_hwpDynamicBoostLabel = nullptr;
     int m_cpuMinFreqKHz = 400000;   // hardware min frequency in kHz
     int m_cpuMaxFreqKHz = 6000000;  // hardware max frequency in kHz
+    bool m_cpuTccTargetSupported = false;
+    int m_cpuTccTargetMin = 0;
+    int m_cpuTccTargetMax = 127;
+    int m_cpuTccTargetCurrent = 0;
     QComboBox *m_platformProfileCombo = nullptr;
     // ODM Power Limit (TDP) widgets
     QSlider *m_odmPowerLimit1Slider = nullptr;

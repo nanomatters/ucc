@@ -257,6 +257,20 @@ std::optional< std::string > UccdClient::getCpuFrequencyLimitsJSON()
   return std::nullopt;
 }
 
+std::optional< std::string > UccdClient::getCpuTccTargetJSON()
+{
+  if ( auto result = callMethod< QString >( "GetCpuTccTargetJSON" ) )
+  {
+    return result->toStdString();
+  }
+  return std::nullopt;
+}
+
+bool UccdClient::setCpuTccTarget( int targetCelsius )
+{
+  return callVoidMethod( "SetCpuTccTarget", targetCelsius );
+}
+
 std::optional< std::string > UccdClient::getDefaultValuesProfileJSON()
 {
   if ( auto result = callMethod< QString >( "GetDefaultValuesProfileJSON" ) )

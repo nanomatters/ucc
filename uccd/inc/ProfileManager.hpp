@@ -249,6 +249,12 @@ public:
         profile.cpu.scalingMaxFrequency = scalingMax;
       }
 
+      int32_t tccTarget = extractInt( cpuJson, "tccTargetCelsius", -1 );
+      if ( tccTarget >= 0 )
+      {
+        profile.cpu.tccTargetCelsius = tccTarget;
+      }
+
       profile.cpu.governor = extractString( cpuJson, "governor", "" );
       profile.cpu.energyPerformancePreference = extractString( cpuJson, "energyPerformancePreference", "" );
       profile.cpu.noTurbo = extractBool( cpuJson, "noTurbo", false );
@@ -519,6 +525,12 @@ private:
       modified = true;
     }
 
+    if ( not profile.cpu.tccTargetCelsius.has_value() and defaultProfile.cpu.tccTargetCelsius.has_value() )
+    {
+      profile.cpu.tccTargetCelsius = defaultProfile.cpu.tccTargetCelsius;
+      modified = true;
+    }
+
     if ( profile.cpu.governor.empty() and not defaultProfile.cpu.governor.empty() )
     {
       profile.cpu.governor = defaultProfile.cpu.governor;
@@ -665,6 +677,7 @@ public:
         << "\"onlineCores\":" << ( profile.cpu.onlineCores.has_value() ? std::to_string( *profile.cpu.onlineCores ) : "-1" ) << ","
         << "\"scalingMinFrequency\":" << ( profile.cpu.scalingMinFrequency.has_value() ? std::to_string( *profile.cpu.scalingMinFrequency ) : "-1" ) << ","
         << "\"scalingMaxFrequency\":" << ( profile.cpu.scalingMaxFrequency.has_value() ? std::to_string( *profile.cpu.scalingMaxFrequency ) : "-1" ) << ","
+        << "\"tccTargetCelsius\":" << ( profile.cpu.tccTargetCelsius.has_value() ? std::to_string( *profile.cpu.tccTargetCelsius ) : "-1" ) << ","
         << "\"governor\":\"" << jsonEscape( profile.cpu.governor ) << "\","
         << "\"energyPerformancePreference\":\"" << jsonEscape( profile.cpu.energyPerformancePreference ) << "\","
         << "\"noTurbo\":" << ( profile.cpu.noTurbo ? "true" : "false" ) << ","

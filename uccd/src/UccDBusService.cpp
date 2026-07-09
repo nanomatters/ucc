@@ -268,7 +268,9 @@ static std::string profileToJSON( const UccProfile &profile,
       << "\"hwpDynamicBoost\":" << ( profile.cpu.hwpDynamicBoost ? "true" : "false" ) << ","
       << "\"onlineCores\":" << optionalValueOr( profile.cpu.onlineCores, defaultOnlineCores ) << ","
       << "\"scalingMinFrequency\":" << optionalValueOr( profile.cpu.scalingMinFrequency, defaultScalingMin ) << ","
-      << "\"scalingMaxFrequency\":" << optionalValueOr( profile.cpu.scalingMaxFrequency, defaultScalingMax )
+      << "\"scalingMaxFrequency\":" << optionalValueOr( profile.cpu.scalingMaxFrequency, defaultScalingMax ) << ","
+      << "\"tccTargetCelsius\":"
+      << optionalValueOr( profile.cpu.tccTargetCelsius, -1 )
       << "},"
       << "\"webcam\":{"
       << "\"status\":" << ( profile.webcam.status ? "true" : "false" ) << ","
@@ -923,6 +925,59 @@ QString UccDBusInterfaceAdaptor::GetCpuFrequencyLimitsJSON()
   std::ostringstream json;
   json << "{\"min\":" << minFreq << ",\"max\":" << maxFreq << "}";
   return QString::fromStdString( json.str() );
+}
+
+QString UccDBusInterfaceAdaptor::GetCpuTccTargetJSON()
+{
+  std::ostringstream json;
+  const auto target = ucc::uniwill::readCpuTccTarget();
+
+  if ( target.isAvailable() )
+  {
+    json << "{"
+         << "\"available\":true,"
+         << "\"current\":" << target.current << ","
+         << "\"min\":" << target.min << ","
+         << "\"max\":" << target.max
+         << "}";
+  }
+  else
+  {
+    json << "{\"available\":false}";
+  }
+
+  {
+    std::lock_guard< std::mutex > lock( m_data.dataMutex );
+    m_data.cpuTccTargetJSON = json.str();
+  }
+
+  return QString::fromStdString( json.str() );
+}
+
+bool UccDBusInterfaceAdaptor::SetCpuTccTarget( int targetCelsius )
+{
+  if ( !checkAuth( PolkitAuthority::ACTION_MANAGE_HARDWARE ) ) return false;
+  if ( !m_service || !m_service->m_profileSettingsWorker ) return false;
+
+  if ( !m_service->m_profileSettingsWorker->setCpuTccTarget( targetCelsius ) )
+    return false;
+
+  const auto target = ucc::uniwill::readCpuTccTarget();
+  if ( target.isAvailable() )
+  {
+    std::ostringstream json;
+    json << "{"
+         << "\"available\":true,"
+         << "\"current\":" << target.current << ","
+         << "\"min\":" << target.min << ","
+         << "\"max\":" << target.max
+         << "}";
+
+    std::lock_guard< std::mutex > lock( m_data.dataMutex );
+    m_data.cpuTccTargetJSON = json.str();
+  }
+
+  return true;
 }
 
 QString UccDBusInterfaceAdaptor::GetDefaultValuesProfileJSON()
@@ -2493,6 +2548,32 @@ void UccDBusService::readHardwareCapabilities()
     {
       syslog( LOG_INFO, "[uccd] No TDP hardware available" );
       m_dbusData.odmPowerLimitsJSON = "[]";
+    }
+  }
+
+  // CPU TCC target
+  {
+    const auto target = ucc::uniwill::readCpuTccTarget();
+
+    if ( target.isAvailable() )
+    {
+      std::ostringstream jsonStream;
+      jsonStream << "{"
+                 << "\"available\":true,"
+                 << "\"current\":" << target.current << ","
+                 << "\"min\":" << target.min << ","
+                 << "\"max\":" << target.max
+                 << "}";
+
+      m_dbusData.cpuTccTargetJSON = jsonStream.str();
+
+      syslog( LOG_INFO, "[uccd] CPU TCC target: min=%d, max=%d, current=%d",
+              target.min, target.max, target.current );
+    }
+    else
+    {
+      syslog( LOG_INFO, "[uccd] CPU TCC target not available" );
+      m_dbusData.cpuTccTargetJSON = "{\"available\":false}";
     }
   }
 

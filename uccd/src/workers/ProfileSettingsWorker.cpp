@@ -16,6 +16,7 @@
 #include "workers/ProfileSettingsWorker.hpp"
 #include "PowerSupplyController.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 
@@ -475,6 +476,44 @@ void ProfileSettingsWorker::applyODMPowerLimits()
   }
 
   publishODMPowerLimitsJSON( tdpInfo );
+}
+
+bool ProfileSettingsWorker::setCpuTccTarget( int32_t targetCelsius ) noexcept
+{
+  try
+  {
+    const auto target = ucc::uniwill::readCpuTccTarget( m_sysfsRoot );
+    if ( not target.isAvailable() )
+      return false;
+
+    const int32_t value = std::clamp( targetCelsius, target.min, target.max );
+    const SysfsWriteResult result = ucc::uniwill::writeCpuTccTarget( value, m_sysfsRoot );
+    if ( result )
+    {
+      syslog( LOG_INFO, "Set CPU TCC target to %d C", value );
+      return true;
+    }
+
+    syslog( LOG_WARNING, "Failed writing CPU TCC target to %s: %s",
+            target.valuePath.c_str(),
+            std::strerror( result.error ) );
+  }
+  catch ( ... )
+  {
+    syslog( LOG_WARNING, "Failed applying CPU TCC target" );
+  }
+
+  return false;
+}
+
+void ProfileSettingsWorker::applyCpuTccTarget()
+{
+  const UccProfile profile = m_getActiveProfile();
+  if ( not profile.cpu.tccTargetCelsius.has_value() )
+    return;
+
+  if ( !setCpuTccTarget( *profile.cpu.tccTargetCelsius ) )
+    logLine( "ProfileSettingsWorker: CPU TCC target unsupported or failed" );
 }
 
 // =====================================================================

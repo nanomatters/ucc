@@ -125,6 +125,7 @@ public:
   std::string settingsJSON;
   std::vector< std::string > platformProfilesAvailable;
   std::string odmPowerLimitsJSON;
+  std::string cpuTccTargetJSON;
   std::string keyboardBacklightCapabilitiesJSON;
   std::string keyboardBacklightStatesJSON;
   std::atomic< int32_t > fansMinSpeed;
@@ -186,6 +187,7 @@ public:
       settingsJSON( "{}" ),
       platformProfilesAvailable(),
       odmPowerLimitsJSON( "[]" ),
+      cpuTccTargetJSON( "{\"available\":false}" ),
       keyboardBacklightCapabilitiesJSON( "{}" ),
       keyboardBacklightStatesJSON( "{}" ),
       fansMinSpeed( 0 ),
@@ -314,6 +316,8 @@ public slots:
   bool RevertFanProfiles();
   QString GetDefaultProfilesJSON();
   QString GetCpuFrequencyLimitsJSON();
+  QString GetCpuTccTargetJSON();
+  bool SetCpuTccTarget( int targetCelsius );
   QString GetDefaultValuesProfileJSON();
   bool AddCustomProfile( const QString &profileJSON );
   bool SaveCustomProfile( const QString &profileJSON );

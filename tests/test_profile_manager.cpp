@@ -32,6 +32,7 @@ private:
         "onlineCores": 8,
         "scalingMinFrequency": 800000,
         "scalingMaxFrequency": 4500000,
+        "tccTargetCelsius": 97,
         "governor": "powersave",
         "energyPerformancePreference": "balance_performance",
         "noTurbo": false
@@ -137,6 +138,13 @@ private slots:
     QCOMPARE( p.nvidiaMuxMode, std::string( "dgpu_direct" ) );
   }
 
+  void parseProfile_cpuTccTarget()
+  {
+    auto p = ProfileManager::parseProfileJSON( minimalJSON() );
+    QVERIFY( p.cpu.tccTargetCelsius.has_value() );
+    QCOMPARE( *p.cpu.tccTargetCelsius, 97 );
+  }
+
   void parseProfile_keyboard()
   {
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
@@ -168,6 +176,7 @@ private slots:
     QCOMPARE( reparsed.display.brightness,    original.display.brightness );
     QCOMPARE( reparsed.display.useBrightness, original.display.useBrightness );
     QCOMPARE( reparsed.display.miniLedLocalDimming, original.display.miniLedLocalDimming );
+    QCOMPARE( reparsed.cpu.tccTargetCelsius, original.cpu.tccTargetCelsius );
     QCOMPARE( reparsed.cpu.governor,          original.cpu.governor );
     QCOMPARE( reparsed.fan.fanProfile,        original.fan.fanProfile );
     QCOMPARE( reparsed.fan.sameSpeed,         original.fan.sameSpeed );

@@ -57,6 +57,8 @@ public:
   // Profile Management
   std::optional< std::string > getDefaultProfilesJSON();
   std::optional< std::string > getCpuFrequencyLimitsJSON();
+  std::optional< std::string > getCpuTccTargetJSON();
+  bool setCpuTccTarget( int targetCelsius );
   std::optional< std::string > getDefaultValuesProfileJSON();
   std::optional< std::string > getCustomProfilesJSON();
   std::optional< std::string > getActiveProfileJSON();

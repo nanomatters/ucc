@@ -95,6 +95,9 @@ protected:
 namespace ucc
 {
 
+static constexpr int CPU_TCC_TARGET_UI_MIN_CELSIUS = 80;
+static constexpr int CPU_TCC_TARGET_UI_MAX_CELSIUS = 105;
+
 static QString platformProfileLabel( QString profile )
 {
   profile.replace( '_', ' ' );
@@ -102,6 +105,25 @@ static QString platformProfileLabel( QString profile )
     profile[ 0 ] = profile[ 0 ].toUpper();
 
   return profile;
+}
+
+static int cpuTccTargetToSliderPosition( int targetCelsius )
+{
+  if ( targetCelsius <= 0 )
+    return 0;
+
+  return std::clamp( targetCelsius,
+                     CPU_TCC_TARGET_UI_MIN_CELSIUS,
+                     CPU_TCC_TARGET_UI_MAX_CELSIUS ) -
+         CPU_TCC_TARGET_UI_MIN_CELSIUS + 1;
+}
+
+static int cpuTccSliderPositionToTarget( int sliderPosition )
+{
+  if ( sliderPosition <= 0 )
+    return 0;
+
+  return CPU_TCC_TARGET_UI_MIN_CELSIUS + sliderPosition - 1;
 }
 
 MainWindow::MainWindow( QWidget *parent )
@@ -124,6 +146,18 @@ MainWindow::MainWindow( QWidget *parent )
     m_miniLedLocalDimmingSupported = *miniLed;
   if ( auto hwpBoost = m_UccdClient->getHwpDynamicBoostSupported() )
     m_hwpDynamicBoostSupported = *hwpBoost;
+  if ( auto tccJson = m_UccdClient->getCpuTccTargetJSON() )
+  {
+    const QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *tccJson ) );
+    if ( doc.isObject() )
+    {
+      const QJsonObject obj = doc.object();
+      m_cpuTccTargetSupported = obj.value( "available" ).toBool( false );
+      m_cpuTccTargetMin = obj.value( "min" ).toInt( 0 );
+      m_cpuTccTargetMax = obj.value( "max" ).toInt( 127 );
+      m_cpuTccTargetCurrent = obj.value( "current" ).toInt( 0 );
+    }
+  }
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     m_gpuDefaultPowerLimit = *gpuDefault;
 
@@ -584,6 +618,7 @@ void MainWindow::setupProfilesPage()
 
   QLabel *coresLabel = new QLabel( "Number of logical cores" );
   QHBoxLayout *coresLayout = new QHBoxLayout();
+  coresLayout->setContentsMargins( 0, 0, 0, 0 );
   const int nCores = m_UccdClient->getCpuCoreCount().value_or( 1 );
   m_cpuCoresSlider = new QSlider( Qt::Horizontal );
   m_cpuCoresSlider->setMinimum( 1 );
@@ -593,8 +628,47 @@ void MainWindow::setupProfilesPage()
   m_cpuCoresValue->setMinimumWidth( 35 );
   coresLayout->addWidget( m_cpuCoresSlider, 1 );
   coresLayout->addWidget( m_cpuCoresValue );
-  detailsLayout->addWidget( coresLabel, row, 0 );
-  detailsLayout->addLayout( coresLayout, row, 1 );
+
+  if ( m_cpuTccTargetSupported )
+  {
+    QHBoxLayout *coresFieldLayout = new QHBoxLayout();
+    coresFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+    coresFieldLayout->setSpacing( 8 );
+    coresFieldLayout->addWidget( coresLabel );
+    coresFieldLayout->addLayout( coresLayout, 1 );
+
+    QLabel *tccTargetLabel = new QLabel( "CPU TCC target" );
+    QHBoxLayout *tccTargetLayout = new QHBoxLayout();
+    tccTargetLayout->setContentsMargins( 0, 0, 0, 0 );
+    m_cpuTccTargetSlider = new QSlider( Qt::Horizontal );
+    m_cpuTccTargetSlider->setMinimum( 0 );
+    m_cpuTccTargetSlider->setMaximum(
+      CPU_TCC_TARGET_UI_MAX_CELSIUS - CPU_TCC_TARGET_UI_MIN_CELSIUS + 1 );
+    m_cpuTccTargetSlider->setValue( cpuTccTargetToSliderPosition( m_cpuTccTargetCurrent ) );
+    m_cpuTccTargetValue = new QLabel();
+    m_cpuTccTargetValue->setMinimumWidth( 50 );
+    tccTargetLayout->addWidget( m_cpuTccTargetSlider, 1 );
+    tccTargetLayout->addWidget( m_cpuTccTargetValue );
+
+    QHBoxLayout *tccTargetFieldLayout = new QHBoxLayout();
+    tccTargetFieldLayout->setContentsMargins( 0, 0, 0, 0 );
+    tccTargetFieldLayout->setSpacing( 8 );
+    tccTargetFieldLayout->addWidget( tccTargetLabel );
+    tccTargetFieldLayout->addLayout( tccTargetLayout, 1 );
+
+    QHBoxLayout *cpuTopologyLayout = new QHBoxLayout();
+    cpuTopologyLayout->setContentsMargins( 0, 0, 0, 0 );
+    cpuTopologyLayout->setSpacing( 16 );
+    cpuTopologyLayout->addLayout( coresFieldLayout, 1 );
+    cpuTopologyLayout->addLayout( tccTargetFieldLayout, 1 );
+
+    detailsLayout->addLayout( cpuTopologyLayout, row, 0, 1, 2 );
+  }
+  else
+  {
+    detailsLayout->addWidget( coresLabel, row, 0 );
+    detailsLayout->addLayout( coresLayout, row, 1 );
+  }
   row++;
 
   m_hwpDynamicBoostLabel = new QLabel( "HWP Dynamic Boost" );
@@ -942,6 +1016,9 @@ void MainWindow::connectSignals()
 
   connect( m_cpuCoresSlider, &QSlider::valueChanged,
            this, &MainWindow::onCpuCoresChanged );
+  if ( m_cpuTccTargetSlider )
+    connect( m_cpuTccTargetSlider, &QSlider::valueChanged,
+             this, &MainWindow::onCpuTccTargetChanged );
 
   connect( m_maxFrequencySlider, &QSlider::valueChanged,
            this, &MainWindow::onMaxFrequencyChanged );
@@ -1036,6 +1113,9 @@ void MainWindow::connectSignals()
 
   connect( m_cpuCoresSlider, &QSlider::valueChanged,
            this, [this]() { markChanged(); } );
+  if ( m_cpuTccTargetSlider )
+    connect( m_cpuTccTargetSlider, &QSlider::valueChanged,
+             this, [this]() { markChanged(); } );
 
   connect( m_governorCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
            this, &MainWindow::markChanged );
@@ -1478,6 +1558,19 @@ void MainWindow::onCpuCoresChanged( int value )
   m_cpuCoresValue->setText( QString::number( value ) );
 }
 
+void MainWindow::onCpuTccTargetChanged( int value )
+{
+  if ( !m_cpuTccTargetValue )
+    return;
+
+  const int targetCelsius = cpuTccSliderPositionToTarget( value );
+
+  if ( targetCelsius == 0 )
+    m_cpuTccTargetValue->setText( "Default" );
+  else
+    m_cpuTccTargetValue->setText( QString::number( targetCelsius ) + " °C" );
+}
+
 // Sub-profile sync helpers: update combo + editor without writing to hardware
 
 void MainWindow::updateKeyboardEditorFromProfile( const QString &keyboardProfileId )
@@ -1655,6 +1748,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   m_fanControlTab->fanProfileCombo()->blockSignals( true );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( true );
   m_cpuCoresSlider->blockSignals( true );
+  if ( m_cpuTccTargetSlider ) m_cpuTccTargetSlider->blockSignals( true );
   m_governorCombo->blockSignals( true );
   m_minFrequencySlider->blockSignals( true );
   m_maxFrequencySlider->blockSignals( true );
@@ -1778,6 +1872,14 @@ void MainWindow::loadProfileDetails( const QString &profileId )
 
     if ( cpuObj.contains( "onlineCores" ) )
       m_cpuCoresSlider->setValue( cpuObj["onlineCores"].toInt( m_cpuCoresSlider->maximum() ) );
+
+    if ( m_cpuTccTargetSlider )
+    {
+      int tccTarget = cpuObj.value( "tccTargetCelsius" ).toInt( m_cpuTccTargetCurrent );
+      if ( tccTarget < 0 )
+        tccTarget = m_cpuTccTargetCurrent;
+      m_cpuTccTargetSlider->setValue( cpuTccTargetToSliderPosition( tccTarget ) );
+    }
 
     if ( cpuObj.contains( "governor" ) )
     {
@@ -2027,6 +2129,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   if ( m_fanControlTab && m_autoWaterControlCheckBox )
     m_fanControlTab->setWaterCoolerAutoControl( m_autoWaterControlCheckBox->isChecked() );
   m_cpuCoresSlider->blockSignals( false );
+  if ( m_cpuTccTargetSlider ) m_cpuTccTargetSlider->blockSignals( false );
   m_governorCombo->blockSignals( false );
   m_minFrequencySlider->blockSignals( false );
   m_maxFrequencySlider->blockSignals( false );
@@ -2046,6 +2149,8 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   // Trigger label updates by calling the slots directly
   onBrightnessSliderChanged( m_brightnessSlider->value() );
   onCpuCoresChanged( m_cpuCoresSlider->value() );
+  if ( m_cpuTccTargetSlider )
+    onCpuTccTargetChanged( m_cpuTccTargetSlider->value() );
   onMaxFrequencyChanged( m_maxFrequencySlider->value() );
   onODMPowerLimit1Changed( m_odmPowerLimit1Slider->value() );
   onODMPowerLimit2Changed( m_odmPowerLimit2Slider->value() );
@@ -2105,6 +2210,7 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   // CPU controls
   if ( m_cpuCoresSlider ) m_cpuCoresSlider->setEnabled( isCustom );
+  if ( m_cpuTccTargetSlider ) m_cpuTccTargetSlider->setEnabled( isCustom );
   if ( m_governorCombo ) m_governorCombo->setEnabled( isCustom );
   if ( m_eppCombo ) m_eppCombo->setEnabled( isCustom );
   if ( m_minFrequencySlider ) m_minFrequencySlider->setEnabled( isCustom );
@@ -2285,6 +2391,9 @@ QString MainWindow::buildProfileJSON() const
   // CPU
   QJsonObject cpuObj;
   cpuObj["onlineCores"]                = m_cpuCoresSlider->value();
+  if ( m_cpuTccTargetSlider )
+    cpuObj["tccTargetCelsius"]          =
+      cpuTccSliderPositionToTarget( m_cpuTccTargetSlider->value() );
   cpuObj["governor"]                   = m_governorCombo->currentData().toString();
   cpuObj["energyPerformancePreference"] = m_eppCombo ? m_eppCombo->currentData().toString() : QString();
   const int minFrequency = std::clamp( m_minFrequencySlider->value(), m_cpuMinFreqKHz, m_cpuMaxFreqKHz );

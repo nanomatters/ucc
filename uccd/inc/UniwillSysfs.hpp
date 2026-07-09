@@ -28,6 +28,8 @@ namespace fs = std::filesystem;
 using Sysfs = SysfsNode< std::string >;
 
 inline constexpr uint32_t TDP_MIN_WATTS = 25;
+inline constexpr int32_t CPU_TCC_TARGET_MIN_CELSIUS = 0;
+inline constexpr int32_t CPU_TCC_TARGET_MAX_CELSIUS = 127;
 inline constexpr int32_t FAN_MIN_SPEED_PERCENT = 25;
 
 struct PlatformProfileSink
@@ -81,6 +83,19 @@ struct CpuPowerLimit
   uint32_t min = 0;
   uint32_t max = 0;
   uint32_t current = 0;
+};
+
+struct CpuTccTarget
+{
+  std::string valuePath;
+  int32_t min = CPU_TCC_TARGET_MIN_CELSIUS;
+  int32_t max = CPU_TCC_TARGET_MAX_CELSIUS;
+  int32_t current = 0;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not valuePath.empty();
+  }
 };
 
 struct CtgpInfo
@@ -862,6 +877,43 @@ inline SysfsWriteResult writeWaterCoolerBridgeEnable(
   }
 
   return limits;
+}
+
+[[nodiscard]] inline CpuTccTarget readCpuTccTarget(
+  const std::string &sysfsRoot = "/sys" )
+{
+  CpuTccTarget target;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return target;
+
+  const fs::path valuePath = *platformDevice / "cpu" / "tcc_temp";
+  if ( not Sysfs::exists( valuePath ) )
+    return target;
+
+  const auto current = readInt32( valuePath );
+  if ( not current )
+    return target;
+
+  target.valuePath = valuePath.string();
+  target.current = std::clamp( *current, target.min, target.max );
+
+  return target;
+}
+
+inline SysfsWriteResult writeCpuTccTarget(
+  int32_t targetCelsius,
+  const std::string &sysfsRoot = "/sys" )
+{
+  const auto target = readCpuTccTarget( sysfsRoot );
+  if ( not target.isAvailable() )
+    return { false, ENOENT, 0 };
+
+  if ( targetCelsius < target.min or targetCelsius > target.max )
+    return { false, EINVAL, 0 };
+
+  return SysfsNode< int64_t >( target.valuePath ).writeDetailed( targetCelsius );
 }
 
 [[nodiscard]] inline CtgpInfo readCtgpInfo( const std::string &sysfsRoot = "/sys" )

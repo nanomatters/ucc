@@ -604,6 +604,8 @@ void DashboardTab::connectSignals()
 {
   connect( m_systemMonitor, &SystemMonitor::cpuTempChanged,
            this, &DashboardTab::onCpuTempChanged );
+  connect( m_systemMonitor, &SystemMonitor::cpuTccTargetChanged,
+           this, &DashboardTab::onCpuTempChanged );
   connect( m_systemMonitor, &SystemMonitor::cpuFrequencyChanged,
            this, &DashboardTab::onCpuFrequencyChanged );
   connect( m_systemMonitor, &SystemMonitor::cpuPowerChanged,
@@ -751,7 +753,11 @@ void DashboardTab::onCpuTempChanged()
 
   if ( ok && tempValue > 0 )
   {
-    m_cpuTempLabel->setText( temp );
+    const int tccTarget = m_systemMonitor->cpuTccTarget();
+    if ( tccTarget > 0 )
+      m_cpuTempLabel->setText( QStringLiteral( "%1 / %2" ).arg( temp ).arg( tccTarget ) );
+    else
+      m_cpuTempLabel->setText( temp );
   }
   else
   {

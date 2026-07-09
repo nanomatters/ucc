@@ -102,7 +102,10 @@ public:
     logLine( "ProfileSettingsWorker: reapplyProfile() called" );
     applyConfiguredPlatformProfile();
     applyODMPowerLimits();
+    applyCpuTccTarget();
   }
+
+  bool setCpuTccTarget( int32_t targetCelsius ) noexcept;
 
   // =====================================================================
   //  Charging API (was ChargingWorker)
@@ -181,6 +184,7 @@ private:
   void logLine( const std::string &message );
   void publishODMPowerLimitsJSON( const std::vector< TDPInfo > &tdpInfo );
   void applyODMPowerLimits();
+  void applyCpuTccTarget();
 
   // Charging internals
 

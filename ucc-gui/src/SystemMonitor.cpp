@@ -69,6 +69,28 @@ void SystemMonitor::updateMetrics()
     }
   }
 
+  // Get CPU TCC target. -1 means unsupported, 0 means firmware/platform default.
+  {
+    int tccTarget = -1;
+
+    if ( auto json = m_client->getCpuTccTargetJSON() )
+    {
+      if ( QJsonDocument doc = QJsonDocument::fromJson( QByteArray::fromStdString( *json ) );
+           doc.isObject() )
+      {
+        const QJsonObject obj = doc.object();
+        if ( obj.value( "available" ).toBool( false ) )
+          tccTarget = obj.value( "current" ).toInt( 0 );
+      }
+    }
+
+    if ( m_cpuTccTarget != tccTarget )
+    {
+      m_cpuTccTarget = tccTarget;
+      emit cpuTccTargetChanged();
+    }
+  }
+
   // Get CPU Frequency
   {
     QString cpuFreq = "--";

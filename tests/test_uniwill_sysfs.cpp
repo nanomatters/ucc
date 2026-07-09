@@ -140,6 +140,24 @@ private slots:
     QCOMPARE( limits[ 2 ].descriptor, std::string( "pl4" ) );
   }
 
+  void readsCpuTccTargetFromPlatformDevice()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path cpuPath = root / "bus/platform/devices/INOU0000:00/cpu";
+
+    writeFile( cpuPath / "tcc_temp", "97\n" );
+
+    const auto target = ucc::uniwill::readCpuTccTarget( root.string() );
+
+    QVERIFY( target.isAvailable() );
+    QCOMPARE( target.valuePath, ( cpuPath / "tcc_temp" ).string() );
+    QCOMPARE( target.min, static_cast< int32_t >( 0 ) );
+    QCOMPARE( target.max, static_cast< int32_t >( 127 ) );
+    QCOMPARE( target.current, static_cast< int32_t >( 97 ) );
+  }
+
   void readsCtgpInfoFromDgpuGroup()
   {
     QTemporaryDir dir;

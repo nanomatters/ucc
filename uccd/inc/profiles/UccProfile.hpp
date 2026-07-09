@@ -58,6 +58,7 @@ struct UccProfileCpu
   std::optional< int32_t > onlineCores;
   std::optional< int32_t > scalingMinFrequency;
   std::optional< int32_t > scalingMaxFrequency;
+  std::optional< int32_t > tccTargetCelsius;
   std::string governor;
   std::string energyPerformancePreference;
   bool noTurbo;

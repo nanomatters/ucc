@@ -35,6 +35,7 @@ class SystemMonitor : public QObject
   Q_OBJECT
   Q_PROPERTY( QString cpuUsage READ cpuUsage NOTIFY cpuUsageChanged )
   Q_PROPERTY( QString cpuTemp READ cpuTemp NOTIFY cpuTempChanged )
+  Q_PROPERTY( int cpuTccTarget READ cpuTccTarget NOTIFY cpuTccTargetChanged )
   Q_PROPERTY( QString cpuFrequency READ cpuFrequency NOTIFY cpuFrequencyChanged )
   Q_PROPERTY( QString cpuPower READ cpuPower NOTIFY cpuPowerChanged )
   Q_PROPERTY( QString ramUsageJSON READ ramUsageJSON NOTIFY ramUsageChanged )
@@ -82,6 +83,7 @@ public:
 
   QString cpuUsage() const { return m_cpuUsage; }
   QString cpuTemp() const { return m_cpuTemp; }
+  int cpuTccTarget() const { return m_cpuTccTarget; }
   QString cpuFrequency() const { return m_cpuFrequency; }
   QString cpuPower() const { return m_cpuPower; }
   QString ramUsageJSON() const { return m_ramUsageJSON; }
@@ -140,6 +142,7 @@ public slots:
 signals:
   void cpuUsageChanged();
   void cpuTempChanged();
+  void cpuTccTargetChanged();
   void cpuFrequencyChanged();
   void cpuPowerChanged();
   void ramUsageChanged();
@@ -192,6 +195,7 @@ private:
 
   QString m_cpuUsage = "0%";
   QString m_cpuTemp = "0°C";
+  int m_cpuTccTarget = -1;
   QString m_cpuFrequency = "0 MHz";
   QString m_cpuPower = "0 W";
   QString m_ramUsageJSON = "{}";
