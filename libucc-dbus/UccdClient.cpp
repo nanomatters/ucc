@@ -647,7 +647,7 @@ std::optional< std::vector< std::string > > UccdClient::getPlatformProfilesAvail
 
 bool UccdClient::setChargingProfile( const std::string &profileDescriptor )
 {
-  return callVoidMethod( "SetChargingProfile", QString::fromStdString( profileDescriptor ) );
+  return callMethod< bool >( "SetChargingProfile", QString::fromStdString( profileDescriptor ) ).value_or( false );
 }
 
 std::optional< std::string > UccdClient::getChargingProfilesAvailable()
@@ -684,7 +684,7 @@ std::optional< std::string > UccdClient::getCurrentChargingPriority()
 
 bool UccdClient::setChargingPriority( const std::string &priorityDescriptor )
 {
-  return callVoidMethod( "SetChargingPriority", QString::fromStdString( priorityDescriptor ) );
+  return callMethod< bool >( "SetChargingPriority", QString::fromStdString( priorityDescriptor ) ).value_or( false );
 }
 
 std::optional< std::string > UccdClient::getChargeStartAvailableThresholds()
@@ -715,12 +715,12 @@ std::optional< int > UccdClient::getChargeEndThreshold()
 
 bool UccdClient::setChargeStartThreshold( int value )
 {
-  return callVoidMethod( "SetChargeStartThreshold", value );
+  return callMethod< bool >( "SetChargeStartThreshold", value ).value_or( false );
 }
 
 bool UccdClient::setChargeEndThreshold( int value )
 {
-  return callVoidMethod( "SetChargeEndThreshold", value );
+  return callMethod< bool >( "SetChargeEndThreshold", value ).value_or( false );
 }
 
 std::optional< std::string > UccdClient::getChargeType()
@@ -733,7 +733,7 @@ std::optional< std::string > UccdClient::getChargeType()
 
 bool UccdClient::setChargeType( const std::string &type )
 {
-  return callVoidMethod( "SetChargeType", QString::fromStdString( type ) );
+  return callMethod< bool >( "SetChargeType", QString::fromStdString( type ) ).value_or( false );
 }
 
 std::optional< std::string > UccdClient::getBatteryHealth()

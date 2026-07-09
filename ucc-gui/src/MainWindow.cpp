@@ -96,7 +96,7 @@ namespace ucc
 {
 
 static constexpr int CPU_TCC_TARGET_UI_MIN_CELSIUS = 80;
-static constexpr int CPU_TCC_TARGET_UI_MAX_CELSIUS = 105;
+static constexpr int CPU_TCC_TARGET_UI_MAX_CELSIUS = 100;
 
 static QString platformProfileLabel( QString profile )
 {
@@ -2443,6 +2443,7 @@ QString MainWindow::buildProfileJSON() const
     if ( limitPreset == "full" )
     {
       profileObj["chargeType"] = "Standard";
+      profileObj["chargeEndThreshold"] = 100;
     }
     else if ( limitPreset == "reduced" )
     {

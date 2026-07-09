@@ -30,6 +30,7 @@ using Sysfs = SysfsNode< std::string >;
 inline constexpr uint32_t TDP_MIN_WATTS = 25;
 inline constexpr int32_t CPU_TCC_TARGET_MIN_CELSIUS = 0;
 inline constexpr int32_t CPU_TCC_TARGET_MAX_CELSIUS = 127;
+inline constexpr int32_t CPU_TCC_TARGET_POLICY_MAX_CELSIUS = 100;
 inline constexpr int32_t FAN_MIN_SPEED_PERCENT = 25;
 
 struct PlatformProfileSink

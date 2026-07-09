@@ -486,7 +486,8 @@ bool ProfileSettingsWorker::setCpuTccTarget( int32_t targetCelsius ) noexcept
     if ( not target.isAvailable() )
       return false;
 
-    const int32_t value = std::clamp( targetCelsius, target.min, target.max );
+    const int32_t maxTarget = std::min( target.max, ucc::uniwill::CPU_TCC_TARGET_POLICY_MAX_CELSIUS );
+    const int32_t value = std::clamp( targetCelsius, target.min, maxTarget );
     const SysfsWriteResult result = ucc::uniwill::writeCpuTccTarget( value, m_sysfsRoot );
     if ( result )
     {

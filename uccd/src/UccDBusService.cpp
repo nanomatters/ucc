@@ -934,11 +934,12 @@ QString UccDBusInterfaceAdaptor::GetCpuTccTargetJSON()
 
   if ( target.isAvailable() )
   {
+    const int32_t maxTarget = std::min( target.max, ucc::uniwill::CPU_TCC_TARGET_POLICY_MAX_CELSIUS );
     json << "{"
          << "\"available\":true,"
          << "\"current\":" << target.current << ","
          << "\"min\":" << target.min << ","
-         << "\"max\":" << target.max
+         << "\"max\":" << maxTarget
          << "}";
   }
   else
@@ -965,12 +966,13 @@ bool UccDBusInterfaceAdaptor::SetCpuTccTarget( int targetCelsius )
   const auto target = ucc::uniwill::readCpuTccTarget();
   if ( target.isAvailable() )
   {
+    const int32_t maxTarget = std::min( target.max, ucc::uniwill::CPU_TCC_TARGET_POLICY_MAX_CELSIUS );
     std::ostringstream json;
     json << "{"
          << "\"available\":true,"
          << "\"current\":" << target.current << ","
          << "\"min\":" << target.min << ","
-         << "\"max\":" << target.max
+         << "\"max\":" << maxTarget
          << "}";
 
     std::lock_guard< std::mutex > lock( m_data.dataMutex );
@@ -2557,18 +2559,19 @@ void UccDBusService::readHardwareCapabilities()
 
     if ( target.isAvailable() )
     {
+      const int32_t maxTarget = std::min( target.max, ucc::uniwill::CPU_TCC_TARGET_POLICY_MAX_CELSIUS );
       std::ostringstream jsonStream;
       jsonStream << "{"
                  << "\"available\":true,"
                  << "\"current\":" << target.current << ","
                  << "\"min\":" << target.min << ","
-                 << "\"max\":" << target.max
+                 << "\"max\":" << maxTarget
                  << "}";
 
       m_dbusData.cpuTccTargetJSON = jsonStream.str();
 
       syslog( LOG_INFO, "[uccd] CPU TCC target: min=%d, max=%d, current=%d",
-              target.min, target.max, target.current );
+              target.min, maxTarget, target.current );
     }
     else
     {
@@ -3561,6 +3564,12 @@ bool UccDBusService::applyProfileJSON( const std::string &profileJSON )
         std::cout << "[Profile] Applying charge end threshold " << profile.chargeEndThreshold << std::endl;
         if ( m_profileSettingsWorker->setChargeEndThreshold( profile.chargeEndThreshold ) )
           m_dbusData.chargeEndThreshold = profile.chargeEndThreshold;
+      }
+      else if ( profile.chargeType == "Standard" && m_dbusData.chargeEndAvailableThresholds != "[]" )
+      {
+        std::cout << "[Profile] Applying full charge end threshold 100" << std::endl;
+        if ( m_profileSettingsWorker->setChargeEndThreshold( 100 ) )
+          m_dbusData.chargeEndThreshold = 100;
       }
     }
 
