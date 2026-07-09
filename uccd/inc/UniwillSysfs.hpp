@@ -136,6 +136,17 @@ struct DgpuMuxControl
   }
 };
 
+struct MiniLedLocalDimmingControl
+{
+  std::string enablePath;
+  std::optional< bool > enabled;
+
+  [[nodiscard]] bool isAvailable() const noexcept
+  {
+    return not enablePath.empty();
+  }
+};
+
 inline bool isDgpuMuxModeValid( const std::string &mode ) noexcept
 {
   return mode == "hybrid" || mode == "dgpu_direct" || mode == "igpu_only";
@@ -979,6 +990,44 @@ inline SysfsWriteResult writeDgpuMuxMode(
   const std::string &sysfsRoot = "/sys" )
 {
   return writeDgpuMuxMode( readDgpuMuxControl( sysfsRoot ), mode );
+}
+
+[[nodiscard]] inline MiniLedLocalDimmingControl readMiniLedLocalDimmingControl(
+  const std::string &sysfsRoot = "/sys" )
+{
+  MiniLedLocalDimmingControl control;
+  const auto platformDevice = findPlatformDevice( sysfsRoot );
+
+  if ( not platformDevice )
+    return control;
+
+  const fs::path enablePath = *platformDevice / "mini_led_local_dimming";
+  if ( not Sysfs::exists( enablePath ) )
+    return control;
+
+  control.enablePath = enablePath.string();
+  control.enabled = SysfsNode< bool >( control.enablePath ).read();
+
+  return control;
+}
+
+inline SysfsWriteResult writeMiniLedLocalDimming(
+  const MiniLedLocalDimmingControl &control,
+  bool enable )
+{
+  if ( not control.isAvailable() )
+    return { false, ENOENT, 0 };
+
+  return SysfsNode< bool >( control.enablePath ).writeDetailed( enable );
+}
+
+inline SysfsWriteResult writeMiniLedLocalDimming(
+  bool enable,
+  const std::string &sysfsRoot = "/sys" )
+{
+  return writeMiniLedLocalDimming(
+    readMiniLedLocalDimmingControl( sysfsRoot ),
+    enable );
 }
 
 }

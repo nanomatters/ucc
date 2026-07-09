@@ -368,6 +368,16 @@ std::optional< int > UccdClient::getDisplayBrightness()
   return callMethod< int >( "GetDisplayBrightness" );
 }
 
+std::optional< bool > UccdClient::getMiniLEDLocalDimmingSupported()
+{
+  return callMethod< bool >( "GetMiniLEDLocalDimmingSupported" );
+}
+
+std::optional< bool > UccdClient::getMiniLEDLocalDimming()
+{
+  return callMethod< bool >( "GetMiniLEDLocalDimming" );
+}
+
 bool UccdClient::setWebcamEnabled( bool enabled )
 {
   return callVoidMethod( "SetWebcam", enabled );

@@ -181,6 +181,7 @@ namespace ucc
     // Display controls
     QSlider *m_brightnessSlider = nullptr;
     QLabel *m_brightnessValueLabel = nullptr;
+    QCheckBox *m_miniLedLocalDimmingCheckBox = nullptr;
     QComboBox *m_profileKeyboardProfileCombo = nullptr;
 
     QComboBox *m_profileChargingPriorityCombo = nullptr;
@@ -203,7 +204,6 @@ namespace ucc
     QLabel *m_ctgpValueLabel = nullptr;
     QLabel *m_ctgpLabel = nullptr;
     QWidget *m_ctgpWidget = nullptr;
-    QLabel *m_nvidiaDynamicBoostLabel = nullptr;
     QCheckBox *m_nvidiaDynamicBoostCheckBox = nullptr;
     QLabel *m_nvidiaMuxModeLabel = nullptr;
     QComboBox *m_nvidiaMuxModeCombo = nullptr;
@@ -260,6 +260,7 @@ namespace ucc
     bool m_cTGPAdjustmentSupported = false;
     bool m_nvidiaDynamicBoostSupported = false;
     bool m_nvidiaMuxModeSupported = false;
+    bool m_miniLedLocalDimmingSupported = false;
     bool m_hwpDynamicBoostSupported = false;
     int m_gpuDefaultPowerLimit = 0;  // Default GPU power limit in watts, queried from daemon
 

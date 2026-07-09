@@ -14,6 +14,7 @@
  */
 
 #include "workers/DisplayWorker.hpp"
+#include "UniwillSysfs.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -226,16 +227,35 @@ void DisplayWorker::initBacklight()
 
 void DisplayWorker::applyBacklightFromProfile()
 {
-  if ( not m_backlightController )
-    return;
-
   const UccProfile activeProfile = m_getActiveProfile();
 
-  if ( activeProfile.display.brightness >= 0 )
+  if ( m_backlightController and activeProfile.display.brightness >= 0 )
   {
     m_backlightController->setBrightness( activeProfile.display.brightness );
     syslog( LOG_INFO, "DisplayWorker: Applied profile brightness %d%%",
             activeProfile.display.brightness );
+  }
+
+  if ( activeProfile.display.miniLedLocalDimming.has_value() )
+  {
+    const auto control = ucc::uniwill::readMiniLedLocalDimmingControl();
+    if ( control.isAvailable() )
+    {
+      const SysfsWriteResult result = ucc::uniwill::writeMiniLedLocalDimming(
+        control,
+        *activeProfile.display.miniLedLocalDimming );
+
+      if ( result )
+      {
+        syslog( LOG_INFO, "DisplayWorker: Applied profile mini-LED local dimming %s",
+                *activeProfile.display.miniLedLocalDimming ? "enabled" : "disabled" );
+      }
+      else
+      {
+        syslog( LOG_WARNING, "DisplayWorker: Failed to apply mini-LED local dimming (errno %d)",
+                result.error );
+      }
+    }
   }
 }
 

@@ -35,6 +35,7 @@ struct UccProfileDisplay
   int32_t xResolution;
   int32_t yResolution;
   bool useResolution;
+  std::optional< bool > miniLedLocalDimming;
 
   UccProfileDisplay()
     : brightness( 100 ),
@@ -43,7 +44,8 @@ struct UccProfileDisplay
       useRefRate( false ),
       xResolution( -1 ),
       yResolution( -1 ),
-      useResolution( false )
+      useResolution( false ),
+      miniLedLocalDimming( std::nullopt )
   {
   }
 };

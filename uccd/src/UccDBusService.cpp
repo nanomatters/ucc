@@ -256,8 +256,11 @@ static std::string profileToJSON( const UccProfile &profile,
       << "\"useRefRate\":" << ( profile.display.useRefRate ? "true" : "false" ) << ","
       << "\"xResolution\":" << profile.display.xResolution << ","
       << "\"yResolution\":" << profile.display.yResolution << ","
-      << "\"useResolution\":" << ( profile.display.useResolution ? "true" : "false" )
-      << "},"
+      << "\"useResolution\":" << ( profile.display.useResolution ? "true" : "false" );
+  if ( profile.display.miniLedLocalDimming.has_value() )
+    oss << ",\"miniLedLocalDimming\":"
+        << ( *profile.display.miniLedLocalDimming ? "true" : "false" );
+  oss << "},"
       << "\"cpu\":{"
       << "\"governor\":\"" << jsonEscape( profile.cpu.governor ) << "\" ,"
       << "\"energyPerformancePreference\":\"" << jsonEscape( profile.cpu.energyPerformancePreference ) << "\" ,"
@@ -586,6 +589,20 @@ int UccDBusInterfaceAdaptor::GetDisplayBrightness()
     return m_service->m_autosave.displayBrightness;
   }
   return -1;
+}
+
+bool UccDBusInterfaceAdaptor::GetMiniLEDLocalDimmingSupported()
+{
+  return m_data.miniLedLocalDimmingSupported;
+}
+
+bool UccDBusInterfaceAdaptor::GetMiniLEDLocalDimming()
+{
+  const auto control = ucc::uniwill::readMiniLedLocalDimmingControl();
+  if ( !control.isAvailable() || !control.enabled.has_value() )
+    return false;
+
+  return *control.enabled;
 }
 
 bool UccDBusInterfaceAdaptor::SetDisplayBrightness( int brightness )
@@ -3882,6 +3899,8 @@ void UccDBusService::computeDeviceCapabilities()
   const bool dynamicBoostHardwareExists =
     ucc::uniwill::readDgpuDynamicBoostControl().isAvailable();
   const bool muxModeHardwareExists = ucc::uniwill::readDgpuMuxControl().isAvailable();
+  const bool miniLedLocalDimmingHardwareExists =
+    ucc::uniwill::readMiniLedLocalDimmingControl().isAvailable();
 
   if ( m_deviceId.has_value() )
   {
@@ -3890,6 +3909,7 @@ void UccDBusService::computeDeviceCapabilities()
       ctgpHardwareExists && cTGPHiddenDevices.count( m_deviceId.value() ) == 0;
     m_dbusData.nvidiaDynamicBoostSupported = dynamicBoostHardwareExists;
     m_dbusData.nvidiaMuxModeSupported = muxModeHardwareExists;
+    m_dbusData.miniLedLocalDimmingSupported = miniLedLocalDimmingHardwareExists;
   }
   else
   {
@@ -3898,6 +3918,7 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.cTGPAdjustmentSupported = ctgpHardwareExists;
     m_dbusData.nvidiaDynamicBoostSupported = dynamicBoostHardwareExists;
     m_dbusData.nvidiaMuxModeSupported = muxModeHardwareExists;
+    m_dbusData.miniLedLocalDimmingSupported = miniLedLocalDimmingHardwareExists;
   }
 
   // Detect HWP Dynamic Boost support
@@ -3906,11 +3927,12 @@ void UccDBusService::computeDeviceCapabilities()
     m_dbusData.hwpDynamicBoostSupported = SysfsNode< bool >( hwpBoostPath ).isAvailable();
   }
 
-  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, nvidiaDynamicBoost=%s, nvidiaMux=%s, hwpDynamicBoost=%s",
+  syslog( LOG_INFO, "Device capabilities: aquaris=%s, cTGP=%s, nvidiaDynamicBoost=%s, nvidiaMux=%s, miniLedLocalDimming=%s, hwpDynamicBoost=%s",
           m_dbusData.waterCoolerSupported.load() ? "supported" : "not supported",
           m_dbusData.cTGPAdjustmentSupported.load() ? "supported" : "hidden",
           m_dbusData.nvidiaDynamicBoostSupported.load() ? "supported" : "not supported",
           m_dbusData.nvidiaMuxModeSupported.load() ? "supported" : "not supported",
+          m_dbusData.miniLedLocalDimmingSupported.load() ? "supported" : "not supported",
           m_dbusData.hwpDynamicBoostSupported.load() ? "supported" : "not supported" );
 }
 

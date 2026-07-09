@@ -21,6 +21,7 @@ private:
       "display": {
         "brightness": 80,
         "useBrightness": true,
+        "miniLedLocalDimming": true,
         "refreshRate": 144,
         "useRefRate": true,
         "xResolution": 1920,
@@ -77,6 +78,8 @@ private slots:
     auto p = ProfileManager::parseProfileJSON( minimalJSON() );
     QCOMPARE( p.display.brightness, 80 );
     QVERIFY( p.display.useBrightness );
+    QVERIFY( p.display.miniLedLocalDimming.has_value() );
+    QVERIFY( *p.display.miniLedLocalDimming );
     QCOMPARE( p.display.refreshRate, 144 );
     QVERIFY( p.display.useRefRate );
     QCOMPARE( p.display.xResolution, 1920 );
@@ -164,6 +167,7 @@ private slots:
     QCOMPARE( reparsed.description, original.description );
     QCOMPARE( reparsed.display.brightness,    original.display.brightness );
     QCOMPARE( reparsed.display.useBrightness, original.display.useBrightness );
+    QCOMPARE( reparsed.display.miniLedLocalDimming, original.display.miniLedLocalDimming );
     QCOMPARE( reparsed.cpu.governor,          original.cpu.governor );
     QCOMPARE( reparsed.fan.fanProfile,        original.fan.fanProfile );
     QCOMPARE( reparsed.fan.sameSpeed,         original.fan.sameSpeed );

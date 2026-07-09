@@ -504,6 +504,32 @@ private slots:
     QCOMPARE( invalid.error, EINVAL );
   }
 
+  void readsAndWritesMiniLedLocalDimming()
+  {
+    QTemporaryDir dir;
+    QVERIFY( dir.isValid() );
+    const fs::path root = rootPath( dir );
+    const fs::path enablePath =
+      root / "bus/platform/devices/INOU0000:00/mini_led_local_dimming";
+
+    writeFile( enablePath, "0\n" );
+
+    auto control = ucc::uniwill::readMiniLedLocalDimmingControl( root.string() );
+    QVERIFY( control.isAvailable() );
+    QCOMPARE( control.enablePath, enablePath.string() );
+    QVERIFY( control.enabled.has_value() );
+    QVERIFY( !*control.enabled );
+
+    const SysfsWriteResult result =
+      ucc::uniwill::writeMiniLedLocalDimming( control, true );
+
+    QVERIFY( result );
+
+    control = ucc::uniwill::readMiniLedLocalDimmingControl( root.string() );
+    QVERIFY( control.enabled.has_value() );
+    QVERIFY( *control.enabled );
+  }
+
   void chargeEndThresholdAvailabilityRequiresWritableNode()
   {
     QTemporaryDir dir;

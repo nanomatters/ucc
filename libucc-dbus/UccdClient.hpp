@@ -75,6 +75,8 @@ public:
   // Display Control
   bool setDisplayBrightness( int brightness );
   std::optional< int > getDisplayBrightness();
+  std::optional< bool > getMiniLEDLocalDimmingSupported();
+  std::optional< bool > getMiniLEDLocalDimming();
   bool setYCbCr420Workaround( bool enabled );
   std::optional< bool > getYCbCr420Workaround();
   bool setDisplayRefreshRate( const std::string &display, int refreshRate );

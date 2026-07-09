@@ -120,6 +120,8 @@ MainWindow::MainWindow( QWidget *parent )
     m_nvidiaDynamicBoostSupported = *gpuBoost;
   if ( auto gpuMux = m_UccdClient->getNVIDIAMuxModeSupported() )
     m_nvidiaMuxModeSupported = *gpuMux;
+  if ( auto miniLed = m_UccdClient->getMiniLEDLocalDimmingSupported() )
+    m_miniLedLocalDimmingSupported = *miniLed;
   if ( auto hwpBoost = m_UccdClient->getHwpDynamicBoostSupported() )
     m_hwpDynamicBoostSupported = *hwpBoost;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
@@ -664,10 +666,27 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
   row++;
 
-  // === GPU SETTINGS SECTION ===
-  m_ctgpHeader = new QLabel( "GPU Settings" );
+  // === GPU & DISPLAY SETTINGS SECTION ===
+  m_ctgpHeader = new QLabel( "GPU & Display Settings" );
   m_ctgpHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
   detailsLayout->addWidget( m_ctgpHeader, row, 0, 1, 2 );
+  row++;
+
+  QLabel *backlightLabel = new QLabel( "Display brightness" );
+  QHBoxLayout *backlightLayout = new QHBoxLayout();
+  m_brightnessSlider = new QSlider( Qt::Horizontal );
+  m_brightnessSlider->setMinimum( 0 );
+  m_brightnessSlider->setMaximum( 100 );
+  m_brightnessSlider->setValue( 100 );
+  m_brightnessValueLabel = new QLabel( "100%" );
+  m_brightnessValueLabel->setMinimumWidth( 40 );
+  m_miniLedLocalDimmingCheckBox = new QCheckBox( "Local dimming" );
+  m_miniLedLocalDimmingCheckBox->setVisible( m_miniLedLocalDimmingSupported );
+  backlightLayout->addWidget( m_brightnessSlider, 1 );
+  backlightLayout->addWidget( m_brightnessValueLabel );
+  backlightLayout->addWidget( m_miniLedLocalDimmingCheckBox );
+  detailsLayout->addWidget( backlightLabel, row, 0 );
+  detailsLayout->addLayout( backlightLayout, row, 1 );
   row++;
 
   // cTGP slider widget (hidden when not supported)
@@ -681,17 +700,13 @@ void MainWindow::setupProfilesPage()
   m_ctgpSlider->setValue( 0 );
   m_ctgpValueLabel = new QLabel( "0 W" );
   m_ctgpValueLabel->setMinimumWidth( 50 );
+  m_nvidiaDynamicBoostCheckBox = new QCheckBox( "Dynamic Boost" );
+  m_nvidiaDynamicBoostCheckBox->setChecked( true );
   ctgpLayout->addWidget( m_ctgpSlider, 1 );
   ctgpLayout->addWidget( m_ctgpValueLabel );
+  ctgpLayout->addWidget( m_nvidiaDynamicBoostCheckBox );
   detailsLayout->addWidget( m_ctgpLabel, row, 0 );
   detailsLayout->addWidget( m_ctgpWidget, row, 1 );
-  row++;
-
-  m_nvidiaDynamicBoostLabel = new QLabel( "Dynamic Boost" );
-  m_nvidiaDynamicBoostCheckBox = new QCheckBox( "Enable" );
-  m_nvidiaDynamicBoostCheckBox->setChecked( true );
-  detailsLayout->addWidget( m_nvidiaDynamicBoostLabel, row, 0 );
-  detailsLayout->addWidget( m_nvidiaDynamicBoostCheckBox, row, 1, Qt::AlignLeft );
   row++;
 
   m_nvidiaMuxModeLabel = new QLabel( "MUX mode" );
@@ -789,16 +804,6 @@ void MainWindow::setupProfilesPage()
     m_profileChargeLimitCombo->setVisible( false );
   }
 
-  // Add spacer before Display section
-  detailsLayout->addItem( new QSpacerItem( 0, 10 ), row, 0, 1, 2 );
-  row++;
-
-  // === DISPLAY SECTION ===
-  QLabel *displayHeader = new QLabel( "Display" );
-  displayHeader->setStyleSheet( "font-weight: bold; font-size: 14px;" );
-  detailsLayout->addWidget( displayHeader, row, 0, 1, 2 );
-  row++;
-
   QLabel *keyboardProfileLabel = new QLabel( "Keyboard profile" );
   m_profileKeyboardProfileCombo = new QComboBox();
 
@@ -812,20 +817,6 @@ void MainWindow::setupProfilesPage()
   detailsLayout->addWidget( m_profileKeyboardProfileCombo, row, 1 );
   keyboardProfileLabel->setVisible( false );
   m_profileKeyboardProfileCombo->setVisible( false );
-  row++;
-
-  QLabel *backlightLabel = new QLabel( "Display brightness" );
-  QHBoxLayout *backlightLayout = new QHBoxLayout();
-  m_brightnessSlider = new QSlider( Qt::Horizontal );
-  m_brightnessSlider->setMinimum( 0 );
-  m_brightnessSlider->setMaximum( 100 );
-  m_brightnessSlider->setValue( 100 );
-  m_brightnessValueLabel = new QLabel( "100%" );
-  m_brightnessValueLabel->setMinimumWidth( 40 );
-  backlightLayout->addWidget( m_brightnessSlider, 1 );
-  backlightLayout->addWidget( m_brightnessValueLabel );
-  detailsLayout->addWidget( backlightLabel, row, 0 );
-  detailsLayout->addLayout( backlightLayout, row, 1 );
   row++;
 
   // Add spacer
@@ -860,32 +851,27 @@ void MainWindow::setupProfilesPage()
         m_profileFanProfileCombo->addItem( name, o["id"].toString() );
     }
   }
-  detailsLayout->addWidget( fanProfileLabel, row, 0 );
-  detailsLayout->addWidget( m_profileFanProfileCombo, row, 1 );
-  row++;
-
-  QLabel *sameSpeedLabel = new QLabel( "Same speed for all fans" );
-  detailsLayout->addWidget( sameSpeedLabel, row, 0 );
+  QHBoxLayout *fanProfileLayout = new QHBoxLayout();
+  fanProfileLayout->setContentsMargins( 0, 0, 0, 0 );
   // Reuse the shared checkbox created in the dashboard (create if not present)
   if ( !m_sameFanSpeedCheckBox ) {
-    m_sameFanSpeedCheckBox = new QCheckBox();
+    m_sameFanSpeedCheckBox = new QCheckBox( "Sync speed" );
     m_sameFanSpeedCheckBox->setChecked( true );
   }
-  detailsLayout->addWidget( m_sameFanSpeedCheckBox, row, 1, Qt::AlignLeft );
-  row++;
 
-  QLabel *autoWaterLabel = new QLabel( "Water cooler auto control" );
-  m_autoWaterControlCheckBox = new QCheckBox();
+  m_autoWaterControlCheckBox = new QCheckBox( "Auto WC" );
   m_autoWaterControlCheckBox->setChecked( true );
   m_autoWaterControlCheckBox->setToolTip( tr( "When enabled the daemon will control the water cooler automatically" ) );
-  detailsLayout->addWidget( autoWaterLabel, row, 0 );
-  detailsLayout->addWidget( m_autoWaterControlCheckBox, row, 1, Qt::AlignLeft );
+  fanProfileLayout->addWidget( m_profileFanProfileCombo, 1 );
+  fanProfileLayout->addWidget( m_sameFanSpeedCheckBox );
+  fanProfileLayout->addWidget( m_autoWaterControlCheckBox );
+  detailsLayout->addWidget( fanProfileLabel, row, 0 );
+  detailsLayout->addLayout( fanProfileLayout, row, 1 );
   row++;
 
   // Hide water cooler auto control if water cooler not supported
   if ( !m_waterCoolerSupported )
   {
-    autoWaterLabel->setVisible( false );
     m_autoWaterControlCheckBox->setVisible( false );
   }
 
@@ -1025,6 +1011,9 @@ void MainWindow::connectSignals()
 
   connect( m_brightnessSlider, &QSlider::valueChanged,
            this, [this]() { markChanged(); } );
+  if ( m_miniLedLocalDimmingCheckBox )
+    connect( m_miniLedLocalDimmingCheckBox, &QCheckBox::toggled,
+             this, &MainWindow::markChanged );
 
   connect( m_profileFanProfileCombo, QOverload< int >::of( &QComboBox::currentIndexChanged ),
            this, [this](int index) {
@@ -1661,6 +1650,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
   QJsonObject obj = doc.object();
   // Block signals while updating to avoid triggering slot updates
   m_brightnessSlider->blockSignals( true );
+  if ( m_miniLedLocalDimmingCheckBox ) m_miniLedLocalDimmingCheckBox->blockSignals( true );
   m_profileFanProfileCombo->blockSignals( true );
   m_fanControlTab->fanProfileCombo()->blockSignals( true );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( true );
@@ -1694,6 +1684,20 @@ void MainWindow::loadProfileDetails( const QString &profileId )
       m_brightnessSlider->setValue( brightness );
     }
 
+    if ( m_miniLedLocalDimmingCheckBox && m_miniLedLocalDimmingSupported )
+    {
+      bool localDimming = false;
+      if ( displayObj.contains( "miniLedLocalDimming" ) )
+      {
+        localDimming = displayObj["miniLedLocalDimming"].toBool( false );
+      }
+      else if ( auto currentLocalDimming = m_UccdClient->getMiniLEDLocalDimming() )
+      {
+        localDimming = *currentLocalDimming;
+      }
+
+      m_miniLedLocalDimmingCheckBox->setChecked( localDimming );
+    }
 
   }
 
@@ -2014,6 +2018,7 @@ void MainWindow::loadProfileDetails( const QString &profileId )
 
   // Unblock signals
   m_brightnessSlider->blockSignals( false );
+  if ( m_miniLedLocalDimmingCheckBox ) m_miniLedLocalDimmingCheckBox->blockSignals( false );
   m_profileFanProfileCombo->blockSignals( false );
   m_fanControlTab->fanProfileCombo()->blockSignals( false );
   if ( m_autoWaterControlCheckBox ) m_autoWaterControlCheckBox->blockSignals( false );
@@ -2091,6 +2096,7 @@ void MainWindow::updateProfileEditingWidgets( bool isCustom )
 
   // Display controls
   if ( m_brightnessSlider ) m_brightnessSlider->setEnabled( isCustom );
+  if ( m_miniLedLocalDimmingCheckBox ) m_miniLedLocalDimmingCheckBox->setEnabled( isCustom );
 
   // Fan controls
   if ( m_profileFanProfileCombo ) m_profileFanProfileCombo->setEnabled( isCustom );
@@ -2192,17 +2198,23 @@ void MainWindow::setCpuPowerLimitSlidersToMaximum()
 void MainWindow::updateCtgpVisibility()
 {
   const bool ctgpVisible = m_cTGPAdjustmentSupported;
+  const bool ctgpRowVisible = ctgpVisible || m_nvidiaDynamicBoostSupported;
   const bool gpuSettingsVisible =
     ctgpVisible || m_nvidiaDynamicBoostSupported || m_nvidiaMuxModeSupported;
 
   if ( m_ctgpHeader )
     m_ctgpHeader->setVisible( gpuSettingsVisible );
   if ( m_ctgpLabel )
-    m_ctgpLabel->setVisible( ctgpVisible );
+  {
+    m_ctgpLabel->setText( ctgpVisible ? "Configurable TGP" : "Dynamic Boost" );
+    m_ctgpLabel->setVisible( ctgpRowVisible );
+  }
   if ( m_ctgpWidget )
-    m_ctgpWidget->setVisible( ctgpVisible );
-  if ( m_nvidiaDynamicBoostLabel )
-    m_nvidiaDynamicBoostLabel->setVisible( m_nvidiaDynamicBoostSupported );
+    m_ctgpWidget->setVisible( ctgpRowVisible );
+  if ( m_ctgpSlider )
+    m_ctgpSlider->setVisible( ctgpVisible );
+  if ( m_ctgpValueLabel )
+    m_ctgpValueLabel->setVisible( ctgpVisible );
   if ( m_nvidiaDynamicBoostCheckBox )
     m_nvidiaDynamicBoostCheckBox->setVisible( m_nvidiaDynamicBoostSupported );
   if ( m_nvidiaMuxModeLabel )
@@ -2244,6 +2256,8 @@ QString MainWindow::buildProfileJSON() const
   QJsonObject displayObj;
   displayObj["useBrightness"] = true;
   displayObj["brightness"] = m_brightnessSlider->value();
+  if ( m_miniLedLocalDimmingCheckBox && m_miniLedLocalDimmingSupported )
+    displayObj["miniLedLocalDimming"] = m_miniLedLocalDimmingCheckBox->isChecked();
   profileObj["display"] = displayObj;
 
   // Fan - embed complete fan profile tables
@@ -2812,8 +2826,13 @@ void MainWindow::onUccdConnectionChanged( bool connected )
     m_nvidiaDynamicBoostSupported = *gpuBoost;
   if ( auto gpuMux = m_UccdClient->getNVIDIAMuxModeSupported() )
     m_nvidiaMuxModeSupported = *gpuMux;
+  if ( auto miniLed = m_UccdClient->getMiniLEDLocalDimmingSupported() )
+    m_miniLedLocalDimmingSupported = *miniLed;
   if ( auto gpuDefault = m_UccdClient->getNVIDIAPowerCTRLDefaultPowerLimit() )
     m_gpuDefaultPowerLimit = *gpuDefault;
+
+  if ( m_miniLedLocalDimmingCheckBox )
+    m_miniLedLocalDimmingCheckBox->setVisible( m_miniLedLocalDimmingSupported );
 
   updateCtgpVisibility();
 

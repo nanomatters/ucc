@@ -222,6 +222,9 @@ public:
       profile.display.xResolution = extractInt( displayJson, "xResolution", -1 );
       profile.display.yResolution = extractInt( displayJson, "yResolution", -1 );
       profile.display.useResolution = extractBool( displayJson, "useResolution", false );
+      if ( displayJson.find( "\"miniLedLocalDimming\"" ) != std::string::npos )
+        profile.display.miniLedLocalDimming =
+          extractBool( displayJson, "miniLedLocalDimming", false );
     }
 
     // Parse CPU settings
@@ -653,8 +656,11 @@ public:
         << "\"useRefRate\":" << ( profile.display.useRefRate ? "true" : "false" ) << ","
         << "\"xResolution\":" << profile.display.xResolution << ","
         << "\"yResolution\":" << profile.display.yResolution << ","
-        << "\"useResolution\":" << ( profile.display.useResolution ? "true" : "false" )
-        << "},"
+        << "\"useResolution\":" << ( profile.display.useResolution ? "true" : "false" );
+    if ( profile.display.miniLedLocalDimming.has_value() )
+      oss << ",\"miniLedLocalDimming\":"
+          << ( *profile.display.miniLedLocalDimming ? "true" : "false" );
+    oss << "},"
         << "\"cpu\":{"
         << "\"onlineCores\":" << ( profile.cpu.onlineCores.has_value() ? std::to_string( *profile.cpu.onlineCores ) : "-1" ) << ","
         << "\"scalingMinFrequency\":" << ( profile.cpu.scalingMinFrequency.has_value() ? std::to_string( *profile.cpu.scalingMinFrequency ) : "-1" ) << ","

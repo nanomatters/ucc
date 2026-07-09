@@ -153,6 +153,7 @@ public:
   std::atomic< bool > cTGPAdjustmentSupported;
   std::atomic< bool > nvidiaDynamicBoostSupported;
   std::atomic< bool > nvidiaMuxModeSupported;
+  std::atomic< bool > miniLedLocalDimmingSupported;
   std::atomic< bool > hwpDynamicBoostSupported;
   std::atomic< bool > deviceSupported{ false };
   std::atomic< int32_t > cpuFrequencyMHz;
@@ -213,6 +214,7 @@ public:
         cTGPAdjustmentSupported( false ),
         nvidiaDynamicBoostSupported( false ),
         nvidiaMuxModeSupported( false ),
+        miniLedLocalDimmingSupported( false ),
         hwpDynamicBoostSupported( false ),
         cpuFrequencyMHz( -1 )
   {
@@ -282,6 +284,8 @@ public slots:
   bool GetWebcamSWStatus();
   bool GetForceYUV420OutputSwitchAvailable();
   int GetDisplayBrightness();
+  bool GetMiniLEDLocalDimmingSupported();
+  bool GetMiniLEDLocalDimming();
   bool GetKeyboardBacklightControlSupported();
   bool SetDisplayBrightness( int brightness );
   bool SetDisplayRefreshRate( const QString &display, int refreshRate );
